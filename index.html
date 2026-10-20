@@ -440,7 +440,7 @@ function render(d) {
         <div><dt>Kursziel Ø</dt><dd class="num">${F.target ? nf(F.target) : "–"} <span class="stamp">${F.upside != null ? pc(F.upside, 1, true) : ""}</span></dd></div>
       </dl>
       ${d.notes.map(n => `<div class="note">${esc(n)}</div>`).join("")}
-      <div class="stamp">Stand ${esc(d.generated)} · Quellen: Yahoo Finance, Google News, Pressedienste</div>
+      <div class="stamp">Stand ${esc(d.generated)} · Quellen: ${esc((d.sources || ["Yahoo Finance", "Google News", "Pressedienste"]).join(", "))}</div>
     </div>
   </section>
 

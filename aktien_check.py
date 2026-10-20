@@ -1260,6 +1260,87 @@ def build_fundamentals(m, mac):
     ]
 
 
+# ---------------------------------------------------------------------------
+# Zweite Datenquelle: Finnhub (optional, Umgebungsvariable FINNHUB_API_KEY)
+# ---------------------------------------------------------------------------
+FINNHUB_CACHE = {}
+
+
+def finnhub_key():
+    return (os.environ.get("FINNHUB_API_KEY") or "").strip()
+
+
+def finnhub(path, **params):
+    """GET auf die Finnhub-API. Liefert JSON oder None (kein Schlüssel, kein Zugriff, Limit erreicht)."""
+    key = finnhub_key()
+    if not key:
+        return None
+    url = f"https://finnhub.io/api/v1/{path}?" + urllib.parse.urlencode(params)
+    hit = FINNHUB_CACHE.get(url)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    req = urllib.request.Request(url, headers={**UA, "X-Finnhub-Token": key})  # Schlüssel im Header, nicht in der URL
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+    except Exception:
+        return None
+    if isinstance(data, dict) and data.get("error"):
+        return None
+    FINNHUB_CACHE[url] = (time.time(), data)
+    return data
+
+
+def finnhub_enrich(m, symbol, alternatives):
+    """Füllt fehlende Analysten- und Kennzahlen aus Finnhub. Vorhandene Yahoo-Werte bleiben unverändert.
+
+    Der kostenlose Finnhub-Tarif deckt v. a. US-Börsen ab; für ausländische Titel wird daher
+    zusätzlich eine US-Notierung (ADR) desselben Unternehmens aus den Suchtreffern probiert."""
+    m["finnhub"] = []
+    if not finnhub_key():
+        return
+    candidates = [symbol] + [a["symbol"] for a in alternatives if "." not in a["symbol"]][:2]
+    for sym in dict.fromkeys(candidates):
+        rec = finnhub("stock/recommendation", symbol=sym)
+        if not (isinstance(rec, list) and rec):
+            continue
+        r0 = rec[0]
+        dist = {k: int(r0.get(k) or 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell")}
+        total = sum(dist.values())
+        if not total:
+            continue
+        if not m.get("rec_mean"):
+            m["rec_mean"] = (dist["strongBuy"] + 2 * dist["buy"] + 3 * dist["hold"]
+                             + 4 * dist["sell"] + 5 * dist["strongSell"]) / total
+            m["n_analysts"] = total
+            m["rec_dist"] = dist
+            m["finnhub"].append(f"Analystenempfehlungen ({sym}, {r0.get('period', '')})")
+        # Kursziel: Potenzial in der Währung der gefundenen Notierung berechnen, dann auf unseren Kurs übertragen
+        if m.get("upside") is None:
+            pt = finnhub("stock/price-target", symbol=sym)
+            q = finnhub("quote", symbol=sym)
+            tgt = num((pt or {}).get("targetMean"))
+            px = num((q or {}).get("c"))
+            if tgt and px and m.get("price"):
+                m["upside"] = tgt / px - 1
+                m["target"] = m["price"] * (1 + m["upside"])
+                m["finnhub"].append(f"Kursziel ({sym})")
+        # Kennzahlen (Quoten sind währungsneutral, daher auch von einer ADR übertragbar)
+        met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
+        filled = []
+        for key, src, scale in (("pe", "peTTM", 1), ("beta", "beta", 1), ("roe", "roeTTM", 100),
+                                ("op_m", "operatingMarginTTM", 100), ("gross_m", "grossMarginTTM", 100),
+                                ("net_m", "netProfitMarginTTM", 100), ("rev_g", "revenueGrowthTTMYoy", 100),
+                                ("eps_g", "epsGrowthTTMYoy", 100)):
+            v = num(met.get(src))
+            if m.get(key) is None and v is not None:
+                m[key] = v / scale
+                filled.append(key)
+        if filled:
+            m["finnhub"].append("Kennzahlen")
+        break
+
+
 CACHE = {}
 
 
@@ -1274,6 +1355,7 @@ def analyze(query):
         company = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
         fnews = ex.submit(collect_news, symbol, company, info.get("website") or "")
         m, mac, news = fm.result(), fmac.result(), fnews.result()
+    finnhub_enrich(m, symbol, alternatives)
 
     cats = {}
     cats["valuation"] = score_valuation(m, mac)
@@ -1296,8 +1378,15 @@ def analyze(query):
         total = 14
         notes.append("Deckel: Unternehmensqualität zu schwach für eine Kaufempfehlung.")
     if info.get("_fallback"):
-        notes.append("Eingeschränkter Datenmodus: Yahoo liefert diesem Server keine Kennzahlen-Übersicht. "
-                     "Kennzahlen wurden aus den Geschäftsberichten berechnet; Analystenkonsens und Kursziele fehlen.")
+        if m["finnhub"]:
+            notes.append("Eingeschränkter Yahoo-Datenmodus: Kennzahlen aus den Geschäftsberichten berechnet, "
+                         "ergänzt durch Finnhub (" + ", ".join(m["finnhub"]) + ").")
+        else:
+            missing = "Analystenkonsens und Kursziele fehlen"
+            if finnhub_key():
+                missing += " (Finnhub hat für diesen Titel keine Daten geliefert)"
+            notes.append("Eingeschränkter Datenmodus: Yahoo liefert diesem Server keine Kennzahlen-Übersicht. "
+                         f"Kennzahlen wurden aus den Geschäftsberichten berechnet; {missing}.")
     label, group = map_rating(total)
     s_adj = summary_adj(total, cats)
 
@@ -1329,6 +1418,7 @@ def analyze(query):
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
         "news": news, "notes": notes, "confidence": confidence,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else []) + ["Google News", "Pressedienste"],
     }
     CACHE[key] = (time.time(), result)
     return result
@@ -1530,6 +1620,8 @@ class Handler(BaseHTTPRequestHandler):
                 "statements": lambda: str(len(yf.Ticker(sym).quarterly_income_stmt.columns)),
                 "fast_info": lambda: str(yf.Ticker(sym).fast_info.market_cap),
                 "google_news": lambda: str(len(google_news(sym, "en"))),
+                "finnhub_key": lambda: "gesetzt" if finnhub_key() else "FEHLT",
+                "finnhub": lambda: str(len(finnhub("stock/recommendation", symbol=sym.split(".")[0]) or [])) + " Perioden",
             }
             out = {}
             for name, fn in checks.items():

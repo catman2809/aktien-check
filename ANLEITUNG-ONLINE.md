@@ -31,6 +31,19 @@ Dauer: ca. 15 Minuten, einmalig. Danach ist der Aktien-Check unter einer festen 
 
 Tipp: Auf dem Handy die Seite über „Zum Startbildschirm hinzufügen“ wie eine App ablegen.
 
+## 3. Finnhub als zweite Datenquelle (Analystendaten online)
+Yahoo liefert Cloud-Servern keine Analystendaten. Finnhub ergänzt sie:
+1. Auf https://finnhub.io/register kostenlos registrieren.
+2. Im Dashboard den **API Key** kopieren.
+3. Render → Service `aktien-check` → **Environment** → **Add Environment Variable**
+   - Key: `FINNHUB_API_KEY`
+   - Value: dein API Key
+4. **Save, rebuild, and deploy**.
+
+Der kostenlose Tarif deckt vor allem US-Börsen ab. Für deutsche Aktien nimmt das Programm automatisch
+die US-Notierung desselben Unternehmens (z. B. SAP statt SAP.DE). Kursziele sind teils nur im
+Bezahltarif enthalten – dann fehlen sie, die Analystenempfehlungen kommen trotzdem.
+
 ## Gut zu wissen
 - **Kostenloser Tarif schläft** nach ca. 15 Minuten ohne Nutzung ein. Der erste Aufruf danach
   dauert 30–60 Sekunden, danach läuft es normal.
