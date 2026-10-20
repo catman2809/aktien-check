@@ -1647,8 +1647,26 @@ def chart_data(symbol, rng):
             lo, hi = pts[0][0], pts[-1][0] + 86400000 * 31
             divs = [[int(ts.timestamp() * 1000), round(float(v), 4)] for ts, v in d.items()
                     if lo <= ts.timestamp() * 1000 <= hi and v > 0]
+    # Gleitende Durchschnitte (50/200 Handelstage) aus Tageskursen, auf die Chartpunkte übertragen
+    sma50 = sma200 = None
+    daily = safe(lambda: t.history(period={"1d": "2y", "1mo": "2y", "1y": "2y", "5y": "10y", "max": "max"}[rng],
+                                   interval="1d", auto_adjust=False))
+    if daily is not None and len(daily) >= 60 and pts:
+        import pandas as pd
+        dc = daily["Close"].copy()
+        dc.index = pd.to_datetime([ts.timestamp() for ts in dc.index], unit="s")
+        idx = pd.to_datetime([p[0] / 1000 for p in pts], unit="s")
+
+        def on_points(series):
+            vals = series.reindex(series.index.union(idx)).ffill().reindex(idx)
+            return [None if v != v else round(float(v), 4) for v in vals]
+        sma50 = on_points(dc.rolling(50).mean())
+        sma200 = on_points(dc.rolling(200).mean()) if len(dc) >= 200 else None
+    volume = [int(v) if v == v else 0 for v in h["Volume"]] if "Volume" in h else None
     base = prev_close if prev_close else (pts[0][1] if pts else None)
     out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "1mo"),
+           "sma50": sma50, "sma200": sma200,
+           "volume": volume if volume and any(volume) and len(volume) == len(pts) else None,
            "change": (pts[-1][1] / base - 1) if pts and base else None,
            "adj": adj if adj and len(adj) == len(pts) and all(a > 0 for a in adj) else None,
            "dividends": divs,

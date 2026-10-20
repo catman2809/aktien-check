@@ -20,6 +20,7 @@
   --neu:#b54708; --neu-soft:#fffaeb; --neu-line:#fedf89;
   --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca;
   --track:#eaecf0; --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  --sma50:#eb6834; --sma200:#6250d6;
   --radius:12px;
 }
 @media (prefers-color-scheme: dark){
@@ -31,6 +32,7 @@
     --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
     --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
     --track:#232c3f; --shadow:none;
+    --sma50:#d95926; --sma200:#9085e9;
   }
 }
 :root[data-theme="dark"]{
@@ -41,6 +43,7 @@
   --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
   --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
   --track:#232c3f; --shadow:none;
+  --sma50:#d95926; --sma200:#9085e9;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:120px}
@@ -336,6 +339,20 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .toggle input:checked + .sw::after{transform:translateX(14px)}
 .toggle input:focus-visible + .sw{outline:2px solid var(--accent);outline-offset:2px}
 .toggle.disabled{opacity:.45;cursor:default}
+.ind-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+.chip-btn{height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);
+  font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.chip-btn i{width:14px;height:0;border-top:2px solid currentColor;display:inline-block}
+.chip-btn[aria-pressed="true"]{background:var(--surface-2);border-color:var(--border-strong);color:var(--text)}
+.chip-btn[aria-pressed="false"] i{opacity:.35}
+.chip-btn:disabled{opacity:.45;cursor:default}
+.chip-btn.vol i{height:8px;width:10px;border:0;background:currentColor;opacity:.6}
+.chart-wrap .vol rect{fill:var(--text-3);opacity:.35}
+.chart-wrap .vol rect.on{opacity:.9}
+.chart-wrap .vlabel{fill:var(--text-3);font-size:10.5px}
+.chart-wrap .endlbl{font-size:10.5px;font-weight:700}
+.legend i.sma50{color:var(--sma50)} .legend i.sma200{color:var(--sma200)}
+@media (max-width:640px){.ind-row{justify-content:flex-start}}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{display:inline-block;width:18px;height:0;border-top:2px solid currentColor}
@@ -852,8 +869,13 @@ function meter(score) {
 }
 
 /* Kurschart (SVG, ohne externe Bibliothek) */
-const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false};
-try { CHART.range = localStorage.getItem("ac-chart-range") || "1y"; CHART.tr = localStorage.getItem("ac-chart-tr") === "1"; } catch (e) {}
+const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false, ind: {sma50: false, sma200: false, vol: false}};
+try {
+  CHART.range = localStorage.getItem("ac-chart-range") || "1y";
+  CHART.tr = localStorage.getItem("ac-chart-tr") === "1";
+  CHART.ind = {...CHART.ind, ...(JSON.parse(localStorage.getItem("ac-chart-ind")) || {})};
+} catch (e) {}
+const fmtVol = v => v >= 1e9 ? nf(v / 1e9, 1) + " Mrd." : v >= 1e6 ? nf(v / 1e6, 1) + " Mio." : v >= 1e3 ? nf(v / 1e3, 0) + " Tsd." : nf(v, 0);
 const RANGE_TEXT = {"1d": "heute", "1mo": "1 Monat", "1y": "1 Jahr", "5y": "5 Jahre", "max": "seit Beginn der Daten"};
 function fmtTime(ms, rng, long) {
   const d = new Date(ms);
@@ -896,12 +918,25 @@ function drawChart() {
   $("#ch-tr").checked = CHART.tr && canTR;
   const pct = CHART.tr && canTR;          // Prozent-Ansicht: Kurs vs. Gesamtrendite auf gemeinsamer Achse
   const n = P.length;
+  // Indikatoren: GD-Linien nur in der Kursansicht (Farben sind gegen die neutrale Kurslinie validiert)
+  const showS50 = CHART.ind.sma50 && !pct && D.sma50, showS200 = CHART.ind.sma200 && !pct && D.sma200;
+  const showVol = CHART.ind.vol && D.volume;
+  document.querySelectorAll("[data-ind]").forEach(b => {
+    const k = b.dataset.ind, avail = k === "vol" ? !!D.volume : !!D[k] && !pct;
+    b.disabled = !avail;
+    b.setAttribute("aria-pressed", String(!!CHART.ind[k] && avail));
+    b.title = !avail && k !== "vol" && pct ? "In der Gesamtrendite-Ansicht nicht verfügbar" : "";
+  });
+  const neutral = showS50 || showS200;
   const priceV = pct ? P.map(p => p[1] / P[0][1] - 1) : P.map(p => p[1]);
   const trV = pct ? D.adj.map(a => a / D.adj[0] - 1) : null;
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const m = {l: 4, r: 58, t: 10, b: 26};
-  const pw = W - m.l - m.r, ph = H - m.t - m.b;
-  const all = [...priceV, ...(trV || []), ...(D.range === "1d" && D.base ? [D.base] : []), ...(pct ? [0] : [])];
+  const pw = W - m.l - m.r;
+  const volH = showVol ? Math.round((H - m.t - m.b) * 0.2) : 0, gap = showVol ? 10 : 0;
+  const ph = H - m.t - m.b - volH - gap;
+  const smaVals = [...(showS50 ? D.sma50 : []), ...(showS200 ? D.sma200 : [])].filter(v => v != null);
+  const all = [...priceV, ...(trV || []), ...smaVals, ...(D.range === "1d" && D.base ? [D.base] : []), ...(pct ? [0] : [])];
   let lo = Math.min(...all), hi = Math.max(...all);
   const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 0.01;
   lo -= pad; hi += pad;
@@ -911,7 +946,19 @@ function drawChart() {
   const path = vals => vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
   const mainV = pct ? trV : priceV;
   const up = (mainV[n - 1] - (pct ? 0 : (D.base ?? mainV[0]))) >= 0;
-  const col = pct ? "var(--accent)" : up ? "var(--pos)" : "var(--neg)";
+  const col = pct ? "var(--accent)" : neutral ? "var(--text)" : up ? "var(--pos)" : "var(--neg)";
+  const smaPath = arr => { let d = "", pen = false;
+    arr.forEach((v, i) => { if (v == null) { pen = false; return; } d += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; });
+    return d; };
+  const lastIdx = arr => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return i; return -1; };
+  const vMax = showVol ? Math.max(...D.volume) || 1 : 1;
+  const vTop = m.t + ph + gap, bw = Math.max(1, (pw / n) * 0.7);
+  const volBars = showVol ? D.volume.map((v, i) => {
+    const hgt = (v / vMax) * volH;
+    return `<rect data-i="${i}" x="${(X(i) - bw / 2).toFixed(1)}" y="${(vTop + volH - hgt).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hgt).toFixed(1)}"/>`;
+  }).join("") : "";
+  const endLabel = (arr, color, txt) => { const i = lastIdx(arr); if (i < 0) return "";
+    return `<text class="endlbl" x="${(X(i) + 4).toFixed(1)}" y="${(Y(arr[i]) + 3.5).toFixed(1)}" fill="${color}">${txt}</text>`; };
   const line = path(mainV);
   const area = `${line}L${X(n - 1).toFixed(1)},${(m.t + ph).toFixed(1)}L${X(0).toFixed(1)},${(m.t + ph).toFixed(1)}Z`;
   const xCount = W < 420 ? 3 : 5;
@@ -940,9 +987,15 @@ function drawChart() {
     ${pct ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ""}
     <path d="${area}" fill="url(#${gid})"/>
     ${pct ? `<path d="${path(priceV)}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
+    ${showS200 ? `<path d="${smaPath(D.sma200)}" fill="none" stroke="var(--sma200)" stroke-width="1.75" stroke-dasharray="7 3" stroke-linejoin="round"/>` : ""}
+    ${showS50 ? `<path d="${smaPath(D.sma50)}" fill="none" stroke="var(--sma50)" stroke-width="1.75" stroke-linejoin="round"/>` : ""}
     <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${showVol ? `<g class="vol">${volBars}</g><text class="vlabel" x="${W - 4}" y="${(vTop + 9).toFixed(1)}" text-anchor="end">${fmtVol(vMax)}</text>
+      <text class="vlabel" x="${W - 4}" y="${(vTop + volH).toFixed(1)}" text-anchor="end">Vol.</text>` : ""}
+    ${W > 480 && showS50 ? endLabel(D.sma50, "var(--sma50)", "50") : ""}
+    ${W > 480 && showS200 ? endLabel(D.sma200, "var(--sma200)", "200") : ""}
     ${divIdx.map(i => `<circle class="divmark" cx="${X(i).toFixed(1)}" cy="${Y(markV(i)).toFixed(1)}" r="4.5"/>`).join("")}
-    <g id="ch-hover" style="display:none"><line class="cross" id="ch-x" y1="${m.t}" y2="${m.t + ph}"/>
+    <g id="ch-hover" style="display:none"><line class="cross" id="ch-x" y1="${m.t}" y2="${m.t + ph + gap + volH}"/>
       <circle class="dot" id="ch-dot" r="5" fill="${col}"/></g>
     <rect id="ch-hit" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>
   </svg><div class="chart-tip" id="ch-tip"></div>`;
@@ -952,7 +1005,11 @@ function drawChart() {
   // Fußzeile: Legende + Dividenden-Summe
   const divs = D.dividends || [];
   const divSum = divs.reduce((a, d) => a + d[1], 0);
-  const legend = pct ? `<span><i style="color:var(--accent)"></i>inkl. Dividenden</span><span><i class="dash" style="color:var(--text-2)"></i>Kurs allein</span>` : "";
+  const legend = (pct ? `<span><i style="color:var(--accent)"></i>inkl. Dividenden</span><span><i class="dash" style="color:var(--text-2)"></i>Kurs allein</span>`
+      : neutral ? `<span><i style="color:var(--text)"></i>Kurs</span>` : "")
+    + (showS50 ? `<span><i class="sma50"></i>GD 50 Tage</span>` : "")
+    + (showS200 ? `<span><i class="dash sma200"></i>GD 200 Tage</span>` : "")
+    + (showVol ? `<span><i style="border:0;height:8px;width:10px;background:var(--text-3);opacity:.6"></i>Handelsvolumen</span>` : "");
   const divTxt = divs.length ? `<span><i class="div"></i>Dividende · ${divs.length} ${divs.length === 1 ? "Zahlung" : "Zahlungen"}, zusammen ${nf(divSum)} ${esc(D.currency)} je Aktie</span>` : "";
   const note = D.range === "1d" && D.base ? `Gestrichelt: Schlusskurs Vortag ${nf(D.base)} ${esc(D.currency)}`
     : D.range === "max" ? `Daten ab ${new Date(P[0][0]).toLocaleDateString("de-DE", {month: "long", year: "numeric"})}`
@@ -971,16 +1028,21 @@ function drawChart() {
     $("#ch-dot").setAttribute("cx", x); $("#ch-dot").setAttribute("cy", y);
     const when = fmtTime(P[i][0], D.range, true);
     const dv = divAt[i] ? divAt[i].map(([ts, amt]) => `<span class="tdiv">Dividende ${nf(amt)} ${esc(D.currency)} · ${new Date(ts).toLocaleDateString("de-DE")}</span>`).join("") : "";
+    const extra = [showS50 && D.sma50[i] != null ? `<span style="display:block">GD 50: ${nf(D.sma50[i])}</span>` : "",
+                   showS200 && D.sma200[i] != null ? `<span style="display:block">GD 200: ${nf(D.sma200[i])}</span>` : "",
+                   showVol ? `<span style="display:block">Volumen: ${fmtVol(D.volume[i])}</span>` : ""].join("");
     tip.innerHTML = pct
-      ? `<b>${pc(trV[i], 1, true)} inkl. Div.</b><span>Kurs ${nf(P[i][1])} ${esc(D.currency)} (${pc(priceV[i], 1, true)}) · ${esc(when)}</span>${dv}`
-      : `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(when)}</span>${dv}`;
+      ? `<b>${pc(trV[i], 1, true)} inkl. Div.</b><span>Kurs ${nf(P[i][1])} ${esc(D.currency)} (${pc(priceV[i], 1, true)}) · ${esc(when)}</span>${extra}${dv}`
+      : `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(when)}</span>${extra}${dv}`;
+    if (showVol) wrap.querySelectorAll(".vol rect").forEach(r => r.classList.toggle("on", +r.dataset.i === i));
     tip.style.display = "block";
     const tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(W - tw, x - tw / 2)) + "px";
     tip.style.top = Math.max(0, y - tip.offsetHeight - 14) + "px";
     pct ? setHeadPct(priceV[i], trV[i], when) : setHead(P[i][1], D.base, D.currency, when);
   };
-  const leave = () => { hov.style.display = "none"; tip.style.display = "none"; resetHead(); };
+  const leave = () => { hov.style.display = "none"; tip.style.display = "none"; resetHead();
+    wrap.querySelectorAll(".vol rect.on").forEach(r => r.classList.remove("on")); };
   hit.addEventListener("pointermove", move);
   hit.addEventListener("pointerdown", move);
   hit.addEventListener("pointerleave", leave);
@@ -1010,6 +1072,11 @@ async function loadChart(rng) {
 function initChart(sym) {
   CHART.sym = sym; CHART.data = {};
   document.querySelectorAll("#ch-seg button").forEach(b => b.onclick = () => loadChart(b.dataset.r));
+  document.querySelectorAll("[data-ind]").forEach(b => b.onclick = () => {
+    CHART.ind[b.dataset.ind] = !CHART.ind[b.dataset.ind];
+    try { localStorage.setItem("ac-chart-ind", JSON.stringify(CHART.ind)); } catch (e) {}
+    drawChart();
+  });
   $("#ch-tr").onchange = e => {
     CHART.tr = e.target.checked;
     try { localStorage.setItem("ac-chart-tr", CHART.tr ? "1" : "0"); } catch (err) {}
@@ -1113,6 +1180,11 @@ function render(d) {
         <div class="seg" id="ch-seg">${[["1d", "Tag"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
           .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div>
         <label class="toggle" id="ch-trl"><input type="checkbox" id="ch-tr"><span class="sw"></span>inkl. Dividenden (Gesamtrendite)</label>
+        <div class="ind-row" role="group" aria-label="Indikatoren">
+          <button class="chip-btn" data-ind="sma50" aria-pressed="false" style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">GD 50</span></button>
+          <button class="chip-btn" data-ind="sma200" aria-pressed="false" style="color:var(--sma200)"><i></i><span style="color:var(--text-2)">GD 200</span></button>
+          <button class="chip-btn vol" data-ind="vol" aria-pressed="false"><i></i>Volumen</button>
+        </div>
       </div>
     </div>
     <div class="chart-wrap" id="ch-wrap"><div class="chart-msg">Lade Kursverlauf …</div></div>
