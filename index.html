@@ -441,6 +441,27 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .a2hs .x-btn{position:absolute;top:6px;right:6px;width:28px;height:28px;font-size:18px}
 .a2hs .btn{margin-top:10px}
 
+/* ---------- Konkurrenzvergleich ---------- */
+.peer-card{overflow:hidden}
+.peer-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.peer-sum div{background:var(--surface);padding:14px 18px}
+.peer-sum dt{font-size:12px;color:var(--text-3);font-weight:500}
+.peer-sum dd{margin:3px 0 0;font-size:15px;font-weight:600}
+.peer-sum small{display:block;font-size:12px;font-weight:500;margin-top:2px}
+@media (max-width:640px){.peer-sum{grid-template-columns:1fr}}
+.peer-scroll{overflow-x:auto}
+table.peers{width:100%;border-collapse:collapse;font-size:13.5px;min-width:520px}
+table.peers th{font-size:11.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);text-align:right;padding:10px 16px;border-bottom:1px solid var(--border)}
+table.peers th:first-child,table.peers td:first-child{text-align:left}
+table.peers td{padding:11px 16px;border-top:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+table.peers tr.peer{cursor:pointer}
+table.peers tr.peer:hover td{background:var(--surface-2)}
+table.peers tr.own td{background:var(--accent-soft);font-weight:600}
+table.peers tr.med td{color:var(--text-2);font-style:italic;border-top:2px solid var(--border)}
+table.peers td small{display:block;font-size:11.5px;color:var(--text-3);font-weight:500;font-style:normal}
+table.peers .neg{color:var(--neg)}
+.peer-foot{font-size:12px;color:var(--text-3);padding:12px 18px;border-top:1px solid var(--border);background:var(--surface-2)}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -497,7 +518,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 <nav class="subnav" id="subnav">
   <div class="container">
     <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#kategorien">Einschätzung im Detail</a>
-    <a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
+    <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
 </nav>
@@ -1391,6 +1412,40 @@ function drawHistory(d) {
   hit.addEventListener("pointerleave", leave); hit.addEventListener("pointercancel", leave);
 }
 
+/* Konkurrenzvergleich */
+function peersSection(d) {
+  const C = d.competitors || {};
+  const peers = C.peers || [], own = C.own || {}, S = C.summary || {};
+  const head = `<h2 class="section" id="konkurrenz">Konkurrenzvergleich</h2>
+    <p class="section-sub">${peers.length ? `${peers.length} Wettbewerber${C.industry ? " aus der Branche „" + esc(C.industry) + "“" : ""} im Vergleich. Zeile antippen, um den Wettbewerber zu analysieren.` : "Vergleich mit Unternehmen derselben Branche."}</p>`;
+  if (!peers.length) return head + `<div class="card empty">Für diese Aktie konnten keine vergleichbaren Wettbewerber ermittelt werden.</div>`;
+  const pcf = v => v == null ? "–" : `<span class="${v < 0 ? "neg" : ""}">${pc(v, 1)}</span>`;
+  const kgv = v => v == null ? "–" : nf(v, 1);
+  const cap = (v, cur) => { if (v == null) return "–"; const [n, u] = big(v); return `${n} ${u}<small>${esc(cur || "")}</small>`; };
+  const verdict = (key, label, lowBetter) => {
+    const x = S[key] || {}, ov = own[key];
+    if (ov == null || !x.n) return `<div><dt>${label}</dt><dd>–</dd><small style="color:var(--text-3)">keine Vergleichsdaten</small></div>`;
+    const good = x.beats >= Math.ceil(x.n / 2);
+    const word = lowBetter ? (good ? "günstiger" : "teurer") : (good ? "höher" : "niedriger");
+    const fmt = key === "pe" ? kgv : v => pc(v, 1);
+    return `<div><dt>${label}</dt><dd class="num">${fmt(ov)} <span class="stamp">vs. Median ${fmt(x.median)}</span></dd>
+      <small style="color:${good ? "var(--pos)" : "var(--neg)"}">${word} als ${x.beats} von ${x.n} Wettbewerbern</small></div>`;
+  };
+  const row = (r, cls) => `<tr class="${cls}" ${cls === "peer" ? `data-s="${esc(r.symbol)}"` : ""}>
+      <td>${esc(r.name || r.symbol)}<small>${esc(r.symbol)}${cls === "own" ? " · diese Aktie" : ""}</small></td>
+      <td>${cap(r.mcap, r.currency)}</td><td>${kgv(r.pe)}</td><td>${pcf(r.op_m)}</td><td>${pcf(r.growth)}</td></tr>`;
+  return head + `<div class="card peer-card">
+    <dl class="peer-sum" style="margin:0">${verdict("pe", "KGV", true)}${verdict("op_m", "Operative Marge", false)}${verdict("growth", "Umsatzwachstum", false)}</dl>
+    <div class="peer-scroll"><table class="peers">
+      <thead><tr><th>Unternehmen</th><th>Börsenwert</th><th>KGV</th><th>Op. Marge</th><th>Wachstum</th></tr></thead>
+      <tbody>${row(own, "own")}${peers.map(r => row(r, "peer")).join("")}
+        <tr class="med"><td>Median Wettbewerber</td><td></td><td>${kgv(S.pe?.median)}</td><td>${S.op_m?.median == null ? "–" : pc(S.op_m.median, 1)}</td><td>${S.growth?.median == null ? "–" : pc(S.growth.median, 1)}</td></tr>
+      </tbody></table></div>
+    <div class="peer-foot">Quelle: ${esc(C.source || "–")}. KGV auf Basis der letzten 12 Monate (bei Verlust nicht aussagekräftig, daher „–“);
+      Wachstum = Umsatz ggü. Vorjahr. Wettbewerber stammen überwiegend von US-Börsen. ${S.pe?.n >= 3 ? "Die Bewertung nutzt den KGV-Median der Wettbewerber als Vergleichsmaßstab." : ""}</div>
+  </div>`;
+}
+
 /* Render */
 function render(d) {
   const R = d.rating, F = d.facts || {}, N = d.news;
@@ -1510,6 +1565,8 @@ function render(d) {
     </article>`).join("")}
   </div>
 
+  ${peersSection(d)}
+
   <h2 class="section" id="fundamental">Fundamentaldaten</h2>
   <p class="section-sub">Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen.</p>
   <div class="fund">${d.fundamentals.map((s, i) => `
@@ -1578,6 +1635,7 @@ function render(d) {
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
+  document.querySelectorAll("table.peers tr.peer").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
   if ((d.history || []).length >= 2) {
     drawHistory(d);
     let lastW = 0;

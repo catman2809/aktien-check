@@ -791,12 +791,16 @@ def gather_macro(currency):
 # ---------------------------------------------------------------------------
 def score_valuation(m, mac):
     ref_pe, ref_ev = SECTOR_REF.get(m["sector"], (20, 13))
+    peer_ref = m.get("peer_pe_med")
+    if peer_ref:
+        ref_pe = round(peer_ref, 1)
     parts, why = [], []
     pe = m["pe"]
     if pe and pe > 0:
         s = clamp((1 - pe / ref_pe) * 1.5)
         parts.append((s, 1.0))
-        why.append(f"KGV {fnum(pe)} vs. Branchen-Referenz ~{ref_pe} ({m['sector'] or 'Markt'})")
+        why.append(f"KGV {fnum(pe)} vs. Median von {m['peer_n']} Wettbewerbern {fnum(ref_pe)}" if peer_ref
+                   else f"KGV {fnum(pe)} vs. Branchen-Referenz ~{ref_pe} ({m['sector'] or 'Markt'})")
     elif m["net_m"] is not None and m["net_m"] < 0:
         parts.append((-0.4, 1.0))
         why.append("Kein positives KGV – Unternehmen schreibt Verluste")
@@ -1477,6 +1481,152 @@ def finnhub_enrich(m, symbol, alternatives):
 
 
 # ---------------------------------------------------------------------------
+# Konkurrenzvergleich: 3–5 Wettbewerber derselben Branche
+# ---------------------------------------------------------------------------
+PEER_CACHE = {}
+
+
+def industry_key(name):
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower().replace("&", "and")).strip("-")
+
+
+def peer_metrics(sym, name_hint=None):
+    """KGV, operative Marge, Umsatzwachstum und Börsenwert eines Wettbewerbers (Finnhub, sonst Yahoo)."""
+    hit = PEER_CACHE.get(sym)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    out = None
+    if finnhub_key():
+        met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
+        if met:
+            prof = finnhub("stock/profile2", symbol=sym) or {}
+            pct = lambda k: (num(met.get(k)) / 100) if num(met.get(k)) is not None else None
+            mc = num(prof.get("marketCapitalization"))
+            out = {"symbol": sym, "name": prof.get("name") or name_hint or sym, "currency": prof.get("currency") or "",
+                   "mcap": mc * 1e6 if mc else None,
+                   "pe": num(met.get("peTTM")) or num(met.get("peBasicExclExtraTTM")),
+                   "op_m": pct("operatingMarginTTM"), "growth": pct("revenueGrowthTTMYoy"), "source": "Finnhub"}
+    if out is None:
+        t = yf.Ticker(sym)
+        info = fill_info(t, safe(lambda: t.info, {}) or {}, {"name": name_hint})
+        if current_price(info):
+            out = {"symbol": sym, "name": info.get("shortName") or info.get("longName") or name_hint or sym,
+                   "currency": info.get("currency") or "", "mcap": num(info.get("marketCap")),
+                   "pe": num(info.get("trailingPE")), "op_m": num(info.get("operatingMargins")),
+                   "growth": num(info.get("revenueGrowth")), "source": "Yahoo"}
+    if out and out["pe"] is not None and out["pe"] <= 0:
+        out["pe"] = None  # Verlust -> kein sinnvolles KGV
+    PEER_CACHE[sym] = (time.time(), out)
+    return out
+
+
+FX_CACHE = {}
+
+
+def usd_rate(cur):
+    """Umrechnungskurs Währung -> USD (für Größenvergleich der Börsenwerte), gecacht."""
+    if not cur or cur == "USD":
+        return 1.0
+    scale = 0.01 if cur in ("GBp", "GBX", "ZAc", "ILA") else 1.0
+    base = {"GBp": "GBP", "GBX": "GBP", "ZAc": "ZAR", "ILA": "ILS"}.get(cur, cur)
+    hit = FX_CACHE.get(base)
+    if not hit or time.time() - hit[0] > 12 * 3600:
+        rate = num(safe(lambda: yf.Ticker(f"{base}USD=X").fast_info.last_price))
+        hit = FX_CACHE[base] = (time.time(), rate)
+    return hit[1] * scale if hit[1] else None
+
+
+def competitors(symbol, info, alternatives):
+    """Bis zu 5 Wettbewerber: Finnhub-Peers (auch über US-Notierung) + Yahoo-Branchenliste."""
+    own_base = symbol.split(".")[0].upper()
+    own_name = clean_company_name(info.get("longName") or info.get("shortName") or "").lower()
+    alt_syms = {a["symbol"].upper() for a in alternatives}
+    cands, names, source = [], {}, []
+    if finnhub_key():
+        for sym in [symbol] + [a["symbol"] for a in alternatives if "." not in a["symbol"]][:2]:
+            ps = finnhub("stock/peers", symbol=sym)
+            if isinstance(ps, list) and len(ps) > 1:
+                cands += [x for x in ps if isinstance(x, str)]
+                source.append("Finnhub")
+                break
+    def add_top(obj_fn, label):
+        tc = safe(obj_fn)
+        if tc is not None and len(tc):
+            for sym_, row in tc.iterrows():
+                cands.append(str(sym_))
+                nm = row.get("name")
+                if isinstance(nm, str) and nm.strip():
+                    names[str(sym_).upper()] = nm
+            source.append(label)
+    key = info.get("industryKey") or industry_key(info.get("industry"))
+    if key:
+        add_top(lambda: yf.Industry(key).top_companies, "Yahoo-Branchenliste")
+    picked, seen = [], set()
+    for c in cands:
+        cu = c.upper()
+        if cu in seen or cu.split(".")[0] == own_base or cu in alt_syms:
+            continue
+        if names.get(cu) and clean_company_name(names[cu]).lower() == own_name:
+            continue
+        seen.add(cu)
+        picked.append(cu)
+
+    own_usd = None
+    if num(info.get("marketCap")) and usd_rate(info.get("currency")):
+        own_usd = num(info["marketCap"]) * usd_rate(info.get("currency"))
+
+    def evaluate(cands_):
+        good = []
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            res = list(ex.map(lambda c: safe(lambda: peer_metrics(c, names.get(c))), cands_))
+        for r in res:
+            if not r or sum(r.get(k) is not None for k in ("pe", "op_m", "growth")) < 2:
+                continue
+            if own_name and clean_company_name(r["name"]).lower() == own_name:
+                continue  # dasselbe Unternehmen unter anderem Kürzel
+            rate = usd_rate(r.get("currency"))
+            if own_usd and r.get("mcap") and rate and r["mcap"] * rate < own_usd * 0.03:
+                continue  # Kleinstfirmen sind keine sinnvollen Vergleichswerte
+            good.append(r)
+        return good
+
+    rows = evaluate(picked[:8])[:5]
+    if len(rows) < 3:  # Branche zu klein besetzt -> größte Firmen desselben Sektors ergänzen
+        skey = info.get("sectorKey") or industry_key(info.get("sector"))
+        if skey:
+            before = len(cands)
+            add_top(lambda: yf.Sector(skey).top_companies, "Yahoo-Sektorliste")
+            extra = []
+            for c in cands[before:]:
+                cu = c.upper()
+                if cu not in seen and cu.split(".")[0] != own_base and cu not in alt_syms:
+                    seen.add(cu)
+                    extra.append(cu)
+            have = {r["symbol"] for r in rows}
+            rows += [r for r in evaluate(extra[:8]) if r["symbol"] not in have][: 5 - len(rows)]
+    return {"peers": rows, "source": " + ".join(source), "industry": info.get("industry") or ""}
+
+
+def peer_summary(own, peers):
+    """Median der Wettbewerber und Rang der analysierten Aktie je Kennzahl."""
+    def med(vals):
+        vals = sorted(v for v in vals if v is not None)
+        if not vals:
+            return None
+        k = len(vals) // 2
+        return vals[k] if len(vals) % 2 else (vals[k - 1] + vals[k]) / 2
+    out = {}
+    for key, better_low in (("pe", True), ("op_m", False), ("growth", False)):
+        vals = [p.get(key) for p in peers if p.get(key) is not None]
+        mv, ov = med(vals), own.get(key)
+        beats = None
+        if ov is not None and vals:
+            beats = sum(1 for v in vals if (ov < v if better_low else ov > v))
+        out[key] = {"median": mv, "n": len(vals), "beats": beats}
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Termine: Quartalszahlen, Dividende, Hauptversammlung
 # ---------------------------------------------------------------------------
 GERMAN_SUFFIX = (".DE", ".F", ".MU", ".SG", ".HM", ".BE", ".DU", ".HA", ".VI")
@@ -1704,9 +1854,18 @@ def analyze(query):
         fnews = ex.submit(collect_news, symbol, company, info.get("website") or "", siblings)
         ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
+        fpeer = ex.submit(competitors, symbol, info, alternatives)
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
+        comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
     finnhub_enrich(m, symbol, alternatives)
+    own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
+               "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],
+               "growth": m["rev_g"] if m["rev_g"] is not None else m["rev_cagr"], "own": True}
+    comp["own"] = own_row
+    comp["summary"] = peer_summary(own_row, comp["peers"])
+    if comp["summary"]["pe"]["n"] >= 3:
+        m["peer_pe_med"], m["peer_n"] = comp["summary"]["pe"]["median"], comp["summary"]["pe"]["n"]
     m["target_n"], m["target_src"], m["target_items"] = 0, "", tgt["items"]
     if m["upside"] is None and tgt["n"] >= 2:
         m["target"] = tgt["median"]
@@ -1763,7 +1922,7 @@ def analyze(query):
         "facts": {k: m.get(k) for k in ("mcap", "pe", "fpe", "fcf_yield", "div_yield", "perf_1y", "perf_1m",
                                         "upside", "target", "beta", "hi52", "lo52", "n_analysts", "rec_mean",
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
-        "news": news, "notes": notes, "confidence": confidence, "events": events,
+        "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
