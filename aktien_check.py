@@ -1506,16 +1506,6 @@ def analyze(query):
     if qs is not None and qs <= -0.5 and total > 14:
         total = 14
         notes.append("Deckel: Unternehmensqualität zu schwach für eine Kaufempfehlung.")
-    if info.get("_fallback"):
-        if m["finnhub"]:
-            notes.append("Eingeschränkter Yahoo-Datenmodus: Kennzahlen aus den Geschäftsberichten berechnet, "
-                         "ergänzt durch Finnhub (" + ", ".join(m["finnhub"]) + ").")
-        else:
-            missing = "Analystenkonsens und Kursziele fehlen"
-            if finnhub_key():
-                missing += " (Finnhub hat für diesen Titel keine Daten geliefert)"
-            notes.append("Eingeschränkter Datenmodus: Yahoo liefert diesem Server keine Kennzahlen-Übersicht. "
-                         f"Kennzahlen wurden aus den Geschäftsberichten berechnet; {missing}.")
     label, group = map_rating(total)
     s_adj = summary_adj(total, cats)
 
