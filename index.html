@@ -224,6 +224,51 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .scale-list span:nth-child(odd){color:var(--text-3);text-align:right}
 .disclaimer{margin-top:28px;font-size:12.5px;color:var(--text-3);line-height:1.7;border-top:1px solid var(--border);padding-top:18px}
 
+/* ---------- Watchlist ---------- */
+.icon-btn{position:relative}
+.badge-n{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);
+  color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;line-height:1}
+.btn{height:36px;padding:0 14px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);
+  font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{border-color:var(--border-strong)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.6;cursor:default}
+.btn.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.watch-row{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.wl-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:8px 0 16px}
+.wl-head h1{font-size:24px;letter-spacing:-.02em;margin:0}
+.wl-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.wl-actions select{height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:13.5px;padding:0 10px}
+.wl-row{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1.1fr) minmax(0,1.3fr) 64px minmax(0,1.1fr) minmax(0,1fr) 36px;
+  gap:14px;align-items:center;padding:14px 20px;border-top:1px solid var(--border);cursor:pointer}
+.wl-row:first-child{border-top:0}
+.wl-row:hover{background:var(--surface-2)}
+.wl-row.head{cursor:default;font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding-top:12px;padding-bottom:12px}
+.wl-row.head:hover{background:none}
+.wl-name{min-width:0} .wl-name b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl-name small{color:var(--text-3);font-size:12px}
+.wl-price{font-weight:600} .wl-price small{display:block;font-size:12px;font-weight:500}
+.wl-score{font-weight:700;text-align:right}
+.wl-time{font-size:12px;color:var(--text-3)}
+.x-btn{width:32px;height:32px;border-radius:8px;border:0;background:none;color:var(--text-3);cursor:pointer;font-size:20px;line-height:1}
+.x-btn:hover{background:var(--neg-soft);color:var(--neg)}
+.wl-busy{display:inline-block;width:14px;height:14px;border:2px solid var(--track);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;vertical-align:-2px}
+@media (max-width:760px){
+  .wl-row{grid-template-columns:minmax(0,1fr) auto 32px;gap:10px;padding:12px 16px}
+  .wl-row .m-hide{display:none}
+  .wl-row.head{display:none}
+  .wl-rating{grid-column:2;text-align:right}
+}
+.wl-empty{padding:40px 24px;text-align:center;color:var(--text-2)}
+.wl-empty b{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
+.wl-preview{margin-top:36px;text-align:left}
+.wl-preview .wl-head{margin:0 0 10px}
+.wl-preview h2{font-size:16px;margin:0}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;
+  border-radius:10px;font-size:14px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100% - 32px)}
+.share-box{display:flex;gap:8px;margin-top:12px} .share-box input{flex:1;min-width:0;height:36px;border-radius:9px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text);padding:0 10px;font:inherit;font-size:13px}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -264,6 +309,10 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
       <button type="submit">Prüfen</button>
       <div class="suggest" id="sg"></div>
     </form>
+    <button class="icon-btn" id="wlbtn" title="Watchlist" aria-label="Watchlist öffnen">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>
+      <span class="badge-n" id="wlcount" style="display:none">0</span>
+    </button>
     <button class="icon-btn" id="theme" title="Hell/Dunkel umschalten" aria-label="Farbschema umschalten">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
     </button>
@@ -339,8 +388,166 @@ function pick(sym) { $("#q").value = sym; hideSg(); run(sym); }
 document.addEventListener("click", e => { if (!e.target.closest(".search")) hideSg(); });
 $("#f").onsubmit = e => { e.preventDefault(); hideSg(); const v = $("#q").value.trim(); if (v) run(v); };
 
+/* Watchlist (pro Gerät im Browser gespeichert) */
+const WL_KEY = "ac-watchlist";
+let wlSort = "score", wlView = false;
+const wlBusy = new Set();
+function wlLoad() { try { const l = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
+function wlSave(l) { try { localStorage.setItem(WL_KEY, JSON.stringify(l)); } catch (e) {} wlBadge(); }
+function wlHas(sym) { return wlLoad().some(x => x.symbol === sym); }
+function wlSnap(d) {
+  return {symbol: d.symbol, name: d.name, exchange: d.exchange, currency: d.currency, price: d.price,
+          label: d.rating.label, group: d.rating.group, score: d.rating.score, summary: d.summary.adjective,
+          perf_1m: d.facts?.perf_1m ?? null, upside: d.facts?.upside ?? null, updated: new Date().toISOString()};
+}
+function wlUpsert(d) {
+  const l = wlLoad(), i = l.findIndex(x => x.symbol === d.symbol);
+  if (i >= 0) { l[i] = {...l[i], ...wlSnap(d)}; wlSave(l); }
+}
+function wlToggle(d) {
+  let l = wlLoad();
+  const had = l.some(x => x.symbol === d.symbol);
+  l = had ? l.filter(x => x.symbol !== d.symbol) : [...l, wlSnap(d)];
+  wlSave(l);
+  toast(had ? `${d.name} aus der Watchlist entfernt` : `${d.name} zur Watchlist hinzugefügt`);
+  return !had;
+}
+function wlBadge() {
+  const n = wlLoad().length, b = $("#wlcount");
+  b.textContent = n; b.style.display = n ? "" : "none";
+}
+function toast(msg) {
+  document.querySelector(".toast")?.remove();
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+function ago(iso) {
+  if (!iso) return "noch nicht analysiert";
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (min < 1) return "gerade eben";
+  if (min < 60) return `vor ${min} Min.`;
+  if (min < 1440) return `vor ${Math.round(min / 60)} Std.`;
+  return new Date(iso).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "2-digit"});
+}
+function wlSorted() {
+  const l = wlLoad();
+  const by = {
+    score: (a, b) => (b.score ?? -999) - (a.score ?? -999),
+    name: (a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol, "de"),
+    perf: (a, b) => (b.perf_1m ?? -9) - (a.perf_1m ?? -9),
+    added: () => 0,
+  }[wlSort];
+  return wlSort === "added" ? l : [...l].sort(by);
+}
+function wlRow(x) {
+  const t = groupTone[x.group] || "";
+  const busy = wlBusy.has(x.symbol);
+  return `<div class="wl-row" data-s="${esc(x.symbol)}">
+    <div class="wl-name"><b>${esc(x.name || x.symbol)}</b><small>${esc(x.symbol)}${x.exchange ? " · " + esc(x.exchange) : ""}</small></div>
+    <div class="wl-price num m-hide">${x.price != null ? nf(x.price) + " " + esc(x.currency || "") : "–"}
+      <small style="color:${x.perf_1m == null ? "var(--text-3)" : x.perf_1m >= 0 ? "var(--pos)" : "var(--neg)"}">${x.perf_1m != null ? pc(x.perf_1m, 1, true) + " 1M" : ""}</small></div>
+    <div class="wl-rating">${busy ? `<span class="wl-busy"></span>` : x.label ? `<span class="tone ${t}">${esc(x.label)}</span>` : `<span class="stamp">–</span>`}</div>
+    <div class="wl-score num m-hide">${x.score != null ? (x.score > 0 ? "+" : "") + nf(x.score, 1) : "–"}</div>
+    <div class="m-hide">${esc(x.summary || "")}</div>
+    <div class="wl-time m-hide">${busy ? "wird aktualisiert …" : ago(x.updated)}</div>
+    <button class="x-btn" data-rm="${esc(x.symbol)}" title="Entfernen" aria-label="${esc(x.name || x.symbol)} entfernen">×</button>
+  </div>`;
+}
+function wlBind(root) {
+  root.querySelectorAll(".wl-row[data-s]").forEach(r => r.onclick = e => {
+    if (e.target.closest("[data-rm]")) return;
+    $("#q").value = r.dataset.s; run(r.dataset.s);
+  });
+  root.querySelectorAll("[data-rm]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const l = wlLoad(), x = l.find(i => i.symbol === b.dataset.rm);
+    wlSave(l.filter(i => i.symbol !== b.dataset.rm));
+    toast(`${x?.name || b.dataset.rm} entfernt`);
+    wlView ? renderWl() : welcome();
+  });
+}
+function showWatchlist() {
+  runId++; wlView = true;
+  $("#subnav").style.display = "none";
+  history.replaceState(null, "", "?view=watchlist");
+  renderWl(); window.scrollTo({top: 0});
+}
+function renderWl() {
+  if (!wlView) return;
+  const l = wlSorted();
+  $("#out").innerHTML = `
+    <div class="wl-head">
+      <div><div class="eyebrow">Gespeichert auf diesem Gerät</div><h1>Watchlist <span class="stamp" style="font-size:15px">${l.length} ${l.length === 1 ? "Aktie" : "Aktien"}</span></h1></div>
+      ${l.length ? `<div class="wl-actions">
+        <select id="wlsort" aria-label="Sortierung">
+          ${[["score", "Nach Score"], ["name", "Nach Name"], ["perf", "Nach 1-Monats-Performance"], ["added", "Nach Hinzufügen"]]
+            .map(([v, t]) => `<option value="${v}" ${v === wlSort ? "selected" : ""}>${t}</option>`).join("")}
+        </select>
+        <button class="btn" id="wlshare">Liste teilen</button>
+        <button class="btn primary" id="wlupd" ${wlBusy.size ? "disabled" : ""}>${wlBusy.size ? `Aktualisiere … (${wlBusy.size})` : "Alle aktualisieren"}</button>
+      </div>` : ""}
+    </div>
+    <div class="card" id="wllist">${l.length ? `
+      <div class="wl-row head"><div>Aktie</div><div>Kurs</div><div>Empfehlung</div><div style="text-align:right">Score</div><div>Urteil</div><div>Stand</div><div></div></div>
+      ${l.map(wlRow).join("")}` : `
+      <div class="wl-empty"><b>Deine Watchlist ist noch leer</b>
+        Analysiere eine Aktie und tippe auf <b style="display:inline">☆ Zur Watchlist</b>, um sie hier zu speichern.</div>`}
+    </div>
+    <div id="wlsharebox"></div>
+    ${l.length ? `<p class="disclaimer">Die Watchlist wird nur in diesem Browser gespeichert. Mit „Liste teilen“ überträgst du sie auf ein anderes Gerät.
+      Empfehlungen zeigen den Stand der letzten Analyse – „Alle aktualisieren“ analysiert jede Aktie neu (ca. 10–20 Sekunden pro Aktie).</p>` : ""}`;
+  wlBind($("#out"));
+  const sel = $("#wlsort"); if (sel) sel.onchange = () => { wlSort = sel.value; renderWl(); };
+  const up = $("#wlupd"); if (up) up.onclick = () => wlUpdateAll();
+  const sh = $("#wlshare"); if (sh) sh.onclick = () => wlShare();
+}
+async function wlUpdate(sym) {
+  wlBusy.add(sym); renderWl();
+  try {
+    const r = await fetch("/api/analyze?q=" + encodeURIComponent(sym));
+    if (r.status === 401) return toLogin();
+    if (r.ok) wlUpsert(await r.json());
+  } catch (e) {} finally { wlBusy.delete(sym); renderWl(); }
+}
+async function wlUpdateAll(only) {
+  const queue = (only || wlLoad().map(x => x.symbol)).filter(s => !wlBusy.has(s));
+  const worker = async () => { while (queue.length) await wlUpdate(queue.shift()); };
+  await Promise.all([worker(), worker()]);  // zwei Analysen gleichzeitig
+  if (wlView) toast("Watchlist aktualisiert");
+}
+async function wlShare() {
+  const link = location.origin + "/?import=" + encodeURIComponent(wlLoad().map(x => x.symbol).join(","));
+  let copied = false;
+  try { await navigator.clipboard.writeText(link); copied = true; } catch (e) {}
+  if (navigator.share && /iPhone|iPad|Android/i.test(navigator.userAgent)) {
+    try { await navigator.share({title: "Aktien-Check Watchlist", url: link}); return; } catch (e) {}
+  }
+  $("#wlsharebox").innerHTML = `<div class="card pad" style="margin-top:16px">
+    <b>Link zum Übertragen</b><div class="stamp">Öffne diesen Link auf dem anderen Gerät – die Aktien werden dort zur Watchlist hinzugefügt.</div>
+    <div class="share-box"><input id="sharelink" readonly value="${esc(link)}"><button class="btn" id="copylink">Kopieren</button></div></div>`;
+  $("#sharelink").onclick = e => e.target.select();
+  $("#copylink").onclick = async () => {
+    try { await navigator.clipboard.writeText(link); toast("Link kopiert"); }
+    catch (e) { $("#sharelink").select(); document.execCommand("copy"); toast("Link kopiert"); }
+  };
+  if (copied) toast("Link kopiert");
+}
+function wlImport(list) {
+  const syms = list.split(",").map(x => x.trim().toUpperCase()).filter(x => /^[A-Z0-9.\-^=]{1,15}$/.test(x));
+  const l = wlLoad(), have = new Set(l.map(x => x.symbol));
+  const added = syms.filter(x => !have.has(x));
+  wlSave([...l, ...added.map(symbol => ({symbol, name: symbol}))]);
+  showWatchlist();
+  toast(added.length ? `${added.length} ${added.length === 1 ? "Aktie" : "Aktien"} importiert – werden analysiert` : "Alle Aktien sind bereits in der Watchlist");
+  if (added.length) wlUpdateAll(added);
+}
+$("#wlbtn").onclick = () => showWatchlist();
+wlBadge();
+
 /* Welcome */
 function welcome() {
+  wlView = false;
   $("#subnav").style.display = "none";
   $("#out").innerHTML = `<section class="welcome">
     <h1>Kaufen, halten oder verkaufen?</h1>
@@ -352,7 +559,13 @@ function welcome() {
       <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
       <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
       <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
-    </div></section>`;
+    </div>
+    ${wlLoad().length ? `<div class="wl-preview">
+      <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
+      <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
+    </section>`;
+  wlBind($("#out"));
+  const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
 }
 
@@ -360,6 +573,7 @@ function welcome() {
 let runId = 0;
 async function run(q) {
   const id = ++runId;
+  wlView = false;
   $("#subnav").style.display = "none";
   const steps = ["Unternehmen finden", "Kurs- und Bilanzdaten laden", "Nachrichten aus Tier 1–3 sammeln", "Kategorien bewerten"];
   $("#out").innerHTML = `<div class="loading"><div class="spinner"></div>
@@ -374,6 +588,7 @@ async function run(q) {
     if (id !== runId) return;
     if (!r.ok) throw new Error(d.error || "Unbekannter Fehler");
     render(d);
+    wlUpsert(d);
     window.scrollTo({top: 0});
     history.replaceState(null, "", "?q=" + encodeURIComponent(d.symbol));
   } catch (e) {
@@ -418,6 +633,7 @@ function render(d) {
           <div class="stamp num">1 Jahr: ${pc(F.perf_1y, 1, true)}</div>
         </div>
       </div>
+      <div class="watch-row"><button class="btn ${wlHas(d.symbol) ? "on" : ""}" id="wltoggle">${wlHas(d.symbol) ? "★ In der Watchlist" : "☆ Zur Watchlist"}</button></div>
       ${d.business ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
       ${d.alternatives?.length ? `<div class="alts">Andere Börsenplätze / Treffer:
         ${d.alternatives.map(a => `<button data-s="${esc(a.symbol)}" title="${esc(a.name)}">${esc(a.symbol)} · ${esc(a.exchange)}</button>`).join("")}</div>` : ""}
@@ -541,6 +757,8 @@ function render(d) {
   document.querySelectorAll("#seg button").forEach(b => b.onclick = () => showTier(b.dataset.t));
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
+  const wt = $("#wltoggle");
+  wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
   const bm = $("#bizmore");
   if (bm) bm.onclick = () => { const b = $("#biz"); b.classList.toggle("clamp"); bm.textContent = b.classList.contains("clamp") ? "Mehr anzeigen" : "Weniger anzeigen"; };
 }
@@ -551,8 +769,11 @@ if (location.protocol === "file:") {
     die Datei „Aktien-Check starten.bat“ doppelklicken – danach öffnet sich http://localhost:8765. Das schwarze Fenster offen lassen.</span></div>`;
   $("#f").onsubmit = e => e.preventDefault();
 } else {
-  const pre = new URLSearchParams(location.search).get("q");
-  if (pre) { $("#q").value = pre; run(pre); } else welcome();
+  const ps = new URLSearchParams(location.search);
+  const pre = ps.get("q");
+  if (ps.get("import")) wlImport(ps.get("import"));
+  else if (ps.get("view") === "watchlist") showWatchlist();
+  else if (pre) { $("#q").value = pre; run(pre); } else welcome();
 }
 </script>
 </body>
