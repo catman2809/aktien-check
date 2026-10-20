@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Aktien-Check">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Aktien-Check</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -305,7 +309,11 @@ $("#q").addEventListener("input", e => {
   const v = e.target.value.trim();
   if (v.length < 2) return hideSg();
   tmr = setTimeout(async () => {
-    try { sugg = await (await fetch("/api/search?q=" + encodeURIComponent(v))).json(); act = -1; renderSg(); } catch (e) {}
+    try {
+      const r = await fetch("/api/search?q=" + encodeURIComponent(v));
+      if (r.status === 401) return toLogin();
+      sugg = await r.json(); act = -1; renderSg();
+    } catch (e) {}
   }, 280);
 });
 $("#q").addEventListener("keydown", e => {
@@ -323,6 +331,10 @@ function renderSg() {
   $("#sg").querySelectorAll("div").forEach(d => d.onmousedown = () => pick(d.dataset.s));
 }
 function hideSg() { $("#sg").style.display = "none"; }
+function toLogin(q) {
+  const next = q ? "/?q=" + encodeURIComponent(q) : location.pathname + location.search;
+  location.href = "/login?next=" + encodeURIComponent(next);
+}
 function pick(sym) { $("#q").value = sym; hideSg(); run(sym); }
 document.addEventListener("click", e => { if (!e.target.closest(".search")) hideSg(); });
 $("#f").onsubmit = e => { e.preventDefault(); hideSg(); const v = $("#q").value.trim(); if (v) run(v); };
@@ -357,6 +369,7 @@ async function run(q) {
   const timers = [1500, 5000, 10000].map((t, i) => setTimeout(() => lis[i]?.classList.add("done"), t));
   try {
     const r = await fetch("/api/analyze?q=" + encodeURIComponent(q));
+    if (r.status === 401) return toLogin(q);
     const d = await r.json();
     if (id !== runId) return;
     if (!r.ok) throw new Error(d.error || "Unbekannter Fehler");
@@ -512,7 +525,8 @@ function render(d) {
     </div></div>
   </div>
   <p class="disclaimer">Hinweis: Automatisiertes, regelbasiertes Modell auf Basis öffentlich verfügbarer Daten – keine Anlageberatung und keine Aufforderung zum Kauf oder Verkauf von Wertpapieren.
-    Daten können verzögert, unvollständig oder fehlerhaft sein; Branchen-Referenzwerte sind Näherungen. Wichtige Entscheidungen bitte selbst prüfen.</p>`;
+    Daten können verzögert, unvollständig oder fehlerhaft sein; Branchen-Referenzwerte sind Näherungen. Wichtige Entscheidungen bitte selbst prüfen.
+    · <a href="/logout">Abmelden</a></p>`;
 
   const showTier = t => {
     document.querySelectorAll("#seg button").forEach(b => b.classList.toggle("on", b.dataset.t === t));

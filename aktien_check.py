@@ -5,6 +5,9 @@ Start:  python aktien_check.py   ->  öffnet http://localhost:8765 im Browser.
 Datenquellen: Yahoo Finance (via yfinance), Google-News-RSS, Yahoo-Finance-RSS.
 Keine Anlageberatung – regelbasiertes Modell auf Basis öffentlich verfügbarer Daten.
 """
+import hashlib
+import hmac
+import http.cookies
 import json
 import logging
 import math
@@ -1336,6 +1339,90 @@ def analyze(query):
 # ---------------------------------------------------------------------------
 HTML_PATH = Path(__file__).with_name("index.html")
 
+# --- Login mit dauerhafter Sitzung (nur aktiv, wenn APP_PASSWORD gesetzt ist) ---
+SESSION_COOKIE = "ac_session"
+SESSION_DAYS = 365
+FAILED_LOGINS = {}  # IP -> Zeitstempel fehlgeschlagener Versuche
+FAILED_LOCK = threading.Lock()
+
+
+def app_password():
+    return os.environ.get("APP_PASSWORD") or ""
+
+
+def session_secret():
+    # Aus dem Passwort abgeleitet: Passwortwechsel meldet alle Geräte ab.
+    return hashlib.sha256(("aktien-check-session|" + app_password()).encode("utf-8")).digest()
+
+
+def make_session_token():
+    exp = str(int(time.time()) + SESSION_DAYS * 86400)
+    sig = hmac.new(session_secret(), exp.encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}"
+
+
+def session_valid(token):
+    try:
+        exp, sig = token.split(".", 1)
+        if int(exp) < time.time():
+            return False
+        good = hmac.new(session_secret(), exp.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(sig, good)
+    except Exception:
+        return False
+
+
+def too_many_failures(ip):
+    now = time.time()
+    with FAILED_LOCK:
+        recent = [t for t in FAILED_LOGINS.get(ip, []) if now - t < 900]
+        FAILED_LOGINS[ip] = recent
+        return len(recent) >= 8
+
+
+def note_failure(ip):
+    with FAILED_LOCK:
+        FAILED_LOGINS.setdefault(ip, []).append(time.time())
+
+
+LOGIN_PAGE = """<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Aktien-Check">
+<title>Anmelden · Aktien-Check</title>
+<style>
+:root{--bg:#f5f6f8;--surface:#fff;--border:#d0d5dd;--text:#101828;--text-2:#475467;--accent:#1f4fd8;--accent-soft:#eef3ff;--neg:#b42318;--neg-soft:#fef3f2}
+@media (prefers-color-scheme:dark){:root{--bg:#0c111d;--surface:#131a2a;--border:#334056;--text:#f2f4f7;--text-2:#b4bccb;--accent:#7c9cff;--accent-soft:#1a2547;--neg:#f97066;--neg-soft:#2f1414}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
+  font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+.box{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
+.logo{width:40px;height:40px;border-radius:10px;background:var(--accent);display:grid;place-items:center;margin-bottom:16px}
+h1{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}
+p{margin:0 0 20px;color:var(--text-2);font-size:14px}
+label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+input{width:100%;height:46px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
+  color:var(--text);font:inherit;font-size:16px}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;background:var(--accent);color:#fff;
+  font:inherit;font-weight:600;font-size:15px;cursor:pointer}
+.err{background:var(--neg-soft);color:var(--neg);font-size:13.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px}
+small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-align:center}
+</style></head><body>
+<form class="box" method="post" action="/login">
+  <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
+    stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
+  <h1>Aktien-Check</h1>
+  <p>Bitte einmal anmelden – dieses Gerät bleibt danach angemeldet.</p>
+  {error}
+  <input type="hidden" name="next" value="{next}">
+  <label for="pw">Passwort</label>
+  <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
+  <button type="submit">Anmelden</button>
+  <small>Angemeldet für {days} Tage oder bis das Passwort geändert wird.</small>
+</form></body></html>"""
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -1350,26 +1437,68 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def authorized(self):
-        """Optionaler Passwortschutz (Umgebungsvariable APP_PASSWORD, Benutzername beliebig)."""
-        pw = os.environ.get("APP_PASSWORD")
-        if not pw:
+    def client_ip(self):
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return fwd.split(",")[0].strip() if fwd else self.client_address[0]
+
+    def logged_in(self):
+        if not app_password():
             return True
-        import base64
-        import hmac
-        auth = self.headers.get("Authorization", "")
-        if auth.startswith("Basic "):
-            try:
-                given = base64.b64decode(auth[6:]).decode("utf-8").split(":", 1)[1]
-                if hmac.compare_digest(given.encode(), pw.encode()):
-                    return True
-            except Exception:
-                pass
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Aktien-Check", charset="UTF-8"')
+        jar = http.cookies.SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie", ""))
+        except http.cookies.CookieError:
+            return False
+        c = jar.get(SESSION_COOKIE)
+        return bool(c and session_valid(c.value))
+
+    def redirect(self, location, cookie=None):
+        self.send_response(303)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def cookie(self, value, max_age):
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "") == "https" else ""
+        return f"{SESSION_COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax{secure}"
+
+    def login_page(self, error="", nxt="/", code=200):
+        err = f'<div class="err">{error}</div>' if error else ""
+        safe_next = nxt.replace('"', "").replace("<", "").replace(">", "")
+        page = LOGIN_PAGE.replace("{error}", err).replace("{next}", safe_next).replace("{days}", str(SESSION_DAYS))
+        return self.send(code, page, "text/html; charset=utf-8")
+
+    def require_login(self, u):
+        if self.logged_in():
+            return True
+        if u.path.startswith("/api/"):
+            self.send(401, json.dumps({"error": "login"}), "application/json")
+        else:
+            target = u.path + (("?" + u.query) if u.query else "")
+            self.redirect("/login?" + urllib.parse.urlencode({"next": target}))
         return False
+
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        if u.path != "/login":
+            return self.send(404, "Not found", "text/plain")
+        length = min(int(self.headers.get("Content-Length") or 0), 4096)
+        form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        nxt = (form.get("next") or ["/"])[0]
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = "/"
+        ip = self.client_ip()
+        if too_many_failures(ip):
+            return self.login_page("Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.", nxt, 429)
+        given = (form.get("password") or [""])[0]
+        if app_password() and hmac.compare_digest(given.encode("utf-8"), app_password().encode("utf-8")):
+            return self.redirect(nxt, self.cookie(make_session_token(), SESSION_DAYS * 86400))
+        note_failure(ip)
+        time.sleep(1)  # bremst Durchprobieren
+        return self.login_page("Falsches Passwort.", nxt, 401)
 
     def do_HEAD(self):
         self.send_response(200)
@@ -1379,9 +1508,16 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/healthz":
             return self.send(200, "ok", "text/plain")
-        if not self.authorized():
-            return
         qs = urllib.parse.parse_qs(u.query)
+        if u.path == "/login":
+            nxt = (qs.get("next") or ["/"])[0]
+            if not nxt.startswith("/") or nxt.startswith("//"):
+                nxt = "/"
+            return self.redirect(nxt) if self.logged_in() else self.login_page(nxt=nxt)
+        if u.path == "/logout":
+            return self.redirect("/login", self.cookie("", 0))
+        if not self.require_login(u):
+            return
         q = (qs.get("q") or [""])[0].strip()
         if u.path in ("/", "/index.html"):
             return self.send(200, HTML_PATH.read_bytes(), "text/html; charset=utf-8")
