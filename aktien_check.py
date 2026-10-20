@@ -1463,6 +1463,49 @@ def finnhub_enrich(m, symbol, alternatives):
         break
 
 
+# ---------------------------------------------------------------------------
+# Kursverlauf für den Chart
+# ---------------------------------------------------------------------------
+CHART_RANGES = {  # Zeitraum -> (yfinance-Periode, Intervall, Cache-Sekunden)
+    "1d": ("5d", "5m", 120), "1mo": ("1mo", "60m", 900), "1y": ("1y", "1d", 3600),
+    "5y": ("5y", "1wk", 6 * 3600), "max": ("max", "1mo", 12 * 3600),
+}
+CHART_CACHE = {}
+
+
+def chart_data(symbol, rng):
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or rng not in CHART_RANGES:
+        raise ValueError("Ungültige Anfrage")
+    period, interval, ttl = CHART_RANGES[rng]
+    key = (symbol, rng)
+    hit = CHART_CACHE.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    t = yf.Ticker(symbol)
+    h = safe(lambda: t.history(period=period, interval=interval, auto_adjust=False))
+    if h is None or h.empty:
+        raise ValueError("Keine Kursdaten verfügbar")
+    h = h[h["Close"].notna()]
+    prev_close = None
+    if rng == "1d":  # nur den letzten Handelstag zeigen, Vergleich mit dem Vortagesschluss
+        last_day = max(ts.date() for ts in h.index)
+        prev = h[[ts.date() < last_day for ts in h.index]]
+        prev_close = float(prev["Close"].iloc[-1]) if len(prev) else None
+        h = h[[ts.date() == last_day for ts in h.index]]
+    pts = [[int(ts.timestamp() * 1000), round(float(c), 4)] for ts, c in zip(h.index, h["Close"])]
+    if rng in ("1d", "1mo"):  # letzten Live-Kurs ergänzen
+        last = num(safe(lambda: t.fast_info.last_price))
+        if last and pts and abs(last / pts[-1][1] - 1) < 0.2:
+            pts[-1][1] = round(last, 4)
+    base = prev_close if prev_close else (pts[0][1] if pts else None)
+    out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "1mo"),
+           "change": (pts[-1][1] / base - 1) if pts and base else None,
+           "currency": safe(lambda: t.fast_info.currency) or ""}
+    CHART_CACHE[key] = (time.time(), out)
+    return out
+
+
 CACHE = {}
 
 
@@ -2018,6 +2061,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/alerts":
             return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
                              "application/json; charset=utf-8")
+        if u.path == "/api/chart":
+            try:
+                return self.send(200, json.dumps(chart_data(q, (qs.get("range") or ["1y"])[0])),
+                                 "application/json; charset=utf-8")
+            except ValueError as e:
+                return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
         if u.path == "/api/search":
             return self.send(200, json.dumps(search_symbols(q) if len(q) >= 2 else []), "application/json")
         if u.path == "/api/analyze":
