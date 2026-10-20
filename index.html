@@ -325,7 +325,25 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .chart-tip b{display:block;font-size:13.5px;font-variant-numeric:tabular-nums}
 .chart-tip span{color:var(--text-3)}
 .chart-msg{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);font-size:14px}
-.chart-foot{font-size:11.5px;color:var(--text-3);margin-top:6px;text-align:right}
+.chart-foot{font-size:11.5px;color:var(--text-3);margin-top:6px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.chart-ctrl{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;user-select:none}
+.toggle input{position:absolute;opacity:0;pointer-events:none}
+.toggle .sw{width:34px;height:20px;border-radius:10px;background:var(--track);position:relative;transition:background .15s;flex:none}
+.toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);
+  box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.toggle input:checked + .sw{background:var(--accent)}
+.toggle input:checked + .sw::after{transform:translateX(14px)}
+.toggle input:focus-visible + .sw{outline:2px solid var(--accent);outline-offset:2px}
+.toggle.disabled{opacity:.45;cursor:default}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:18px;height:0;border-top:2px solid currentColor}
+.legend i.dash{border-top-style:dashed}
+.legend i.div{width:9px;height:9px;border:2px solid var(--accent);border-radius:50%;background:var(--surface)}
+.chart-wrap .divmark{fill:var(--surface);stroke:var(--accent);stroke-width:2}
+.chart-tip .tdiv{display:block;color:var(--accent);font-weight:600;margin-top:2px}
+@media (max-width:640px){.chart-ctrl{align-items:flex-start;width:100%}}
 
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
@@ -801,8 +819,8 @@ function meter(score) {
 }
 
 /* Kurschart (SVG, ohne externe Bibliothek) */
-const CHART = {sym: null, range: "1y", data: {}, ro: null};
-try { CHART.range = localStorage.getItem("ac-chart-range") || "1y"; } catch (e) {}
+const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false};
+try { CHART.range = localStorage.getItem("ac-chart-range") || "1y"; CHART.tr = localStorage.getItem("ac-chart-tr") === "1"; } catch (e) {}
 const RANGE_TEXT = {"1d": "heute", "1mo": "1 Monat", "1y": "1 Jahr", "5y": "5 Jahre", "max": "seit Beginn der Daten"};
 function fmtTime(ms, rng, long) {
   const d = new Date(ms);
@@ -827,66 +845,109 @@ function setHead(price, base, cur, label) {
   const col = chg == null ? "var(--text-3)" : chg >= 0 ? "var(--pos)" : "var(--neg)";
   $("#ch-chg").innerHTML = chg == null ? "" : `<span style="color:${col};margin:0">${chg >= 0 ? "+" : ""}${nf(price - base)} (${pc(chg, 2, true)})</span><span>${esc(label)}</span>`;
 }
+function setHeadPct(pr, tr, label) {
+  const c = v => v >= 0 ? "var(--pos)" : "var(--neg)";
+  $("#ch-val").innerHTML = `<span style="color:${c(tr)}">${pc(tr, 1, true)}</span><small>inkl. Dividenden</small>`;
+  $("#ch-chg").innerHTML = `<span style="color:var(--text-2);margin:0">Kurs allein ${pc(pr, 1, true)}</span><span>${esc(label)}</span>`;
+}
 function drawChart() {
   const wrap = $("#ch-wrap"); if (!wrap) return;
   const D = CHART.data[CHART.range];
   if (!D) return;
   const P = D.points;
   if (!P || P.length < 2) { wrap.innerHTML = `<div class="chart-msg">Für diesen Zeitraum liegen keine Kursdaten vor.</div>`; return; }
+  const canTR = !!(D.adj && D.range !== "1d");
+  const trl = $("#ch-trl");
+  trl.classList.toggle("disabled", !canTR);
+  $("#ch-tr").disabled = !canTR;
+  $("#ch-tr").checked = CHART.tr && canTR;
+  const pct = CHART.tr && canTR;          // Prozent-Ansicht: Kurs vs. Gesamtrendite auf gemeinsamer Achse
+  const n = P.length;
+  const priceV = pct ? P.map(p => p[1] / P[0][1] - 1) : P.map(p => p[1]);
+  const trV = pct ? D.adj.map(a => a / D.adj[0] - 1) : null;
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const m = {l: 4, r: 58, t: 10, b: 26};
   const pw = W - m.l - m.r, ph = H - m.t - m.b;
-  const vals = P.map(p => p[1]);
-  let lo = Math.min(...vals, D.range === "1d" && D.base ? D.base : Infinity);
-  let hi = Math.max(...vals, D.range === "1d" && D.base ? D.base : -Infinity);
-  const pad = (hi - lo) * 0.08 || hi * 0.01;
+  const all = [...priceV, ...(trV || []), ...(D.range === "1d" && D.base ? [D.base] : []), ...(pct ? [0] : [])];
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 0.01;
   lo -= pad; hi += pad;
   const {ticks} = niceTicks(lo, hi, H < 240 ? 3 : 4);
-  const n = P.length;
   const X = i => m.l + (i / (n - 1)) * pw;
   const Y = v => m.t + (1 - (v - lo) / (hi - lo)) * ph;
-  const up = (D.change ?? 0) >= 0;
-  const col = up ? "var(--pos)" : "var(--neg)";
-  const line = P.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+  const path = vals => vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const mainV = pct ? trV : priceV;
+  const up = (mainV[n - 1] - (pct ? 0 : (D.base ?? mainV[0]))) >= 0;
+  const col = pct ? "var(--accent)" : up ? "var(--pos)" : "var(--neg)";
+  const line = path(mainV);
   const area = `${line}L${X(n - 1).toFixed(1)},${(m.t + ph).toFixed(1)}L${X(0).toFixed(1)},${(m.t + ph).toFixed(1)}Z`;
   const xCount = W < 420 ? 3 : 5;
   const xIdx = [...new Set(Array.from({length: xCount}, (_, k) => Math.round(k * (n - 1) / (xCount - 1))))];
-  const dec = hi - lo < 5 ? 2 : hi - lo < 50 ? 1 : 0;
+  const span = hi - lo;
+  const tickTxt = t => pct ? `${t > 0 ? "+" : ""}${nf(t * 100, span < 0.2 ? 1 : 0)} %` : nf(t, span < 5 ? 2 : span < 50 ? 1 : 0);
+  // Dividenden dem nächstgelegenen Datenpunkt zuordnen
+  const divAt = {};
+  (D.dividends || []).forEach(([ts, amt]) => {
+    let i = P.findIndex(p => p[0] >= ts);
+    if (i < 0) i = n - 1;
+    (divAt[i] = divAt[i] || []).push([ts, amt]);
+  });
+  const divIdx = Object.keys(divAt).map(Number);
+  const markV = i => pct ? priceV[i] : priceV[i];
   const gid = "g" + Math.random().toString(36).slice(2, 8);
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kursverlauf ${esc(RANGE_TEXT[D.range])}: von ${nf(P[0][1])} auf ${nf(P[n - 1][1])} ${esc(D.currency)}">
+  const ariaTxt = pct ? `Gesamtrendite ${RANGE_TEXT[D.range]}: ${pc(trV[n - 1], 1, true)}, Kurs allein ${pc(priceV[n - 1], 1, true)}`
+                      : `Kursverlauf ${RANGE_TEXT[D.range]}: von ${nf(P[0][1])} auf ${nf(P[n - 1][1])} ${D.currency}`;
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaTxt)}">
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="${col}" stop-opacity=".16"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
     <g class="grid">${ticks.map(t => `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>`).join("")}</g>
-    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${nf(t, dec)}</text>`).join("")}
+    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${tickTxt(t)}</text>`).join("")}
       ${xIdx.map((i, k) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === xIdx.length - 1 ? "end" : "middle"}">${esc(fmtTime(P[i][0], D.range))}</text>`).join("")}</g>
     ${D.range === "1d" && D.base ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(D.base).toFixed(1)}" y2="${Y(D.base).toFixed(1)}"/>` : ""}
+    ${pct ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ""}
     <path d="${area}" fill="url(#${gid})"/>
+    ${pct ? `<path d="${path(priceV)}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
     <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${divIdx.map(i => `<circle class="divmark" cx="${X(i).toFixed(1)}" cy="${Y(markV(i)).toFixed(1)}" r="4.5"/>`).join("")}
     <g id="ch-hover" style="display:none"><line class="cross" id="ch-x" y1="${m.t}" y2="${m.t + ph}"/>
       <circle class="dot" id="ch-dot" r="5" fill="${col}"/></g>
     <rect id="ch-hit" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>
   </svg><div class="chart-tip" id="ch-tip"></div>`;
   const label = RANGE_TEXT[D.range];
-  setHead(P[n - 1][1], D.base, D.currency, label);
-  $("#ch-foot").textContent = D.range === "1d" && D.base ? `Gestrichelt: Schlusskurs Vortag ${nf(D.base)} ${D.currency}`
-    : D.range === "max" ? `Daten ab ${new Date(P[0][0]).toLocaleDateString("de-DE", {month: "long", year: "numeric"})}` : "";
+  const resetHead = () => pct ? setHeadPct(priceV[n - 1], trV[n - 1], label) : setHead(P[n - 1][1], D.base, D.currency, label);
+  resetHead();
+  // Fußzeile: Legende + Dividenden-Summe
+  const divs = D.dividends || [];
+  const divSum = divs.reduce((a, d) => a + d[1], 0);
+  const legend = pct ? `<span><i style="color:var(--accent)"></i>inkl. Dividenden</span><span><i class="dash" style="color:var(--text-2)"></i>Kurs allein</span>` : "";
+  const divTxt = divs.length ? `<span><i class="div"></i>Dividende · ${divs.length} ${divs.length === 1 ? "Zahlung" : "Zahlungen"}, zusammen ${nf(divSum)} ${esc(D.currency)} je Aktie</span>` : "";
+  const note = D.range === "1d" && D.base ? `Gestrichelt: Schlusskurs Vortag ${nf(D.base)} ${esc(D.currency)}`
+    : D.range === "max" ? `Daten ab ${new Date(P[0][0]).toLocaleDateString("de-DE", {month: "long", year: "numeric"})}`
+    : pct ? "Dividenden zum Auszahlungstag wieder angelegt" : "";
+  $("#ch-foot").innerHTML = `<div class="legend">${legend}${divTxt}</div><span>${note}</span>`;
   const hit = $("#ch-hit"), hov = $("#ch-hover"), tip = $("#ch-tip");
+  const snap = Math.max(1, Math.round(n / 60));  // Dividenden-Markierung leichter treffen
   const move = e => {
     const r = hit.getBoundingClientRect();
-    const i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
-    const x = X(i), y = Y(P[i][1]);
+    let i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1))));
+    const near = divIdx.find(k => Math.abs(k - i) <= snap);
+    if (near !== undefined) i = near;
+    const x = X(i), y = Y(mainV[i]);
     hov.style.display = "";
     $("#ch-x").setAttribute("x1", x); $("#ch-x").setAttribute("x2", x);
     $("#ch-dot").setAttribute("cx", x); $("#ch-dot").setAttribute("cy", y);
-    const chg = D.base ? P[i][1] / D.base - 1 : null;
-    tip.innerHTML = `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(fmtTime(P[i][0], D.range, true))}</span>`;
+    const when = fmtTime(P[i][0], D.range, true);
+    const dv = divAt[i] ? divAt[i].map(([ts, amt]) => `<span class="tdiv">Dividende ${nf(amt)} ${esc(D.currency)} · ${new Date(ts).toLocaleDateString("de-DE")}</span>`).join("") : "";
+    tip.innerHTML = pct
+      ? `<b>${pc(trV[i], 1, true)} inkl. Div.</b><span>Kurs ${nf(P[i][1])} ${esc(D.currency)} (${pc(priceV[i], 1, true)}) · ${esc(when)}</span>${dv}`
+      : `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(when)}</span>${dv}`;
     tip.style.display = "block";
     const tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(W - tw, x - tw / 2)) + "px";
-    tip.style.top = Math.max(0, y - 58) + "px";
-    setHead(P[i][1], D.base, D.currency, fmtTime(P[i][0], D.range, true));
+    tip.style.top = Math.max(0, y - tip.offsetHeight - 14) + "px";
+    pct ? setHeadPct(priceV[i], trV[i], when) : setHead(P[i][1], D.base, D.currency, when);
   };
-  const leave = () => { hov.style.display = "none"; tip.style.display = "none"; setHead(P[n - 1][1], D.base, D.currency, label); };
+  const leave = () => { hov.style.display = "none"; tip.style.display = "none"; resetHead(); };
   hit.addEventListener("pointermove", move);
   hit.addEventListener("pointerdown", move);
   hit.addEventListener("pointerleave", leave);
@@ -916,6 +977,11 @@ async function loadChart(rng) {
 function initChart(sym) {
   CHART.sym = sym; CHART.data = {};
   document.querySelectorAll("#ch-seg button").forEach(b => b.onclick = () => loadChart(b.dataset.r));
+  $("#ch-tr").onchange = e => {
+    CHART.tr = e.target.checked;
+    try { localStorage.setItem("ac-chart-tr", CHART.tr ? "1" : "0"); } catch (err) {}
+    drawChart();
+  };
   CHART.ro?.disconnect();
   let last = 0;
   CHART.ro = new ResizeObserver(() => { const w = $("#ch-wrap")?.clientWidth; if (w && w !== last) { last = w; drawChart(); } });
@@ -985,8 +1051,11 @@ function render(d) {
       <div><div class="eyebrow">Kursverlauf</div>
         <div class="chart-val num" id="ch-val">–</div>
         <div class="chart-chg num" id="ch-chg"></div></div>
-      <div class="seg" id="ch-seg">${[["1d", "Tag"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
-        .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div>
+      <div class="chart-ctrl">
+        <div class="seg" id="ch-seg">${[["1d", "Tag"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
+          .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div>
+        <label class="toggle" id="ch-trl"><input type="checkbox" id="ch-tr"><span class="sw"></span>inkl. Dividenden (Gesamtrendite)</label>
+      </div>
     </div>
     <div class="chart-wrap" id="ch-wrap"><div class="chart-msg">Lade Kursverlauf …</div></div>
     <div class="chart-foot" id="ch-foot"></div>

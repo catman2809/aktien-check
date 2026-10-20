@@ -1494,13 +1494,26 @@ def chart_data(symbol, rng):
         prev_close = float(prev["Close"].iloc[-1]) if len(prev) else None
         h = h[[ts.date() == last_day for ts in h.index]]
     pts = [[int(ts.timestamp() * 1000), round(float(c), 4)] for ts, c in zip(h.index, h["Close"])]
+    # Dividendenbereinigter Kurs (für die Gesamtrendite mit wieder angelegten Dividenden)
+    adj = [round(float(a), 4) for a in h["Adj Close"]] if "Adj Close" in h and rng != "1d" else None
     if rng in ("1d", "1mo"):  # letzten Live-Kurs ergänzen
         last = num(safe(lambda: t.fast_info.last_price))
         if last and pts and abs(last / pts[-1][1] - 1) < 0.2:
+            if adj:
+                adj[-1] = round(adj[-1] * last / pts[-1][1], 4)
             pts[-1][1] = round(last, 4)
+    divs = []
+    if pts and rng != "1d":
+        d = safe(lambda: t.dividends)
+        if d is not None and len(d):
+            lo, hi = pts[0][0], pts[-1][0] + 86400000 * 31
+            divs = [[int(ts.timestamp() * 1000), round(float(v), 4)] for ts, v in d.items()
+                    if lo <= ts.timestamp() * 1000 <= hi and v > 0]
     base = prev_close if prev_close else (pts[0][1] if pts else None)
     out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "1mo"),
            "change": (pts[-1][1] / base - 1) if pts and base else None,
+           "adj": adj if adj and len(adj) == len(pts) and all(a > 0 for a in adj) else None,
+           "dividends": divs,
            "currency": safe(lambda: t.fast_info.currency) or ""}
     CHART_CACHE[key] = (time.time(), out)
     return out
