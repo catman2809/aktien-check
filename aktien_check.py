@@ -1904,8 +1904,15 @@ class AlertStore:
                 sp.setdefault("history", data.pop("history", {}))
             self.data = data
             # Mit Schlüssel, aber noch Klartext gespeichert -> sofort verschlüsselt umziehen
-            if not self.locked and key and (not self.encrypted or self.plain_gist_id):
+            migrate = not self.locked and key and (not self.encrypted or self.plain_gist_id)
+            if migrate:
                 self.save()
+            # Protokoll ohne Inhalte – nur der Zustand des Speichers
+            print(f"[Speicher] {self.backend} · {'verschlüsselt' if self.encrypted else 'unverschlüsselt'}"
+                  f" · Schlüssel {'gesetzt' if key else 'fehlt'} · Benutzer: {len(data['users'])}"
+                  f" · altes Klartext-Gist: {'vorhanden' if self.plain_gist_id else 'keins'}"
+                  f"{' · Umzug durchgeführt' if migrate and not self.error else ''}"
+                  f"{' · FEHLER: ' + self.error if self.error else ''}", flush=True)
             return data
 
     def save(self):
