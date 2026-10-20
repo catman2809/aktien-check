@@ -1255,6 +1255,21 @@ class Handler(BaseHTTPRequestHandler):
         q = (qs.get("q") or [""])[0].strip()
         if u.path in ("/", "/index.html"):
             return self.send(200, HTML_PATH.read_bytes(), "text/html; charset=utf-8")
+        if u.path == "/api/diag":  # Erreichbarkeit der Datenquellen prüfen
+            sym = q or "SAP.DE"
+            checks = {
+                "info": lambda: str(current_price(yf.Ticker(sym).info)),
+                "history": lambda: str(len(yf.Ticker(sym).history(period="5d"))),
+                "search": lambda: str(len(search_symbols(sym))),
+                "google_news": lambda: str(len(google_news(sym, "en"))),
+            }
+            out = {}
+            for name, fn in checks.items():
+                try:
+                    out[name] = "ok: " + fn()
+                except Exception as e:
+                    out[name] = f"{type(e).__name__}: {e}"[:300]
+            return self.send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/api/search":
             return self.send(200, json.dumps(search_symbols(q) if len(q) >= 2 else []), "application/json")
         if u.path == "/api/analyze":
