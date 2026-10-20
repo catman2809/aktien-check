@@ -426,10 +426,10 @@ def parse_rss(xml_bytes):
     return items
 
 
-def google_news(query, lang):
+def google_news(query, lang, days=30):
     loc = {"de": ("de", "DE", "DE:de"), "en": ("en-US", "US", "US:en")}[lang]
     url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
-        {"q": query + " when:30d", "hl": loc[0], "gl": loc[1], "ceid": loc[2]})
+        {"q": query + f" when:{days}d", "hl": loc[0], "gl": loc[1], "ceid": loc[2]})
     return parse_rss(http_get(url))
 
 
@@ -457,6 +457,22 @@ def words(title):
     return {w for w in re.findall(r"[a-zäöüß0-9]{4,}", title.lower())}
 
 
+def sibling_names(company, symbol):
+    """Namen anderer börsennotierter Firmen, die mit unserem Firmennamen beginnen."""
+    own = company.lower()
+    sibs = set()
+    for a in search_symbols(company):
+        n = clean_company_name(a["name"]).lower()
+        if a["symbol"].split(".")[0] != symbol.split(".")[0] and n != own and n.startswith(own + " "):
+            sibs.add(n)
+    return sorted(sibs, key=len, reverse=True)
+
+
+def mentions_sibling(title, siblings):
+    tl = title.lower().replace("-", " ")
+    return any(sib in tl for sib in siblings)
+
+
 def clean_company_name(name):
     n = re.sub(r"[,.]", " ", name or "")
     n = re.sub(r"\b(Inc|Incorporated|Corp|Corporation|Company|Co|AG|Aktiengesellschaft|SE|KGaA|plc|PLC|Ltd|Limited|N V|NV|SA|S A|"
@@ -464,7 +480,7 @@ def clean_company_name(name):
     return re.sub(r"\s+", " ", n).strip() or name
 
 
-def collect_news(symbol, company, website):
+def collect_news(symbol, company, website, siblings=()):
     company_domain = domain_of(website) if website else ""
     base_sym = symbol.split(".")[0]
     jobs = {
@@ -493,7 +509,7 @@ def collect_news(symbol, company, website):
         if it["date"] and it["date"] < cutoff:
             continue
         tl = it["title"].lower()
-        if JOB_AD.search(tl):
+        if JOB_AD.search(tl) or mentions_sibling(it["title"], siblings):
             continue
         if not (any(tok in tl for tok in name_tokens) or re.search(r"\b" + re.escape(base_sym.lower()) + r"\b", tl)):
             continue
@@ -785,9 +801,13 @@ def score_valuation(m, mac):
     if m["peg"] and m["peg"] > 0:
         parts.append((clamp((1.5 - m["peg"]) / 1.0), 0.7))
         why.append(f"PEG-Ratio {fnum(m['peg'], 2)} (unter 1 = günstig relativ zum Wachstum)")
-    if m["upside"] is not None and m["n_analysts"] >= 3:
-        parts.append((clamp(m["upside"] / 0.3), 0.6))
-        why.append(f"Analysten-Kursziel {fnum(m['target'], 2)} {m['currency']} → {pct(m['upside'])} Potenzial")
+    if m["upside"] is not None and (m["n_analysts"] >= 3 or m.get("target_n", 0) >= 2):
+        w = 0.6 if not m.get("target_n") else 0.6 * min(1.0, m["target_n"] / 6)  # wenige Meldungen -> weniger Gewicht
+        parts.append((clamp(m["upside"] / 0.3), w))
+        src = f" ({m['target_src']})" if m.get("target_src") else ""
+        why.append(f"Analysten-Kursziel {fnum(m['target'], 2)} {m['currency']} → {pct(m['upside'])} Potenzial{src}")
+        if m.get("target_n"):
+            why.append("Einzelziele: " + " · ".join(f"{t['firm']} {fnum(t['value'], 0)}" for t in m["target_items"][:8]))
 
     # Eingepreiste Erwartungen (Reverse-DCF)
     r = clamp((mac["rf"] or 4.0) / 100 + (m["beta"] or 1.0) * 0.05, 0.07, 0.13)
@@ -1248,7 +1268,7 @@ def build_fundamentals(m, mac):
              f"10 Jahre, danach 2,5 %, Diskontsatz {pct(m.get('disc_rate'))}"],
             ["Realistisch erwartbares Wachstum", pct(m.get("expected_g")), "Median aus Historie & Prognosen"],
             ["Analysten-Kursziel (Ø)", "–" if m["target"] is None else f"{fnum(m['target'], 2)} {c}",
-             f"Potenzial {pct(m['upside'])}"],
+             f"Potenzial {pct(m['upside'])}" + (f" · {m['target_src']}" if m.get("target_src") else "")],
         )},
         {"title": "Makro: Zinsen, Währung, Konjunktur", "rows": rows_(
             ["US-10J-Rendite", "–" if mac["rf"] is None else fnum(mac["rf"], 2) + " %",
@@ -1258,6 +1278,107 @@ def build_fundamentals(m, mac):
             ["Beta", fnum(m["beta"], 2), "Konjunktur-/Marktabhängigkeit"],
         )},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Kursziele aus Analysten-Schlagzeilen (z. B. dpa-AFX: "Jefferies hebt Ziel für SAP auf 300 Euro")
+# ---------------------------------------------------------------------------
+TARGET_CUR = {"euro": "EUR", "eur": "EUR", "€": "EUR", "us-dollar": "USD", "dollar": "USD", "usd": "USD",
+              "franken": "CHF", "chf": "CHF", "pence": "GBp", "pfund": "GBP"}
+DE_AMOUNT = re.compile(r"(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(us-dollar|dollar|usd|euro|eur|€|franken|chf|pence|pfund)(?![a-zäöü])", re.I)
+EN_AMOUNT = re.compile(r"(?:\$|US\$|USD\s?)\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)", re.I)
+DE_FIRM = re.compile(r"^(?:[^:]{0,40}:\s*)?([A-Z][\w&.\-' ]{1,40}?)\s+(?:hebt|senkt|erhöht|belässt|bestätigt|startet|nimmt|"
+                     r"stuft|reduziert|kappt|sieht|setzt|bewertet)\b")
+EN_FIRM = [re.compile(r"\bby ([A-Z][\w&.\-' ]{1,30}?)(?:[,;:]|\s+(?:on|amid|after|as|despite|ahead)\b|$)"),
+           re.compile(r"\bfrom ([A-Z][A-Za-z&.\-' ]{1,30}?)(?:[,;:]|\s+(?:on|amid|after|as|despite|ahead)\b|$)"),
+           re.compile(r"^([A-Z][\w&.\-' ]{1,30}?)\s+(?:raises|lifts|cuts|lowers|boosts|trims|sets|adjusts|maintains|"
+                      r"reiterates|hikes|ups|reduces|initiates|starts|keeps)\b", re.I)]
+
+
+def _de_number(txt):
+    return float(txt.replace(".", "").replace(",", "."))
+
+
+def parse_target(title, lang):
+    """(Analysehaus|None, Wert, Währung) aus einer Kursziel-Schlagzeile – oder None."""
+    tl = title.lower()
+    if re.search(r"\b(unser|unsere|our|we're|we are)\b", tl):  # eigene Ziele von Medien/Bloggern
+        return None
+    if lang == "de":
+        if "ziel" not in tl:
+            return None
+        hits = list(DE_AMOUNT.finditer(title))
+        if not hits:
+            return None
+        pick = next((h for h in hits if title[max(0, h.start() - 4):h.start()].lower().strip().endswith("auf")), hits[-1])
+        value, cur = _de_number(pick.group(1)), TARGET_CUR[pick.group(2).lower()]
+        fm = DE_FIRM.search(title)
+    else:
+        if "target" not in tl:
+            return None
+        hits = list(EN_AMOUNT.finditer(title))
+        if not hits:
+            return None
+        pick = next((h for h in hits if title[max(0, h.start() - 4):h.start()].lower().strip().endswith("to")), hits[0])
+        value, cur = float(pick.group(1).replace(",", "")), "USD"
+        fm = next((r.search(title) for r in EN_FIRM if r.search(title)), None)
+    firm = fm.group(1).strip() if fm else None
+    if firm and (re.search(r"\d", firm) or re.search(r"(ziel|target|aktie|stock|shares|kurs)", firm.lower())):
+        firm = None
+    return firm, value, cur
+
+
+def firm_key(firm):
+    k = re.sub(r"[^a-z0-9]", "", firm.lower())
+    for suffix in ("capitalmarkets", "capital", "securities", "research", "global", "co", "inc"):
+        if k.endswith(suffix) and len(k) > len(suffix) + 2:
+            k = k[: -len(suffix)]
+    return {"bofa": "bankofamerica", "bankofamericasecurities": "bankofamerica", "jpm": "jpmorgan",
+            "gs": "goldmansachs", "ms": "morganstanley"}.get(k, k)
+
+
+def news_targets(company, currency, price, siblings=(), days=90):
+    """Median der Analysten-Kursziele aus Schlagzeilen (nur Börsenwährung, je Analysehaus die neueste Meldung)."""
+    out = {"median": None, "n": 0, "items": []}
+    if not price:
+        return out
+    want = {"GBp": "GBp", "GBX": "GBp"}.get(currency, currency)
+    jobs = {"de": lambda: google_news(f'"{company}" Kursziel', "de", days),
+            "en": lambda: google_news(f'"{company}" "price target"', "en", days)}
+    found = {}
+    tokens = [w for w in re.findall(r"[a-zäöüß0-9]{3,}", company.lower())][:1] or [company.lower()]
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        futs = {lang: ex.submit(fn) for lang, fn in jobs.items()}
+        for lang, f in futs.items():
+            for it in safe(lambda: f.result(timeout=20), []) or []:
+                if not any(t in it["title"].lower() for t in tokens) or mentions_sibling(it["title"], siblings):
+                    continue
+                if re.search(r"dividend", it["title"].lower()):
+                    continue
+                parsed = parse_target(it["title"], lang)
+                if not parsed:
+                    continue
+                firm, value, cur = parsed
+                if cur == "GBP" and want == "GBp":
+                    value, cur = value * 100, "GBp"
+                if cur != want or not (0.5 * price <= value <= 2.5 * price):
+                    continue
+                key = firm_key(firm) if firm else f"#{value:g}"
+                prev = found.get(key)
+                if prev is None or (it["date"] and (prev["dt"] is None or it["date"] > prev["dt"])):
+                    found[key] = {"firm": firm, "value": value, "dt": it["date"], "source": it["source"]}
+    named = {k: v for k, v in found.items() if not k.startswith("#")}
+    if len(named) >= 3:  # Meldungen ohne erkennbares Analysehaus sind oft Wiederholungen
+        found = named
+    vals = sorted(v["value"] for v in found.values())
+    if vals:
+        mid = len(vals) // 2
+        out["median"] = vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2
+        out["n"] = len(vals)
+        out["items"] = sorted(({"firm": v["firm"] or "k. A.", "value": v["value"],
+                                "date": v["dt"].strftime("%d.%m.") if v["dt"] else ""} for v in found.values()),
+                              key=lambda x: -x["value"])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1353,9 +1474,17 @@ def analyze(query):
         fm = ex.submit(gather, symbol, t, info)
         fmac = ex.submit(gather_macro, info.get("currency") or "")
         company = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
-        fnews = ex.submit(collect_news, symbol, company, info.get("website") or "")
-        m, mac, news = fm.result(), fmac.result(), fnews.result()
+        siblings = sibling_names(company, symbol)
+        fnews = ex.submit(collect_news, symbol, company, info.get("website") or "", siblings)
+        ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
+        m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
     finnhub_enrich(m, symbol, alternatives)
+    m["target_n"], m["target_src"], m["target_items"] = 0, "", tgt["items"]
+    if m["upside"] is None and tgt["n"] >= 2:
+        m["target"] = tgt["median"]
+        m["upside"] = tgt["median"] / m["price"] - 1
+        m["target_n"] = tgt["n"]
+        m["target_src"] = f"Median aus {tgt['n']} Analysten-Kurszielen in Nachrichten, 90 Tage"
 
     cats = {}
     cats["valuation"] = score_valuation(m, mac)
@@ -1418,7 +1547,8 @@ def analyze(query):
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
         "news": news, "notes": notes, "confidence": confidence,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
-        "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else []) + ["Google News", "Pressedienste"],
+        "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
+                   + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
     }
     CACHE[key] = (time.time(), result)
     return result
