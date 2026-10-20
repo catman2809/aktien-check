@@ -1464,6 +1464,144 @@ def finnhub_enrich(m, symbol, alternatives):
 
 
 # ---------------------------------------------------------------------------
+# Termine: Quartalszahlen, Dividende, Hauptversammlung
+# ---------------------------------------------------------------------------
+GERMAN_SUFFIX = (".DE", ".F", ".MU", ".SG", ".HM", ".BE", ".DU", ".HA", ".VI")
+EVENT_CACHE = {}
+
+
+def _as_date(v):
+    if v is None:
+        return None
+    if hasattr(v, "date") and callable(v.date):
+        v = v.date()
+    return v if hasattr(v, "year") else None
+
+
+def company_events(symbol, alternatives=(), currency=""):
+    """Nächste Termine (bis 13 Monate voraus). Geschätzte Termine sind als solche markiert."""
+    hit = EVENT_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    from datetime import date
+    today = date.today()
+    horizon = today + timedelta(days=400)
+    t = yf.Ticker(symbol)
+    cal = safe(lambda: t.calendar) or {}
+    if not isinstance(cal, dict):
+        cal = {}
+    ev = []
+
+    # --- Quartalszahlen
+    future, past, eps_est = [], [], None
+    for d in cal.get("Earnings Date") or []:
+        d = _as_date(d)
+        if d and d >= today:
+            future.append(d)
+    eps_est = num(cal.get("Earnings Average"))
+    ed = safe(lambda: t.get_earnings_dates(limit=12))
+    if ed is not None and len(ed):
+        for ts, r in ed.iterrows():
+            d = _as_date(ts)
+            if not d:
+                continue
+            if d >= today:
+                future.append(d)
+                eps_est = eps_est or num(r.get("EPS Estimate"))
+            else:
+                past.append(d)
+    source = "Yahoo" if future else ""
+    if not future and finnhub_key():
+        for sym in [symbol] + [a["symbol"] for a in alternatives if "." not in a["symbol"]][:2]:
+            fc = finnhub("calendar/earnings", symbol=sym, **{"from": str(today - timedelta(days=400)), "to": str(horizon)})
+            rows = (fc or {}).get("earningsCalendar") or []
+            for r0 in rows:
+                d = safe(lambda: datetime.strptime(r0["date"], "%Y-%m-%d").date())
+                if d:
+                    (future if d >= today else past).append(d)
+                    if d >= today and not eps_est:
+                        eps_est = num(r0.get("epsEstimate"))
+            if rows:
+                source = "Finnhub" if future else ""
+                break
+    if future:
+        d = min(future)
+        ev.append({"type": "earnings", "date": str(d), "estimated": False, "source": source,
+                   "label": "Quartalszahlen", "detail": f"Erwarteter Gewinn je Aktie: {fnum(eps_est, 2)}" if eps_est else ""})
+    elif past:  # Schätzung: gleicher Termin wie vor einem Jahr
+        cands = sorted(d + timedelta(days=364) for d in past if d + timedelta(days=364) >= today)
+        if cands:
+            ev.append({"type": "earnings", "date": str(cands[0]), "estimated": True, "source": "Vorjahrestermin",
+                       "label": "Quartalszahlen", "detail": "geschätzt nach dem Vorjahrestermin"})
+
+    # --- Dividende
+    divs = safe(lambda: t.dividends)
+    last_amt, freq_days = None, None
+    if divs is not None and len(divs):
+        dd = [(_as_date(i), float(v)) for i, v in divs.items() if v > 0]
+        dd = [x for x in dd if x[0]]
+        if dd:
+            last_d, last_amt = dd[-1]
+            recent = [x for x in dd if x[0] >= today - timedelta(days=400)]
+            per_year = len([x for x in dd if x[0] >= today - timedelta(days=370)])
+            # in ganzen Wochen, damit die Schätzung auf denselben Wochentag wie zuletzt fällt
+            freq_days = {0: None, 1: 364, 2: 182, 3: 119, 4: 91}.get(per_year, 28 if per_year >= 10 else 91)
+            if not recent:
+                freq_days = None  # Dividende ausgesetzt
+    ex_off = _as_date(cal.get("Ex-Dividend Date"))
+    pay_off = _as_date(cal.get("Dividend Date"))
+    cur = currency or ""
+    amt_txt = f"zuletzt {fnum(last_amt, 2)} {cur} je Aktie".strip() if last_amt else ""
+    ex_date, ex_est = None, False
+    if ex_off and ex_off >= today:
+        ex_date = ex_off
+    elif freq_days and divs is not None and len(divs):
+        nxt = last_d + timedelta(days=freq_days)
+        while nxt < today:
+            nxt += timedelta(days=freq_days)
+        ex_date, ex_est = nxt, True
+    if ex_date and ex_date <= horizon:
+        ev.append({"type": "exdiv", "date": str(ex_date), "estimated": ex_est, "source": "Yahoo" if not ex_est else "Zahlungsrhythmus",
+                   "label": "Ex-Dividende", "detail": amt_txt + (" · geschätzt nach dem Zahlungsrhythmus" if ex_est else "")})
+    if pay_off and pay_off >= today:
+        ev.append({"type": "pay", "date": str(pay_off), "estimated": False, "source": "Yahoo",
+                   "label": "Dividendenzahlung", "detail": amt_txt})
+
+    # --- Hauptversammlung (Deutschland/Österreich: Ex-Tag = Handelstag nach der HV)
+    if ex_date and freq_days and freq_days >= 300 and symbol.upper().endswith(GERMAN_SUFFIX):
+        agm = ex_date - timedelta(days=1)
+        while agm.weekday() >= 5:
+            agm -= timedelta(days=1)
+        if agm >= today:
+            ev.append({"type": "agm", "date": str(agm), "estimated": True, "source": "Ex-Tag",
+                       "label": "Hauptversammlung", "detail": "geschätzt: Handelstag vor dem Ex-Dividenden-Tag"})
+
+    ev.sort(key=lambda e: e["date"])
+    for e in ev:
+        e["days"] = (datetime.strptime(e["date"], "%Y-%m-%d").date() - today).days
+    EVENT_CACHE[symbol] = (time.time(), ev)
+    return ev
+
+
+def ics_calendar(symbol, name, events):
+    """iCalendar-Datei (ganztägige Termine) für Kalender-Apps."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Aktien-Check//DE", "CALSCALE:GREGORIAN"]
+    for e in events:
+        d = e["date"].replace("-", "")
+        nxt = (datetime.strptime(e["date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+        title = f"{name}: {e['label']}" + (" (voraussichtlich)" if e["estimated"] else "")
+        desc = (e.get("detail") or "").replace(",", "\\,").replace(";", "\\;")
+        lines += ["BEGIN:VEVENT", f"UID:{symbol}-{e['type']}-{d}@aktien-check", f"DTSTAMP:{stamp}",
+                  f"DTSTART;VALUE=DATE:{d}", f"DTEND;VALUE=DATE:{nxt}",
+                  "SUMMARY:" + title.replace(",", "\\,").replace(";", "\\;"), f"DESCRIPTION:{desc}",
+                  "BEGIN:VALARM", "TRIGGER:-PT15H", "ACTION:DISPLAY", "DESCRIPTION:Erinnerung", "END:VALARM",
+                  "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+# ---------------------------------------------------------------------------
 # Kursverlauf für den Chart
 # ---------------------------------------------------------------------------
 CHART_RANGES = {  # Zeitraum -> (yfinance-Periode, Intervall, Cache-Sekunden)
@@ -1534,7 +1672,9 @@ def analyze(query):
         siblings = sibling_names(company, symbol)
         fnews = ex.submit(collect_news, symbol, company, info.get("website") or "", siblings)
         ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
+        fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
+        events = safe(lambda: fev.result(timeout=30), []) or []
     finnhub_enrich(m, symbol, alternatives)
     m["target_n"], m["target_src"], m["target_items"] = 0, "", tgt["items"]
     if m["upside"] is None and tgt["n"] >= 2:
@@ -1592,7 +1732,7 @@ def analyze(query):
         "facts": {k: m.get(k) for k in ("mcap", "pe", "fpe", "fcf_yield", "div_yield", "perf_1y", "perf_1m",
                                         "upside", "target", "beta", "hi52", "lo52", "n_analysts", "rec_mean",
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
-        "news": news, "notes": notes, "confidence": confidence,
+        "news": news, "notes": notes, "confidence": confidence, "events": events,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
@@ -1761,6 +1901,17 @@ def run_alert_checks(force_rating=False):
                             msgs.append((f"⚡ {name} {sign}{fnum(chg * 100, 1)} % heute",
                                          f"Kurs {fmt_price(last, cur)} (Vortag {fmt_price(prev, cur)}) – "
                                          f"Schwelle ±{fnum(a['move'], 1)} %", ["zap"]))
+            if a.get("events"):  # Erinnerung am Vortag eines Termins
+                evs = safe(lambda: company_events(sym, (), cur), []) or []
+                sent_ev = st.setdefault("events_sent", [])
+                for e in evs:
+                    key = f"{e['type']}:{e['date']}"
+                    if e["days"] == 1 and key not in sent_ev and datetime.now().hour >= 8:
+                        sent_ev.append(key)
+                        msgs.append((f"📅 Morgen: {name} – {e['label']}" + (" (voraussichtlich)" if e["estimated"] else ""),
+                                     e.get("detail") or datetime.strptime(e["date"], "%Y-%m-%d").strftime("%d.%m.%Y"),
+                                     ["calendar"]))
+                st["events_sent"] = sent_ev[-20:]
             if a.get("rating") and (force_rating or now - (st.get("rating_checked") or 0) > RATING_INTERVAL):
                 res = safe(lambda: analyze(sym))
                 if res:
@@ -1810,15 +1961,16 @@ def save_alert(body):
         v = num(body.get(key))
         return v if v and v > 0 else None
     cfg = {"name": str(body.get("name") or sym)[:80], "currency": str(body.get("currency") or "")[:6],
-           "below": pos("below"), "above": pos("above"), "move": pos("move"), "rating": bool(body.get("rating"))}
+           "below": pos("below"), "above": pos("above"), "move": pos("move"), "rating": bool(body.get("rating")),
+           "events": bool(body.get("events"))}
     data = STORE.load()
     with STORE.lock:
-        if not (cfg["below"] or cfg["above"] or cfg["move"] or cfg["rating"]):
+        if not (cfg["below"] or cfg["above"] or cfg["move"] or cfg["rating"] or cfg["events"]):
             data["alerts"].pop(sym, None)
         else:
             old = data["alerts"].get(sym, {}).get("state", {})
             # Neu gespeichert = scharf geschaltet; Verlauf und letzte Empfehlung bleiben erhalten
-            cfg["state"] = {"log": old.get("log", []),
+            cfg["state"] = {"log": old.get("log", []), "events_sent": old.get("events_sent", []),
                             "last_label": str(body.get("label") or "") or old.get("last_label"),
                             "rating_checked": time.time() if body.get("label") else old.get("rating_checked"),
                             "created": old.get("created") or time.time()}
@@ -2060,6 +2212,8 @@ class Handler(BaseHTTPRequestHandler):
                 "search": lambda: str(len(search_symbols(sym))),
                 "statements": lambda: str(len(yf.Ticker(sym).quarterly_income_stmt.columns)),
                 "fast_info": lambda: str(yf.Ticker(sym).fast_info.market_cap),
+                "calendar": lambda: str(yf.Ticker(sym).calendar.get("Earnings Date")),
+                "earnings_dates": lambda: str(len(yf.Ticker(sym).get_earnings_dates(limit=8))),
                 "google_news": lambda: str(len(google_news(sym, "en"))),
                 "finnhub_key": lambda: "gesetzt" if finnhub_key() else "FEHLT",
                 "finnhub": lambda: str(len(finnhub("stock/recommendation", symbol=sym.split(".")[0]) or [])) + " Perioden",
@@ -2074,6 +2228,20 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/alerts":
             return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
                              "application/json; charset=utf-8")
+        if u.path == "/api/ics":
+            sym = q.upper()
+            if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
+                return self.send(400, "Ungültiges Symbol", "text/plain")
+            name = (qs.get("name") or [sym])[0][:80]
+            body = ics_calendar(sym, name, company_events(sym))
+            data = body.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/calendar; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="{re.sub(r"[^A-Za-z0-9]", "_", sym)}-termine.ics"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if u.path == "/api/chart":
             try:
                 return self.send(200, json.dumps(chart_data(q, (qs.get("range") or ["1y"])[0])),

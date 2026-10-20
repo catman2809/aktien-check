@@ -345,6 +345,27 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .chart-tip .tdiv{display:block;color:var(--accent);font-weight:600;margin-top:2px}
 @media (max-width:640px){.chart-ctrl{align-items:flex-start;width:100%}}
 
+/* ---------- Termine ---------- */
+.ev-card{margin-top:16px}
+.ev-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--border)}
+.ev-head h3{margin:0;font-size:15px}
+.ev-list{list-style:none;margin:0;padding:0}
+.ev-item{display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 20px;border-top:1px solid var(--border)}
+.ev-item:first-child{border-top:0}
+.ev-date{text-align:center;border:1px solid var(--border);border-radius:10px;padding:5px 0 6px;line-height:1.1;background:var(--surface-2)}
+.ev-date b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
+.ev-date span{font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.ev-title{font-weight:600;font-size:14.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ev-title .dot{width:8px;height:8px}
+.ev-sub{font-size:12.5px;color:var(--text-3);margin-top:2px}
+.ev-when{font-size:12.5px;font-weight:600;color:var(--text-2);white-space:nowrap;text-align:right}
+.ev-when.soon{color:var(--accent)}
+.ev-est{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;background:var(--neu-soft);color:var(--neu)}
+.ev-foot{font-size:12px;color:var(--text-3);padding:12px 20px;border-top:1px solid var(--border);background:var(--surface-2);border-radius:0 0 var(--radius) var(--radius)}
+.dot.earnings{background:var(--accent)} .dot.exdiv,.dot.pay{background:var(--pos)} .dot.agm{background:var(--neu)}
+.wl-ev{display:block;font-size:11.5px;color:var(--text-3);margin-top:2px}
+.wl-ev.soon{color:var(--accent);font-weight:600}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -396,7 +417,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 </header>
 <nav class="subnav" id="subnav">
   <div class="container">
-    <a href="#ueberblick">Überblick</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -474,7 +495,8 @@ function wlHas(sym) { return wlLoad().some(x => x.symbol === sym); }
 function wlSnap(d) {
   return {symbol: d.symbol, name: d.name, exchange: d.exchange, currency: d.currency, price: d.price,
           label: d.rating.label, group: d.rating.group, score: d.rating.score, summary: d.summary.adjective,
-          perf_1m: d.facts?.perf_1m ?? null, upside: d.facts?.upside ?? null, updated: new Date().toISOString()};
+          perf_1m: d.facts?.perf_1m ?? null, upside: d.facts?.upside ?? null, updated: new Date().toISOString(),
+          next_event: (d.events || [])[0] || null};
 }
 function wlUpsert(d) {
   const l = wlLoad(), i = l.findIndex(x => x.symbol === d.symbol);
@@ -516,11 +538,18 @@ function wlSorted() {
   }[wlSort];
   return wlSort === "added" ? l : [...l].sort(by);
 }
+function wlEvent(x) {
+  const e = x.next_event;
+  if (!e) return "";
+  const days = Math.round((new Date(e.date + "T12:00:00") - new Date().setHours(12, 0, 0, 0)) / 86400000);
+  if (days < 0 || days > 45) return "";
+  return `<span class="wl-ev ${days <= 7 ? "soon" : ""}">📅 ${esc(e.label)} ${evWhen(days)}${e.estimated ? " (geschätzt)" : ""}</span>`;
+}
 function wlRow(x) {
   const t = groupTone[x.group] || "";
   const busy = wlBusy.has(x.symbol);
   return `<div class="wl-row" data-s="${esc(x.symbol)}">
-    <div class="wl-name"><b>${esc(x.name || x.symbol)}</b><small>${esc(x.symbol)}${x.exchange ? " · " + esc(x.exchange) : ""}</small></div>
+    <div class="wl-name"><b>${esc(x.name || x.symbol)}</b><small>${esc(x.symbol)}${x.exchange ? " · " + esc(x.exchange) : ""}</small>${wlEvent(x)}</div>
     <div class="wl-price num m-hide">${x.price != null ? nf(x.price) + " " + esc(x.currency || "") : "–"}
       <small style="color:${x.perf_1m == null ? "var(--text-3)" : x.perf_1m >= 0 ? "var(--pos)" : "var(--neg)"}">${x.perf_1m != null ? pc(x.perf_1m, 1, true) + " 1M" : ""}</small></div>
     <div class="wl-rating">${busy ? `<span class="wl-busy"></span>` : x.label ? `<span class="tone ${t}">${esc(x.label)}</span>` : `<span class="stamp">–</span>`}</div>
@@ -646,6 +675,7 @@ function alertSummary(a, cur) {
   if (a.above) parts.push(`über ${nf(a.above)} ${c}`);
   if (a.move) parts.push(`±${nf(a.move, 1)} % am Tag`);
   if (a.rating) parts.push("Empfehlungswechsel");
+  if (a.events) parts.push("Termin-Erinnerung");
   return parts.join(" · ");
 }
 function bellBtn(sym) {
@@ -678,6 +708,8 @@ async function openAlert(sym, d) {
       <small>Höchstens eine Meldung pro Tag, gemessen am Schlusskurs des Vortags.</small></div>
     <label class="check"><input type="checkbox" id="a-rating" ${a.rating ? "checked" : ""}>
       <span>Bei Änderung der Empfehlung benachrichtigen<br><small style="color:var(--text-3)">z. B. von „Hold“ auf „Buy“ – wird zweimal täglich geprüft.</small></span></label>
+    <label class="check"><input type="checkbox" id="a-events" ${a.events ? "checked" : ""}>
+      <span>An Termine erinnern<br><small style="color:var(--text-3)">Quartalszahlen, Ex-Dividende, Hauptversammlung – Push am Vortag.</small></span></label>
     <div class="modal-actions">
       ${ALERTS?.alerts?.[sym] ? `<button class="btn danger" id="a-del">Alarm löschen</button>` : ""}
       <button class="btn" id="a-cancel">Abbrechen</button>
@@ -691,12 +723,13 @@ async function openAlert(sym, d) {
   const save = async payload => {
     try {
       ALERTS = await api("/api/alerts", payload);
-      closeModal(); toast(payload.below || payload.above || payload.move || payload.rating ? "Preisalarm gespeichert" : "Preisalarm gelöscht");
+      closeModal(); toast(payload.below || payload.above || payload.move || payload.rating || payload.events ? "Alarm gespeichert" : "Alarm gelöscht");
       if (wlView) renderWl(); else { const b = $("#alertbtn"); if (b) b.classList.toggle("on", !!ALERTS.alerts[sym]); }
     } catch (e) { if (e.message !== "login") toast("Speichern fehlgeschlagen: " + e.message); }
   };
   $("#a-save").onclick = () => save({symbol: sym, name: info.name, currency: info.currency, label: info.label,
-    below: $("#a-below").value, above: $("#a-above").value, move: $("#a-move").value, rating: $("#a-rating").checked});
+    below: $("#a-below").value, above: $("#a-above").value, move: $("#a-move").value, rating: $("#a-rating").checked,
+    events: $("#a-events").checked});
   const del = $("#a-del"); if (del) del.onclick = () => save({symbol: sym});
   setTimeout(() => $("#a-below").focus(), 50);
 }
@@ -989,6 +1022,31 @@ function initChart(sym) {
   loadChart(CHART.range);
 }
 
+/* Termine */
+const EV_DOT = {earnings: "earnings", exdiv: "exdiv", pay: "pay", agm: "agm"};
+function evWhen(days) {
+  return days <= 0 ? "heute" : days === 1 ? "morgen" : days < 14 ? `in ${days} Tagen`
+    : days < 60 ? `in ${Math.round(days / 7)} Wochen` : `in ${Math.round(days / 30)} Monaten`;
+}
+function eventsCard(d) {
+  const ev = d.events || [];
+  const icsUrl = `/api/ics?q=${encodeURIComponent(d.symbol)}&name=${encodeURIComponent(d.name)}`;
+  return `<section class="card ev-card" id="termine" aria-label="Termine">
+    <div class="ev-head"><div><div class="eyebrow">Termine</div><h3>Nächste Ereignisse</h3></div>
+      ${ev.length ? `<a class="btn" href="${icsUrl}" download>In Kalender übernehmen</a>` : ""}</div>
+    ${ev.length ? `<ul class="ev-list">${ev.map(e => {
+      const dt = new Date(e.date + "T12:00:00");
+      return `<li class="ev-item">
+        <div class="ev-date"><span>${dt.toLocaleDateString("de-DE", {month: "short"}).replace(".", "")}</span><b>${dt.getDate()}</b><span>${dt.toLocaleDateString("de-DE", {weekday: "short"}).replace(".", "")}</span></div>
+        <div><div class="ev-title"><span class="dot ${EV_DOT[e.type] || ""}"></span>${esc(e.label)}${e.estimated ? `<span class="ev-est">geschätzt</span>` : ""}</div>
+          <div class="ev-sub">${esc(dt.toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}))}${e.detail ? " · " + esc(e.detail) : ""}</div></div>
+        <div class="ev-when ${e.days <= 7 ? "soon" : ""}">${evWhen(e.days)}</div></li>`;
+    }).join("")}</ul>
+    <div class="ev-foot">„Geschätzt“: aus dem Vorjahr bzw. Zahlungsrhythmus abgeleitet – der offizielle Termin kann abweichen. Erinnerung per Push über die Glocke (Preisalarm) einstellbar.</div>`
+    : `<div class="empty">Für diese Aktie sind keine Termine bekannt.</div>`}
+  </section>`;
+}
+
 /* Render */
 function render(d) {
   const R = d.rating, F = d.facts || {}, N = d.news;
@@ -1060,6 +1118,8 @@ function render(d) {
     <div class="chart-wrap" id="ch-wrap"><div class="chart-msg">Lade Kursverlauf …</div></div>
     <div class="chart-foot" id="ch-foot"></div>
   </section>
+
+  ${eventsCard(d)}
 
   <dl class="card facts" style="margin-bottom:0">
     ${[["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["KGV", nf(F.pe, 1), F.fpe ? `fwd ${nf(F.fpe, 1)}` : ""],
