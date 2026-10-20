@@ -236,7 +236,9 @@ def search_symbols(q):
         if it.get("quoteType") == "EQUITY" and it.get("symbol"):
             out.append({"symbol": it["symbol"],
                         "name": (it.get("longname") or it.get("shortname") or it["symbol"]).strip(),
-                        "exchange": it.get("exchDisp") or it.get("exchange", "")})
+                        "exchange": it.get("exchDisp") or it.get("exchange", ""),
+                        "sector": it.get("sectorDisp") or it.get("sector") or "",
+                        "industry": (it.get("industryDisp") or it.get("industry") or "").replace("�", " - ")})
     return out
 
 
@@ -244,15 +246,126 @@ def current_price(info):
     return num(info.get("currentPrice")) or num(info.get("regularMarketPrice")) or num(info.get("previousClose"))
 
 
+def ttm(q_df, a_df, *names, flow=True):
+    """TTM-Wert: Summe der letzten 4 Quartale (Fluss) bzw. letzter Stand (Bestand); sonst Jahreswert."""
+    q = [v for v in row(q_df, *names)[:4] if v is not None]
+    if flow and len(q) == 4:
+        return sum(q)
+    if not flow and q:
+        return q[0]
+    return first(row(a_df, *names))
+
+
+def fill_info(t, info, hint=None):
+    """Ergänzt fehlende Yahoo-'info'-Felder aus Kursverlauf und Geschäftsberichten.
+
+    Yahoo sperrt die info-Schnittstelle für manche Server (z. B. Cloud-Hoster); Kurse und
+    Finanzberichte kommen über andere Endpunkte meist trotzdem an."""
+    info = dict(info or {})
+    if os.environ.get("FORCE_FALLBACK"):
+        info = {}
+    if current_price(info) and info.get("marketCap"):
+        return info
+    hint = hint or {}
+    info["_fallback"] = True
+
+    def put(key, val):
+        if info.get(key) is None and val is not None:
+            info[key] = val
+
+    fi = safe(lambda: t.fast_info)
+    hist = safe(lambda: t.history(period="1y", auto_adjust=False))
+    price = num(safe(lambda: fi.last_price)) or (float(hist["Close"].iloc[-1]) if hist is not None and len(hist) else None)
+    put("currentPrice", price)
+    put("currency", safe(lambda: fi.currency))
+    put("marketCap", num(safe(lambda: fi.market_cap)))
+    put("longName", hint.get("name"))
+    put("shortName", hint.get("name"))
+    put("sector", hint.get("sector") or None)
+    put("industry", hint.get("industry") or None)
+    put("fullExchangeName", hint.get("exchange") or safe(lambda: fi.exchange))
+    put("quoteType", "EQUITY")
+
+    inc, qinc = safe(lambda: t.income_stmt), safe(lambda: t.quarterly_income_stmt)
+    cf, qcf = safe(lambda: t.cashflow), safe(lambda: t.quarterly_cashflow)
+    bs, qbs = safe(lambda: t.balance_sheet), safe(lambda: t.quarterly_balance_sheet)
+    rev = ttm(qinc, inc, "Total Revenue")
+    ni = ttm(qinc, inc, "Net Income")
+    op = ttm(qinc, inc, "Operating Income")
+    gp = ttm(qinc, inc, "Gross Profit")
+    ebitda = ttm(qinc, inc, "EBITDA", "Normalized EBITDA")
+    eps = ttm(qinc, inc, "Diluted EPS", "Basic EPS")
+    fcf = ttm(qcf, cf, "Free Cash Flow")
+    debt = ttm(qbs, bs, "Total Debt", flow=False)
+    cash = ttm(qbs, bs, "Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", flow=False)
+    equity = ttm(qbs, bs, "Stockholders Equity", "Common Stock Equity", flow=False)
+    assets = ttm(qbs, bs, "Total Assets", flow=False)
+    divs_paid = ttm(qcf, cf, "Cash Dividends Paid", "Common Stock Dividend Paid")
+    mcap = info.get("marketCap")
+    if mcap is None and price:
+        shares = num(safe(lambda: fi.shares)) or ttm(qbs, bs, "Ordinary Shares Number", "Share Issued", flow=False)
+        mcap = price * shares if shares else None
+        put("marketCap", mcap)
+
+    put("totalRevenue", rev)
+    put("ebitda", ebitda)
+    put("freeCashflow", fcf)
+    put("totalDebt", debt)
+    put("totalCash", cash)
+    put("trailingEps", eps)
+    if rev:
+        put("profitMargins", ni / rev if ni is not None else None)
+        put("operatingMargins", op / rev if op is not None else None)
+        put("grossMargins", gp / rev if gp is not None else None)
+    if equity and equity > 0 and ni is not None:
+        put("returnOnEquity", ni / equity)
+    if assets and ni is not None:
+        put("returnOnAssets", ni / assets)
+    if price and eps and eps > 0:
+        put("trailingPE", price / eps)
+    if mcap:
+        ev = mcap + (debt or 0) - (cash or 0)
+        put("enterpriseValue", ev)
+        if ebitda and ebitda > 0:
+            put("enterpriseToEbitda", ev / ebitda)
+        if equity and equity > 0:
+            put("priceToBook", mcap / equity)
+        if rev:
+            put("priceToSalesTrailing12Months", mcap / rev)
+    if divs_paid is not None and ni and ni > 0:
+        put("payoutRatio", abs(divs_paid) / ni)
+    # Wachstum: letztes Quartal ggü. Vorjahresquartal
+    qr, qn = row(qinc, "Total Revenue"), row(qinc, "Net Income")
+    if len(qr) >= 5 and qr[0] and qr[4]:
+        put("revenueGrowth", qr[0] / qr[4] - 1)
+    if len(qn) >= 5 and qn[0] and qn[4] and qn[4] > 0:
+        put("earningsGrowth", qn[0] / qn[4] - 1)
+    # Beta ggü. S&P 500 (1 Jahr, Tagesrenditen)
+    if hist is not None and len(hist) > 100:
+        idx = safe(lambda: yf.Ticker("^GSPC").history(period="1y")["Close"])
+        if idx is not None and len(idx) > 100:
+            def norm(series):
+                r = series.pct_change()
+                r.index = (r.index.tz_localize(None) if r.index.tz is not None else r.index).normalize()
+                return r
+            j = norm(hist["Close"]).to_frame("a").join(norm(idx).to_frame("b"), how="inner").dropna()
+            if len(j) > 60 and j["b"].var() > 0:
+                put("beta", float(j["a"].cov(j["b"]) / j["b"].var()))
+    return info
+
+
 def resolve(query):
     q = query.strip()
-    alternatives = []
     if re.fullmatch(r"[A-Za-z0-9.\-^=]{1,15}", q):
-        t = yf.Ticker(q.upper())
+        sym = q.upper()
+        t = yf.Ticker(sym)
         info = safe(lambda: t.info, {}) or {}
+        found = search_symbols(info.get("longName") or q)
+        hint = next((a for a in found if a["symbol"] == sym), None)
+        if current_price(info) or hint:
+            info = fill_info(t, info, hint)
         if current_price(info) and info.get("quoteType", "EQUITY") == "EQUITY":
-            alternatives = [a for a in search_symbols(info.get("longName") or q) if a["symbol"] != q.upper()][:6]
-            return q.upper(), t, info, alternatives
+            return sym, t, info, [a for a in found if a["symbol"] != sym][:6]
     found = search_symbols(q)
     if not found:
         raise ValueError(f"Keine Aktie zu „{q}“ gefunden.")
@@ -261,7 +374,7 @@ def resolve(query):
                else 1 if a["name"].lower().startswith(ql) else 2)  # stabil: Yahoo-Reihenfolge bleibt sonst erhalten
     for cand in found[:3]:
         t = yf.Ticker(cand["symbol"])
-        info = safe(lambda: t.info, {}) or {}
+        info = fill_info(t, safe(lambda: t.info, {}) or {}, cand)
         if current_price(info):
             return cand["symbol"], t, info, [a for a in found if a["symbol"] != cand["symbol"]][:6]
     raise ValueError(f"Keine Kursdaten zu „{q}“ verfügbar.")
@@ -990,7 +1103,21 @@ def score_sentiment(m, news, val_score):
     tot = sum(dist.values()) or 1
     rating_split = dist and (dist.get("sell", 0) + dist.get("strongSell", 0)) / tot > 0.15 and \
         (dist.get("buy", 0) + dist.get("strongBuy", 0)) / tot > 0.4
-    if cnt >= 25 and (rm or 3) <= 1.9 and (val_score or 0) < -0.3:
+    if not rm:  # keine Analystendaten verfügbar -> nur News-basiert
+        n = ns or 0
+        if cnt < 8:
+            adj = "übersehen" if (val_score or 0) > 0.15 else "vernachlässigt"
+        elif split:
+            adj = "umstritten"
+        elif n >= 0.08 and cnt >= 15:
+            adj = "gefragt"
+        elif n >= 0.03:
+            adj = "beliebt"
+        elif n <= -0.08:
+            adj = "unbeliebt"
+        else:
+            adj = "umstritten"
+    elif cnt >= 25 and (rm or 3) <= 1.9 and (val_score or 0) < -0.3:
         adj = "gehypt"
     elif na < 5 and cnt < 8:
         adj = "übersehen" if (val_score or 0) > 0.15 else "vernachlässigt"
@@ -1165,6 +1292,9 @@ def analyze(query):
     if qs is not None and qs <= -0.5 and total > 14:
         total = 14
         notes.append("Deckel: Unternehmensqualität zu schwach für eine Kaufempfehlung.")
+    if info.get("_fallback"):
+        notes.append("Eingeschränkter Datenmodus: Yahoo liefert diesem Server keine Kennzahlen-Übersicht. "
+                     "Kennzahlen wurden aus den Geschäftsberichten berechnet; Analystenkonsens und Kursziele fehlen.")
     label, group = map_rating(total)
     s_adj = summary_adj(total, cats)
 
@@ -1261,6 +1391,8 @@ class Handler(BaseHTTPRequestHandler):
                 "info": lambda: str(current_price(yf.Ticker(sym).info)),
                 "history": lambda: str(len(yf.Ticker(sym).history(period="5d"))),
                 "search": lambda: str(len(search_symbols(sym))),
+                "statements": lambda: str(len(yf.Ticker(sym).quarterly_income_stmt.columns)),
+                "fast_info": lambda: str(yf.Ticker(sym).fast_info.market_cap),
                 "google_news": lambda: str(len(google_news(sym, "en"))),
             }
             out = {}
