@@ -1766,7 +1766,9 @@ def analyze(query):
 # Preisalarme mit Push über ntfy (https://ntfy.sh)
 # ---------------------------------------------------------------------------
 ALERT_FILE = Path(__file__).with_name("alerts.json")
-GIST_DESCRIPTION = "aktien-check-alerts (automatisch verwaltet)"
+GIST_DESCRIPTION = "aktien-check-alerts (automatisch verwaltet)"   # alter, unverschlüsselter Speicher
+GIST_DESCRIPTION_ENC = "aktien-check-data (verschlüsselt, automatisch verwaltet)"
+ENC_MARK = "fernet-v1"
 CHECK_INTERVAL = 600          # Sekunden zwischen Kursprüfungen
 RATING_INTERVAL = 12 * 3600   # Empfehlungswechsel höchstens alle 12 Std. prüfen (volle Analyse)
 
@@ -1785,15 +1787,55 @@ def gh_api(method, path, body=None):
         return json.loads(r.read() or b"null")
 
 
+def store_key():
+    """Schlüssel aus STORE_KEY (mind. 16 Zeichen). Ohne Schlüssel wird unverschlüsselt gespeichert."""
+    raw = (os.environ.get("STORE_KEY") or "").strip()
+    if len(raw) < 16:
+        return None
+    import base64
+    return base64.urlsafe_b64encode(hashlib.sha256(("aktien-check-store|" + raw).encode("utf-8")).digest())
+
+
+def encrypt_text(text, key):
+    from cryptography.fernet import Fernet
+    return json.dumps({"enc": ENC_MARK, "data": Fernet(key).encrypt(text.encode("utf-8")).decode("ascii")})
+
+
+def decrypt_text(text, key):
+    """Gibt (Klartext, war_verschlüsselt) zurück. Wirft ValueError bei fehlendem/falschem Schlüssel."""
+    try:
+        obj = json.loads(text or "{}")
+    except ValueError:
+        obj = None
+    if not (isinstance(obj, dict) and obj.get("enc") == ENC_MARK):
+        return text or "{}", False
+    if not key:
+        raise ValueError("Speicher ist verschlüsselt, aber STORE_KEY fehlt")
+    from cryptography.fernet import Fernet, InvalidToken
+    try:
+        return Fernet(key).decrypt(obj["data"].encode("ascii")).decode("utf-8"), True
+    except InvalidToken:
+        raise ValueError("STORE_KEY passt nicht zum gespeicherten Datenbestand")
+
+
 class AlertStore:
-    """Speichert Alarme dauerhaft: privates GitHub-Gist (wenn GITHUB_TOKEN gesetzt) oder lokale Datei."""
+    """Dauerhafter Speicher: privates GitHub-Gist (wenn GITHUB_TOKEN gesetzt) oder lokale Datei.
+
+    Mit STORE_KEY wird der Inhalt verschlüsselt (Fernet/AES). Beim ersten Start mit Schlüssel wird ein neues,
+    verschlüsseltes Gist angelegt und erst nach erfolgreicher Kontrolle das alte Klartext-Gist samt Versionsverlauf
+    gelöscht. Konnte der Speicher nicht gelesen werden, ist Schreiben gesperrt (kein Überschreiben mit leeren Daten).
+    """
 
     def __init__(self):
         self.lock = threading.RLock()
         self.data = None
         self.gist_id = None
+        self.plain_gist_id = None   # altes, unverschlüsseltes Gist (wird nach Migration gelöscht)
         self.error = ""
-        self.dirty = False  # ungespeicherte Änderungen (Verlauf wird gebündelt geschrieben)
+        self.dirty = False          # ungespeicherte Änderungen (Verlauf wird gebündelt geschrieben)
+        self.locked = False         # Schreiben gesperrt, weil Lesen fehlgeschlagen ist
+        self.loaded_at = 0
+        self.encrypted = False      # aktueller Bestand liegt verschlüsselt vor
 
     @property
     def backend(self):
@@ -1804,30 +1846,53 @@ class AlertStore:
         # Auf Render ist das Dateisystem flüchtig -> nur das Gist ist dauerhaft
         return self.backend == "gist" or "RENDER" not in os.environ
 
-    def _find_gist(self):
+    def _find_gists(self):
+        found = {}
         for page in range(1, 4):
-            for g in gh_api("GET", f"/gists?per_page=100&page={page}") or []:
-                if g.get("description") == GIST_DESCRIPTION:
-                    return g["id"]
-        return None
+            batch = gh_api("GET", f"/gists?per_page=100&page={page}") or []
+            for g in batch:
+                if g.get("description") in (GIST_DESCRIPTION, GIST_DESCRIPTION_ENC):
+                    found.setdefault(g["description"], g["id"])
+            if len(batch) < 100:
+                break
+        return found.get(GIST_DESCRIPTION_ENC), found.get(GIST_DESCRIPTION)
+
+    def _read_gist(self, gid):
+        g = gh_api("GET", f"/gists/{gid}")
+        f = g["files"]["alerts.json"]
+        if f.get("truncated"):  # große Dateien liefert die API nur gekürzt -> Rohdaten nachladen
+            req = urllib.request.Request(f["raw_url"], headers={"Authorization": f"Bearer {github_token()}",
+                                                                "User-Agent": "aktien-check"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.read().decode("utf-8")
+        return f["content"]
 
     def load(self):
         with self.lock:
-            if self.data is not None:
+            if self.data is not None and not (self.locked and time.time() - self.loaded_at > 60):
                 return self.data
-            data = {}
+            data, key = {}, store_key()
+            self.loaded_at = time.time()
             try:
+                raw = None
                 if self.backend == "gist":
-                    self.gist_id = self._find_gist()
-                    if self.gist_id:
-                        g = gh_api("GET", f"/gists/{self.gist_id}")
-                        data = json.loads(g["files"]["alerts.json"]["content"] or "{}")
+                    enc_id, plain_id = self._find_gists()
+                    if enc_id:
+                        self.gist_id, raw = enc_id, self._read_gist(enc_id)
+                        self.plain_gist_id = plain_id  # Rest einer abgebrochenen Migration
+                    elif plain_id:
+                        self.gist_id, raw = plain_id, self._read_gist(plain_id)
+                        self.plain_gist_id = plain_id
                 elif ALERT_FILE.exists():
-                    data = json.loads(ALERT_FILE.read_text(encoding="utf-8") or "{}")
-                self.error = ""
+                    raw = ALERT_FILE.read_text(encoding="utf-8")
+                text, self.encrypted = decrypt_text(raw, key) if raw is not None else ("{}", False)
+                data = json.loads(text or "{}")
+                self.locked, self.error = False, ""
             except Exception as e:
-                self.error = f"Speicher nicht lesbar: {type(e).__name__}"
-                data = {}
+                self.locked = True
+                self.error = (str(e) if isinstance(e, ValueError) else f"Speicher nicht lesbar: {type(e).__name__}") \
+                    + " – Änderungen werden nicht gespeichert."
+                data = self.data or {}
             data.setdefault("users", {})
             data.setdefault("u", {})
             data.setdefault("last_check", None)
@@ -1838,24 +1903,48 @@ class AlertStore:
                     sp.setdefault("topic", data.pop("topic"))
                 sp.setdefault("history", data.pop("history", {}))
             self.data = data
+            # Mit Schlüssel, aber noch Klartext gespeichert -> sofort verschlüsselt umziehen
+            if not self.locked and key and (not self.encrypted or self.plain_gist_id):
+                self.save()
             return data
 
     def save(self):
         with self.lock:
+            if self.data is None or self.locked:
+                return
             self.dirty = False
+            key = store_key()
             content = json.dumps(self.data, ensure_ascii=False, separators=(",", ":"))
+            stored = encrypt_text(content, key) if key else content
             try:
                 if self.backend == "gist":
-                    files = {"alerts.json": {"content": content}}
-                    if self.gist_id:
+                    files = {"alerts.json": {"content": stored}}
+                    if key and (not self.gist_id or self.gist_id == self.plain_gist_id):
+                        # neues verschlüsseltes Gist anlegen und kontrollieren, dann Klartext-Gist löschen
+                        g = gh_api("POST", "/gists", {"description": GIST_DESCRIPTION_ENC, "public": False, "files": files})
+                        check, _ = decrypt_text(self._read_gist(g["id"]), key)
+                        if json.loads(check) != json.loads(content):
+                            raise RuntimeError("Kontrolle des verschlüsselten Speichers fehlgeschlagen")
+                        old, self.gist_id = self.plain_gist_id, g["id"]
+                        if old:
+                            gh_api("DELETE", f"/gists/{old}")
+                            self.plain_gist_id = None
+                    elif key and self.plain_gist_id:
+                        gh_api("PATCH", f"/gists/{self.gist_id}", {"files": files})
+                        gh_api("DELETE", f"/gists/{self.plain_gist_id}")
+                        self.plain_gist_id = None
+                    elif self.gist_id:
                         gh_api("PATCH", f"/gists/{self.gist_id}", {"files": files})
                     else:
                         g = gh_api("POST", "/gists", {"description": GIST_DESCRIPTION, "public": False, "files": files})
                         self.gist_id = g["id"]
+                        self.plain_gist_id = g["id"]
                 else:
-                    ALERT_FILE.write_text(content, encoding="utf-8")
+                    ALERT_FILE.write_text(stored, encoding="utf-8")
+                self.encrypted = bool(key)
                 self.error = ""
             except Exception as e:
+                self.dirty = True
                 self.error = f"Speichern fehlgeschlagen: {type(e).__name__}"
 
 
@@ -2080,6 +2169,7 @@ def alerts_payload(user, host_url=""):
     base = host_url or app_base_url()
     return {"alerts": sp["alerts"], "topic": sp["topic"], "last_check": data.get("last_check"), "user": user,
             "storage": STORE.backend, "persistent": STORE.persistent, "error": STORE.error,
+            "encrypted": STORE.encrypted,
             "hosted": "RENDER" in os.environ,
             "cron_url": f"{base}/api/cron?key={cron_key()}" if app_password() else ""}
 

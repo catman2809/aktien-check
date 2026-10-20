@@ -44,6 +44,17 @@ Der kostenlose Tarif deckt vor allem US-Börsen ab. Für deutsche Aktien nimmt d
 die US-Notierung desselben Unternehmens (z. B. SAP statt SAP.DE). Kursziele sind teils nur im
 Bezahltarif enthalten – dann fehlen sie, die Analystenempfehlungen kommen trotzdem.
 
+## 4. Gespeicherte Daten verschlüsseln (STORE_KEY)
+Benutzer, Watchlists, Alarme und ntfy-Themen liegen im GitHub-Gist. Mit `STORE_KEY` werden sie verschlüsselt.
+1. Einen zufälligen Schlüssel erzeugen (mind. 16 Zeichen), z. B. am PC in der Eingabeaufforderung:
+   `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. Den Schlüssel **im Passwort-Manager sichern** – ohne ihn sind die Daten nicht wiederherstellbar.
+3. Render → Environment → `STORE_KEY` = Schlüssel → Save, rebuild, and deploy.
+
+Beim nächsten Start legt das Programm ein neues, verschlüsseltes Gist an, prüft es und löscht danach das alte
+unverschlüsselte Gist (inklusive dessen Versionsverlauf). In der Watchlist steht dann „GitHub-Gist · verschlüsselt 🔒“.
+`STORE_KEY` nie ändern oder löschen – sonst sperrt sich der Speicher (es wird dann nichts überschrieben).
+
 ## Gut zu wissen
 - **Kostenloser Tarif schläft** nach ca. 15 Minuten ohne Nutzung ein. Der erste Aufruf danach
   dauert 30–60 Sekunden, danach läuft es normal.

@@ -1,1 +1,2 @@
 yfinance>=0.2.50
+cryptography>=42

@@ -834,7 +834,9 @@ function renderPush() {
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
       <div><h3>Preisalarme & Push-Benachrichtigungen</h3>
         <div class="stamp">Letzte Prüfung: ${A.last_check ? ago(new Date(A.last_check * 1000).toISOString()) : "noch keine"} · ${list.length} ${list.length === 1 ? "Alarm" : "Alarme"} aktiv</div></div>
-      <span class="status ${A.persistent ? "ok" : "warn"}">${A.persistent ? (A.storage === "gist" ? "Gespeichert in GitHub-Gist" : "Lokal gespeichert") : "Nicht dauerhaft gespeichert"}</span>
+      <span class="status ${A.persistent && (A.encrypted || !A.hosted) ? "ok" : "warn"}">${A.persistent
+        ? (A.storage === "gist" ? "GitHub-Gist" : "Lokal gespeichert") + (A.encrypted ? " · verschlüsselt 🔒" : A.hosted ? " · unverschlüsselt" : "")
+        : "Nicht dauerhaft gespeichert"}</span>
     </div>
     ${A.error ? `<div class="note" style="margin-top:12px">${esc(A.error)}</div>` : ""}
     ${list.length ? `<div class="alert-list">${list.map(([sym, a]) => `<div class="alert-item">
