@@ -1154,7 +1154,7 @@ function drawChart() {
   const priceV = pct ? P.map(p => p[1] / P[0][1] - 1) : P.map(p => p[1]);
   const trV = pct ? D.adj.map(a => a / D.adj[0] - 1) : null;
   const W = wrap.clientWidth, H = wrap.clientHeight;
-  const m = {l: 4, r: 58, t: 10, b: 26};
+  const m = {l: 4, r: 66, t: 10, b: 26};
   const pw = W - m.l - m.r;
   const volH = showVol ? Math.round((H - m.t - m.b) * 0.2) : 0, gap = showVol ? 10 : 0;
   const ph = H - m.t - m.b - volH - gap;
@@ -1180,7 +1180,18 @@ function drawChart() {
     const hgt = (v / vMax) * volH;
     return `<rect data-i="${i}" x="${(X(i) - bw / 2).toFixed(1)}" y="${(vTop + volH - hgt).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, hgt).toFixed(1)}"/>`;
   }).join("") : "";
-  const endLabel = (arr, color, txt) => { const i = lastIdx(arr); if (i < 0) return "";
+  // Prozent-Markierung am Kurvenende (Veränderung im gewählten Zeitraum)
+  const endChg = pct ? trV[n - 1] : (D.base ? P[n - 1][1] / D.base - 1 : P[n - 1][1] / P[0][1] - 1);
+  const pillY = Math.min(m.t + ph - 10, Math.max(m.t + 10, Y(mainV[n - 1])));
+  const pillCol = endChg >= 0 ? "var(--pos)" : "var(--neg)";
+  const pillTxt = `${endChg > 0 ? "+" : ""}${nf(endChg * 100, Math.abs(endChg) < 0.1 ? 2 : Math.abs(endChg) < 10 ? 1 : 0)} %`;
+  const pill = `<g class="endpill" aria-hidden="true">
+      <line x1="${X(n - 1).toFixed(1)}" x2="${(m.l + pw + 3).toFixed(1)}" y1="${pillY.toFixed(1)}" y2="${pillY.toFixed(1)}" stroke="${pillCol}" stroke-width="1" stroke-dasharray="2 2"/>
+      <rect x="${(m.l + pw + 3).toFixed(1)}" y="${(pillY - 10).toFixed(1)}" width="${m.r - 5}" height="20" rx="6" fill="${pillCol}"/>
+      <text x="${(m.l + pw + 3 + (m.r - 5) / 2).toFixed(1)}" y="${(pillY + 4).toFixed(1)}" text-anchor="middle" fill="var(--surface)"
+        style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">${pillTxt}</text></g>`;
+  const nearPill = y => Math.abs(y - pillY) < 14;
+  const endLabel = (arr, color, txt) => { const i = lastIdx(arr); if (i < 0 || nearPill(Y(arr[i]))) return "";
     return `<text class="endlbl" x="${(X(i) + 4).toFixed(1)}" y="${(Y(arr[i]) + 3.5).toFixed(1)}" fill="${color}">${txt}</text>`; };
   const line = path(mainV);
   const area = `${line}L${X(n - 1).toFixed(1)},${(m.t + ph).toFixed(1)}L${X(0).toFixed(1)},${(m.t + ph).toFixed(1)}Z`;
@@ -1204,7 +1215,7 @@ function drawChart() {
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="${col}" stop-opacity=".16"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
     <g class="grid">${ticks.map(t => `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/>`).join("")}</g>
-    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${tickTxt(t)}</text>`).join("")}
+    <g class="axis">${ticks.filter(t => !nearPill(Y(t))).map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${tickTxt(t)}</text>`).join("")}
       ${xIdx.map((i, k) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === xIdx.length - 1 ? "end" : "middle"}">${esc(fmtTime(P[i][0], D.range))}</text>`).join("")}</g>
     ${D.range === "1d" && D.base ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(D.base).toFixed(1)}" y2="${Y(D.base).toFixed(1)}"/>` : ""}
     ${pct ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ""}
@@ -1218,6 +1229,7 @@ function drawChart() {
     ${W > 480 && showS50 ? endLabel(D.sma50, "var(--sma50)", "50") : ""}
     ${W > 480 && showS200 ? endLabel(D.sma200, "var(--sma200)", "200") : ""}
     ${divIdx.map(i => `<circle class="divmark" cx="${X(i).toFixed(1)}" cy="${Y(markV(i)).toFixed(1)}" r="4.5"/>`).join("")}
+    ${pill}
     <g id="ch-hover" style="display:none"><line class="cross" id="ch-x" y1="${m.t}" y2="${m.t + ph + gap + volH}"/>
       <circle class="dot" id="ch-dot" r="5" fill="${col}"/></g>
     <rect id="ch-hit" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>
