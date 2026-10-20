@@ -1755,6 +1755,7 @@ def analyze(query):
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
     }
+    result["history"] = safe(lambda: record_history(result), []) or []
     CACHE[key] = (time.time(), result)
     return result
 
@@ -1793,6 +1794,7 @@ class AlertStore:
         self.data = None
         self.gist_id = None
         self.error = ""
+        self.dirty = False  # ungespeicherte Änderungen (Verlauf wird gebündelt geschrieben)
 
     @property
     def backend(self):
@@ -1835,7 +1837,8 @@ class AlertStore:
 
     def save(self):
         with self.lock:
-            content = json.dumps(self.data, ensure_ascii=False, indent=1)
+            self.dirty = False
+            content = json.dumps(self.data, ensure_ascii=False, separators=(",", ":"))
             try:
                 if self.backend == "gist":
                     files = {"alerts.json": {"content": content}}
@@ -1853,6 +1856,37 @@ class AlertStore:
 
 STORE = AlertStore()
 CHECK_LOCK = threading.Lock()
+HISTORY_MAX_POINTS = 250    # Tage je Aktie
+HISTORY_MAX_SYMBOLS = 60
+
+
+def record_history(res):
+    """Speichert Score/Empfehlung/Kurs der Analyse (ein Punkt pro Tag) und liefert den Verlauf zurück."""
+    data = STORE.load()
+    sym, today = res["symbol"], datetime.now().strftime("%Y-%m-%d")
+    entry = [today, round(res["rating"]["score"], 1), res["rating"]["label"],
+             round(res["price"], 4) if res.get("price") else None]
+    with STORE.lock:
+        hist = data.setdefault("history", {})
+        pts = hist.setdefault(sym, [])
+        if pts and pts[-1][0] == today:
+            pts[-1] = entry
+        else:
+            pts.append(entry)
+        del pts[:-HISTORY_MAX_POINTS]
+        if len(hist) > HISTORY_MAX_SYMBOLS:  # am längsten nicht analysierte Aktien zuerst verwerfen
+            for old in sorted(hist, key=lambda k: hist[k][-1][0] if hist[k] else "")[: len(hist) - HISTORY_MAX_SYMBOLS]:
+                if old != sym:
+                    hist.pop(old, None)
+        STORE.dirty = True
+        return [list(x) for x in pts]
+
+
+def history_flush_loop():
+    while True:
+        time.sleep(60)
+        if STORE.dirty:
+            safe(STORE.save)
 
 
 def app_base_url():
@@ -2328,6 +2362,7 @@ def main():
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         threading.Thread(target=alert_loop, daemon=True).start()
+        threading.Thread(target=history_flush_loop, daemon=True).start()
         srv.serve_forever()
     except KeyboardInterrupt:
         print("Beendet.")

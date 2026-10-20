@@ -383,6 +383,21 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-ev{display:block;font-size:11.5px;color:var(--text-3);margin-top:2px}
 .wl-ev.soon{color:var(--accent);font-weight:600}
 
+/* ---------- Verlauf der Empfehlung ---------- */
+.hist-card{margin-top:16px}
+.hist-body{padding:16px 20px}
+.hist-wrap{position:relative;height:200px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.hist-wrap svg{display:block;width:100%;height:100%;overflow:visible}
+.hist-wrap .zone-pos{fill:var(--pos-soft)} .hist-wrap .zone-neu{fill:var(--neu-soft)} .hist-wrap .zone-neg{fill:var(--neg-soft)}
+.hist-wrap .zlbl{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.hist-wrap .axis text{fill:var(--text-3);font-size:11px;font-variant-numeric:tabular-nums}
+.hist-wrap .hp{stroke:var(--surface);stroke-width:2}
+.hist-changes{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--border)}
+.hist-changes li{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13.5px;flex-wrap:wrap}
+.hist-changes .when{color:var(--text-3);font-size:12.5px}
+.hist-empty{color:var(--text-2);font-size:14px;line-height:1.6}
+.hist-empty b{color:var(--text)}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -434,7 +449,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 </header>
 <nav class="subnav" id="subnav">
   <div class="container">
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -1114,6 +1129,81 @@ function eventsCard(d) {
   </section>`;
 }
 
+/* Verlauf der Empfehlung */
+function historyCard(d) {
+  const H = d.history || [];
+  const changes = [];
+  for (let i = 1; i < H.length; i++) if (H[i][2] !== H[i - 1][2]) changes.push([H[i - 1], H[i]]);
+  const fmtD = s => new Date(s + "T12:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  const scoreTxt = v => (v > 0 ? "+" : "") + nf(v, 1);
+  let body;
+  if (H.length < 2) {
+    body = `<div class="hist-empty">Der Verlauf startet ${H.length ? `am <b>${fmtD(H[0][0])}</b> mit <b>${esc(H[0][2])}</b> (Score ${scoreTxt(H[0][1])})` : "mit dieser Analyse"}.
+      Jede weitere Analyse an einem anderen Tag fügt einen Punkt hinzu – auch „Alle aktualisieren“ in der Watchlist und die
+      automatischen Prüfungen eines Preisalarms mit „Empfehlungswechsel“. Der Verlauf ist auf allen deinen Geräten derselbe.</div>`;
+  } else {
+    const first = H[0], last = H[H.length - 1];
+    body = `<div class="kv" style="margin:0 0 10px">
+        <span>Seit ${fmtD(first[0])}: <b>${esc(first[2])} → ${esc(last[2])}</b></span>
+        <span>Score <b class="num">${scoreTxt(first[1])} → ${scoreTxt(last[1])}</b></span>
+        <span>${H.length} Analysetage · ${changes.length} ${changes.length === 1 ? "Wechsel" : "Wechsel"}</span></div>
+      <div class="hist-wrap" id="hist-wrap"></div>
+      ${changes.length ? `<ul class="hist-changes">${changes.slice(-6).reverse().map(([a, b]) => `<li>
+        <span><b>${esc(a[2])} → ${esc(b[2])}</b> <span class="stamp">Score ${scoreTxt(a[1])} → ${scoreTxt(b[1])}</span></span>
+        <span class="when">${fmtD(b[0])}${b[3] ? " · Kurs " + nf(b[3]) + " " + esc(d.currency) : ""}</span></li>`).join("")}</ul>` : ""}`;
+  }
+  return `<section class="card hist-card" id="verlauf" aria-label="Verlauf der Empfehlung">
+    <div class="ev-head"><div><div class="eyebrow">Verlauf</div><h3>Entwicklung der Empfehlung</h3></div></div>
+    <div class="hist-body">${body}</div></section>`;
+}
+function drawHistory(d) {
+  const wrap = $("#hist-wrap"); if (!wrap) return;
+  const H = d.history, n = H.length;
+  const W = wrap.clientWidth, Hh = wrap.clientHeight;
+  const m = {l: 4, r: 40, t: 6, b: 22};
+  const pw = W - m.l - m.r, ph = Hh - m.t - m.b;
+  const t0 = new Date(H[0][0]).getTime(), t1 = new Date(H[n - 1][0]).getTime() || t0 + 1;
+  const X = s => m.l + ((new Date(s).getTime() - t0) / Math.max(1, t1 - t0)) * pw;
+  const lo = Math.min(-40, ...H.map(h => h[1] - 8)), hi = Math.max(40, ...H.map(h => h[1] + 8));
+  const Y = v => m.t + (1 - (v - lo) / (hi - lo)) * ph;
+  const zone = (a, b, cls, lbl, col) => {
+    const y1 = Y(Math.min(hi, b)), y2 = Y(Math.max(lo, a));
+    return y2 - y1 > 2 ? `<rect class="${cls}" x="${m.l}" y="${y1.toFixed(1)}" width="${pw}" height="${(y2 - y1).toFixed(1)}"/>
+      ${y2 - y1 > 16 ? `<text class="zlbl" x="${m.l + 6}" y="${(y1 + 13).toFixed(1)}" fill="${col}">${lbl}</text>` : ""}` : "";
+  };
+  // Stufenlinie: Empfehlung gilt bis zur nächsten Analyse
+  let path = `M${X(H[0][0]).toFixed(1)},${Y(H[0][1]).toFixed(1)}`;
+  for (let i = 1; i < n; i++) path += `H${X(H[i][0]).toFixed(1)}V${Y(H[i][1]).toFixed(1)}`;
+  const tone = g => g >= 15 ? "var(--pos)" : g <= -15 ? "var(--neg)" : "var(--neu)";
+  const ticks = [-50, 0, 50].filter(v => v > lo && v < hi);
+  const fmtS = s => new Date(s + "T12:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit"});
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Score-Verlauf von ${nf(H[0][1], 1)} auf ${nf(H[n - 1][1], 1)}">
+    ${zone(15, 999, "zone-pos", "Kaufen", "var(--pos)")}${zone(-15, 15, "zone-neu", "Halten", "var(--neu)")}${zone(-999, -15, "zone-neg", "Verkaufen", "var(--neg)")}
+    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${t > 0 ? "+" : ""}${t}</text>`).join("")}
+      <text x="${m.l}" y="${Hh - 5}">${fmtS(H[0][0])}</text><text x="${m.l + pw}" y="${Hh - 5}" text-anchor="end">${fmtS(H[n - 1][0])}</text></g>
+    <path d="${path}" fill="none" stroke="var(--text)" stroke-width="2" stroke-linejoin="round"/>
+    ${H.map(h => `<circle class="hp" cx="${X(h[0]).toFixed(1)}" cy="${Y(h[1]).toFixed(1)}" r="${n > 60 ? 3 : 4.5}" fill="${tone(h[1])}"/>`).join("")}
+    <line id="hist-x" stroke="var(--text-3)" y1="${m.t}" y2="${m.t + ph}" style="display:none"/>
+    <rect id="hist-hit" x="${m.l}" y="0" width="${pw}" height="${Hh}" fill="transparent"/>
+  </svg><div class="chart-tip" id="hist-tip"></div>`;
+  const hit = $("#hist-hit"), tip = $("#hist-tip"), xl = $("#hist-x");
+  const move = e => {
+    const r = hit.getBoundingClientRect(), x = e.clientX - r.left + m.l;
+    let best = 0;
+    H.forEach((h, i) => { if (Math.abs(X(h[0]) - x) < Math.abs(X(H[best][0]) - x)) best = i; });
+    const h = H[best], px = X(h[0]);
+    xl.setAttribute("x1", px); xl.setAttribute("x2", px); xl.style.display = "";
+    tip.innerHTML = `<b>${esc(h[2])} · Score ${(h[1] > 0 ? "+" : "") + nf(h[1], 1)}</b><span>${new Date(h[0] + "T12:00:00").toLocaleDateString("de-DE")}${h[3] ? " · Kurs " + nf(h[3]) + " " + esc(d.currency) : ""}</span>`;
+    tip.style.display = "block";
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(W - tw, px - tw / 2)) + "px";
+    tip.style.top = Math.max(0, Y(h[1]) - tip.offsetHeight - 12) + "px";
+  };
+  const leave = () => { tip.style.display = "none"; xl.style.display = "none"; };
+  hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
+  hit.addEventListener("pointerleave", leave); hit.addEventListener("pointercancel", leave);
+}
+
 /* Render */
 function render(d) {
   const R = d.rating, F = d.facts || {}, N = d.news;
@@ -1192,6 +1282,7 @@ function render(d) {
   </section>
 
   ${eventsCard(d)}
+  ${historyCard(d)}
 
   <dl class="card facts" style="margin-bottom:0">
     ${[["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["KGV", nf(F.pe, 1), F.fpe ? `fwd ${nf(F.fpe, 1)}` : ""],
@@ -1291,6 +1382,11 @@ function render(d) {
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
+  if ((d.history || []).length >= 2) {
+    drawHistory(d);
+    let lastW = 0;
+    new ResizeObserver(() => { const w = $("#hist-wrap")?.clientWidth; if (w && w !== lastW) { lastW = w; drawHistory(d); } }).observe($("#hist-wrap"));
+  }
   $("#alertbtn").onclick = () => openAlert(d.symbol, d);
   const wt = $("#wltoggle");
   wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
