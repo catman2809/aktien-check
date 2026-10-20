@@ -100,7 +100,9 @@ TIER_DOMAINS = {
         "morningstar.de", "fortune.com", "forbes.com", "businessinsider.com", "businessinsider.de",
         "spiegel.de", "zeit.de", "sueddeutsche.de", "boersen-zeitung.de", "deraktionaer.de", "fool.com",
         "fool.de", "techcrunch.com", "theverge.com", "theinformation.com", "axios.com", "washingtonpost.com",
-        "welt.de", "capital.de", "investors.com", "zacks.com", "benzinga.com", "thestreet.com"],
+        "welt.de", "capital.de", "investors.com", "zacks.com", "benzinga.com", "thestreet.com",
+        "coindesk.com", "theblock.co", "cointelegraph.com", "decrypt.co", "blockworks.co", "btc-echo.de",
+        "bitcoinmagazine.com", "dlnews.com"],
     3: ["businesswire.com", "prnewswire.com", "globenewswire.com", "accesswire.com", "newsfilecorp.com",
         "eqs-news.com", "dgap.de", "pressetext.com", "openai.com", "deepmind.google", "blog.google",
         "anthropic.com", "newsroom", "investor", "ir."],
@@ -240,7 +242,7 @@ def domain_of(url):
 # ---------------------------------------------------------------------------
 # Symbol-Suche
 # ---------------------------------------------------------------------------
-def search_symbols(q):
+def search_symbols(q, include_crypto=False):
     out = []
     res = safe(lambda: yf.Search(q, max_results=10, news_count=0).quotes, [])
     if not res:
@@ -248,6 +250,11 @@ def search_symbols(q):
             {"q": q, "quotesCount": 10, "newsCount": 0})
         res = safe(lambda: json.loads(http_get(url)).get("quotes", []), [])
     for it in res or []:
+        if include_crypto and it.get("quoteType") == "CRYPTOCURRENCY" and it.get("symbol"):
+            base = re.sub(r"\d+$", "", it["symbol"].split("-")[0])
+            nm = re.sub(r"\s+(USD|EUR)$", "", (it.get("shortname") or it.get("longname") or base).strip())
+            out.append({"symbol": f"{base}-EUR", "name": nm, "exchange": "Krypto", "crypto": True})
+            continue
         if it.get("quoteType") == "EQUITY" and it.get("symbol"):
             out.append({"symbol": it["symbol"],
                         "name": (it.get("longname") or it.get("shortname") or it["symbol"]).strip(),
@@ -492,12 +499,12 @@ def clean_company_name(name):
     return re.sub(r"\s+", " ", n).strip() or name
 
 
-def collect_news(symbol, company, website, siblings=()):
+def collect_news(symbol, company, website, siblings=(), terms=("stock", "Aktie")):
     company_domain = domain_of(website) if website else ""
     base_sym = symbol.split(".")[0]
     jobs = {
-        "en": lambda: google_news(f'"{company}" stock', "en"),
-        "de": lambda: google_news(f'"{company}" Aktie', "de"),
+        "en": lambda: google_news(f'"{company}" {terms[0]}', "en"),
+        "de": lambda: google_news(f'"{company}" {terms[1]}', "de"),
         "press": lambda: google_news(f'"{company}" (site:businesswire.com OR site:prnewswire.com OR '
                                      f'site:globenewswire.com OR site:eqs-news.com'
                                      + (f" OR site:{company_domain}" if company_domain else "") + ")", "en"),
@@ -1797,6 +1804,8 @@ def chart_data(symbol, rng):
     pts = [[int(ts.timestamp() * 1000), round(float(c), 4)] for ts, c in zip(h.index, h["Close"])]
     # Dividendenbereinigter Kurs (für die Gesamtrendite mit wieder angelegten Dividenden)
     adj = [round(float(a), 4) for a in h["Adj Close"]] if "Adj Close" in h and rng != "1d" else None
+    if adj and all(abs(a_ - c_) <= 1e-4 * max(1.0, abs(c_)) for a_, c_ in zip(adj, h["Close"])):
+        adj = None  # keine Ausschüttungen -> Gesamtrendite = Kurs
     if rng in ("1d", "5d", "1mo"):  # letzten Live-Kurs ergänzen
         last = num(safe(lambda: t.fast_info.last_price))
         if last and pts and abs(last / pts[-1][1] - 1) < 0.2:
@@ -1838,6 +1847,555 @@ def chart_data(symbol, rng):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Kryptowährungen
+# ---------------------------------------------------------------------------
+# Große Coins: Kürzel -> CoinGecko-ID (Namen werden zusätzlich über CoinGecko gesucht)
+CRYPTO_IDS = {
+    "BTC": "bitcoin", "ETH": "ethereum", "BNB": "binancecoin", "SOL": "solana", "XRP": "ripple",
+    "DOGE": "dogecoin", "ADA": "cardano", "TRX": "tron", "AVAX": "avalanche-2", "LINK": "chainlink",
+    "DOT": "polkadot", "TON": "the-open-network", "SHIB": "shiba-inu", "LTC": "litecoin", "BCH": "bitcoin-cash",
+    "XLM": "stellar", "NEAR": "near", "UNI": "uniswap", "SUI": "sui", "APT": "aptos", "ICP": "internet-computer",
+    "ETC": "ethereum-classic", "XMR": "monero", "ATOM": "cosmos", "HBAR": "hedera-hashgraph", "POL": "polygon-ecosystem-token",
+    "ARB": "arbitrum", "OP": "optimism", "RENDER": "render-token", "PEPE": "pepe", "KAS": "kaspa", "FIL": "filecoin",
+    "ALGO": "algorand", "AAVE": "aave", "INJ": "injective-protocol", "ZEC": "zcash", "HYPE": "hyperliquid",
+    "USDT": "tether", "USDC": "usd-coin", "DAI": "dai",
+}
+CRYPTO_NAMES = {"bitcoin": "BTC", "ethereum": "ETH", "ether": "ETH", "solana": "SOL", "ripple": "XRP", "dogecoin": "DOGE",
+                "cardano": "ADA", "tron": "TRX", "avalanche": "AVAX", "chainlink": "LINK", "polkadot": "DOT", "toncoin": "TON",
+                "litecoin": "LTC", "stellar": "XLM", "monero": "XMR", "cosmos": "ATOM", "polygon": "POL", "binance coin": "BNB",
+                "shiba inu": "SHIB", "bitcoin cash": "BCH", "tether": "USDT", "zcash": "ZEC"}
+STABLE = {"USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "PYUSD", "USDS", "EURC"}
+CRYPTO_WEIGHTS = {"valuation": .20, "quality": .20, "growth": .15, "risk": .15,
+                  "dividend": 0.0, "chart": .15, "sentiment": .10, "macro": .05}
+CG_CACHE = {}
+
+
+def coingecko(path, ttl=600):
+    """CoinGecko-API (kostenlos; optional COINGECKO_API_KEY als Demo-Schlüssel), gecacht."""
+    hit = CG_CACHE.get(path)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    headers = dict(UA)
+    if os.environ.get("COINGECKO_API_KEY"):
+        headers["x-cg-demo-api-key"] = os.environ["COINGECKO_API_KEY"].strip()
+    data = None
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request("https://api.coingecko.com/api/v3/" + path, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as r:
+                data = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 0:
+                time.sleep(2.5)  # gedrosselt -> kurz warten, einmal erneut
+                continue
+            break
+        except Exception:
+            break
+    if data is None:
+        return hit[1] if hit else None  # bei Limit/Fehler: letzter bekannter Stand
+    CG_CACHE[path] = (time.time(), data)
+    return data
+
+
+def cg_markets(vs="eur"):
+    """Marktdaten der 250 größten Coins in einer Abfrage (Kurs, Rang, Angebot, Allzeithoch, Performance)."""
+    return coingecko(f"coins/markets?vs_currency={vs}&order=market_cap_desc&per_page=250&page=1"
+                     f"&price_change_percentage=30d,1y", ttl=600) or []
+
+
+def fear_greed():
+    d = safe(lambda: json.loads(http_get("https://api.alternative.me/fng/?limit=1"))["data"][0])
+    return (int(d["value"]), d["value_classification"]) if d else (None, None)
+
+
+FG_DE = {"Extreme Fear": "extreme Angst", "Fear": "Angst", "Neutral": "neutral", "Greed": "Gier", "Extreme Greed": "extreme Gier"}
+
+
+CAT_PRIORITY = ["Stablecoins", "Meme", "Layer 2 (L2)", "Layer 1 (L1)", "Smart Contract Platform",
+                "Decentralized Finance (DeFi)", "Oracle", "Privacy Coins", "Artificial Intelligence (AI)", "Payment Solutions"]
+
+
+def crypto_categories(cats):
+    """Aussagekräftige Kategorien zuerst; Portfolio-/Ökosystem-Einträge von CoinGecko ausblenden."""
+    cats = [c for c in (cats or []) if c and not re.search(r"portfolio|ecosystem|holdings|binance|coinbase|launchpad|index|alleged", c, re.I)]
+    prio = {c: i for i, c in enumerate(CAT_PRIORITY)}
+    return sorted(cats, key=lambda c: prio.get(c, 99))
+
+
+def resolve_crypto(query):
+    """Erkennt Kryptowährungen: Kürzel (BTC, BTC-EUR), Namen (Bitcoin) oder Yahoo-Suchtreffer."""
+    q = query.strip()
+    qu = q.upper()
+    m_ = re.fullmatch(r"([A-Z0-9]{2,12})-(EUR|USD|USDT)", qu)
+    base = re.sub(r"\d+$", "", m_.group(1)) if m_ else None
+    if not base and qu in CRYPTO_IDS:
+        base = qu
+    if not base and q.lower() in CRYPTO_NAMES:
+        base = CRYPTO_NAMES[q.lower()]
+    if not base:
+        quotes = safe(lambda: yf.Search(q, max_results=6, news_count=0).quotes, []) or []
+        first = quotes[0] if quotes else {}
+        if first.get("quoteType") != "CRYPTOCURRENCY" or any(x.get("quoteType") == "EQUITY" and
+                                                            q.lower() in (x.get("shortname") or "").lower() for x in quotes[:3]):
+            return None
+        base = re.sub(r"\d+$", "", first["symbol"].split("-")[0])
+    cg_id = CRYPTO_IDS.get(base)
+    if not cg_id:
+        found = (coingecko(f"search?query={urllib.parse.quote(base)}") or {}).get("coins") or []
+        exact = [c for c in found if c.get("symbol", "").upper() == base and c.get("market_cap_rank")]
+        exact.sort(key=lambda c: c["market_cap_rank"])
+        cg_id = exact[0]["id"] if exact else None
+    return {"base": base, "id": cg_id, "quote": m_.group(2) if m_ else "EUR"}
+
+
+def crypto_yahoo_symbol(base, name, cg_price_eur, cg_price_usd):
+    """Yahoo-Kürzel für Kursverlauf; Preis wird mit CoinGecko abgeglichen (gleiches Kürzel ≠ gleicher Coin)."""
+    def plausible(sym, ref):
+        h = safe(lambda: yf.Ticker(sym).history(period="5d"))
+        if h is None or h.empty:
+            return False
+        last = float(h["Close"].dropna().iloc[-1])
+        return not ref or 0.8 < last / ref < 1.25
+    for sym, ref in ((f"{base}-EUR", cg_price_eur), (f"{base}-USD", cg_price_usd)):
+        if plausible(sym, ref):
+            return sym
+    for it in safe(lambda: yf.Search(name or base, max_results=8, news_count=0).quotes, []) or []:
+        sym = it.get("symbol", "")
+        if it.get("quoteType") == "CRYPTOCURRENCY" and sym.endswith(("-USD", "-EUR")) and \
+                re.sub(r"\d+$", "", sym.split("-")[0]) == base:
+            if plausible(sym, cg_price_eur if sym.endswith("-EUR") else cg_price_usd):
+                return sym
+    return None
+
+
+def crypto_indicators(m, hist, btc_hist=None):
+    """Charttechnik-Kennzahlen (24/7-Handel: 365 Tage/Jahr)."""
+    c = hist["Close"].dropna()
+    c = c[c > 0]
+    last = float(c.iloc[-1])
+    m["last"] = last
+    m["sma50"] = float(c.rolling(50).mean().iloc[-1]) if len(c) >= 50 else None
+    m["sma200"] = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else None
+    m["sma200_3m"] = float(c.rolling(200).mean().iloc[-91]) if len(c) >= 291 else None
+    m["price_3m_ago"] = float(c.iloc[-91]) if len(c) > 91 else None
+
+    def perf(n):
+        return last / float(c.iloc[-n - 1]) - 1 if len(c) > n else None
+    m["perf_1m"], m["perf_3m"], m["perf_6m"], m["perf_1y"] = perf(30), perf(90), perf(180), perf(365)
+    delta = c.diff()
+    up = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    dn = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    m["rsi"] = float(100 - 100 / (1 + up.iloc[-1] / dn.iloc[-1])) if dn.iloc[-1] else 100.0
+    y = c.iloc[-365:]
+    m["vol"] = float(y.pct_change().dropna().std() * math.sqrt(365))
+    m["hi52"], m["lo52"] = float(y.max()), float(y.min())
+    m["max_dd"] = float((y / y.cummax() - 1).min())
+    m["mayer"] = last / m["sma200"] if m["sma200"] else None
+    m["corr_btc"] = m["beta_btc"] = None
+    if btc_hist is not None and not btc_hist.empty:
+        import pandas as pd
+        a_ = y.pct_change()
+        b_ = btc_hist["Close"].dropna().iloc[-365:].pct_change()
+        a_.index, b_.index = a_.index.normalize(), b_.index.normalize()
+        j = pd.concat([a_, b_], axis=1, join="inner").dropna()
+        if len(j) > 60 and j.iloc[:, 1].var() > 0:
+            m["corr_btc"] = float(j.iloc[:, 0].corr(j.iloc[:, 1]))
+            m["beta_btc"] = float(j.iloc[:, 0].cov(j.iloc[:, 1]) / j.iloc[:, 1].var())
+
+
+def c_valuation(m):
+    parts, why = [], []
+    if m.get("mayer"):
+        parts.append((clamp((1.25 - m["mayer"]) / 0.75), 1.2))
+        why.append(f"Mayer-Multiple (Kurs ÷ GD200) {fnum(m['mayer'], 2)} – unter 1 historisch günstig, über 2,4 überhitzt")
+    d = m.get("ath_change")
+    if d is not None:
+        s = -0.5 if d > -0.1 else -0.1 if d > -0.3 else 0.3 if d > -0.6 else 0.6 if d > -0.85 else 0.1
+        parts.append((s, 0.8))
+        why.append(f"Abstand zum Allzeithoch {pct(d)} (Hoch {fnum(m['ath'], 2)} {m['currency']} am {m.get('ath_date') or '–'})")
+    if m.get("mcap") and m.get("vol24"):
+        ratio = m["mcap"] / m["vol24"]
+        parts.append((clamp((40 - ratio) / 40) * 0.5, 0.4))
+        why.append(f"Marktwert ÷ Tagesvolumen {fnum(ratio, 0)} (niedrig = viel Handelsaktivität relativ zum Wert)")
+    v = wavg(parts)
+    if v is None:
+        return {"score": None, "adjective": "fair bewertet", "reasons": why + ["Zu wenige Daten"]}
+    hot = (m.get("rsi") or 50) > 70 or (m.get("mayer") or 1) > 2.0
+    if v >= 0.6:
+        adj = "unterbewertet"
+    elif v >= 0.15 and (m.get("fg") or 50) < 30:
+        adj = "unterschätzt"
+    elif v >= 0.45:
+        adj = "günstig"
+    elif v >= 0.3:
+        adj = "preiswert"
+    elif v >= 0.15:
+        adj = "attraktiv bewertet"
+    elif v >= 0.05:
+        adj = "angemessen bewertet"
+    elif v >= -0.05:
+        adj = "fair bewertet"
+    elif v >= -0.15:
+        adj = "marktgerecht"
+    elif v < -0.6 and hot:
+        adj = "überhitzt"
+    elif v < -0.3 and hot:
+        adj = "heißgelaufen"
+    elif v < -0.45:
+        adj = "überbewertet"
+    elif v < -0.3:
+        adj = "teuer"
+    else:
+        adj = "ambitioniert bewertet"
+    return {"score": v, "adjective": adj, "reasons": why}
+
+
+def c_quality(m):
+    parts, why = [], []
+    rank, age = m.get("rank"), m.get("age_years")
+    if rank:
+        parts.append((1.0 if rank <= 2 else 0.6 if rank <= 10 else 0.3 if rank <= 25 else 0.0 if rank <= 50 else -0.5, 1.2))
+        why.append(f"Rang {rank} nach Marktkapitalisierung")
+    if age is not None:
+        parts.append((0.8 if age >= 8 else 0.4 if age >= 4 else 0.0 if age >= 2 else -0.4, 0.8))
+        why.append(f"Seit {fnum(age, 1)} Jahren am Markt" + (f" (Start {m['genesis']})" if m.get("genesis") else ""))
+    if m.get("mcap") and m.get("vol24"):
+        liq = m["vol24"] / m["mcap"]
+        parts.append((clamp((liq - 0.01) / 0.03), 0.6))
+        why.append(f"Liquidität: Tagesvolumen {pct(liq)} des Marktwerts")
+    if m.get("max_supply"):
+        parts.append((0.3, 0.4))
+        why.append("Begrenzte Maximalmenge")
+    q = wavg(parts)
+    d = m.get("ath_change") or 0
+    if rank == 1:
+        adj = "dominant"
+    elif rank and rank <= 3:
+        adj = "marktführend"
+    elif rank and rank <= 10 and (age or 0) >= 5:
+        adj = "wettbewerbsstark (mit „Burggraben“)"
+    elif d < -0.85 and (m.get("perf_1y") or 0) < -0.5:
+        adj = "angeschlagen"
+    elif rank and rank <= 20:
+        adj = "robust"
+    elif rank and rank <= 50:
+        adj = "solide"
+    else:
+        adj = "schwach"
+    return {"score": q, "adjective": adj, "reasons": why}
+
+
+def c_growth(m):
+    parts, why = [], []
+    g = m.get("perf_1y")
+    if g is not None:
+        parts.append((clamp(g / 0.8), 1.0))
+        why.append(f"Wertentwicklung 12 Monate {pct(g)} (Indikator für Nachfrage/Adoption)")
+    circ, mx, tot = m.get("circ"), m.get("max_supply"), m.get("total_supply")
+    if circ and mx:
+        share = circ / mx
+        parts.append((clamp((share - 0.6) / 0.35), 0.7))
+        why.append(f"Umlauf {pct(share)} der Maximalmenge ({fnum(mx, 0)}) – {'kaum weitere Verwässerung' if share > 0.9 else 'weitere Neuausgabe ausstehend'}")
+    elif circ:
+        parts.append((-0.2, 0.5))
+        why.append(f"Keine feste Maximalmenge – laufende Neuausgabe möglich (Umlauf {fnum(circ, 0)})")
+    if m.get("fdv") and m.get("mcap"):
+        why.append(f"Vollverwässerter Wert {money(m['fdv'], m['currency'])} ({fnum(m['fdv'] / m['mcap'], 2)}× Marktwert)")
+    s_ = wavg(parts)
+    age = m.get("age_years") or 99
+    cats = " ".join(m.get("categories") or []).lower()
+    g = g or 0
+    if age < 4 and g > 0.5:
+        adj = "aufstrebend"
+    elif g > 1.0:
+        adj = "wachstumsstark"
+    elif g > 0.3:
+        adj = "dynamisch"
+    elif g > 0 and any(k in cats for k in ("smart contract", "artificial intelligence", "defi", "layer 2")):
+        adj = "innovativ"
+    elif age >= 10 and -0.3 <= g <= 0.3:
+        adj = "reif"
+    elif -0.1 <= g <= 0.1:
+        adj = "stagnierend"
+    elif g < -0.3:
+        adj = "rückläufig"
+    else:
+        adj = "gesättigt"
+    return {"score": s_, "adjective": adj, "reasons": why}
+
+
+def c_risk(m):
+    parts, why = [], []
+    vol = m.get("vol")
+    if vol is not None:
+        parts.append((clamp((0.55 - vol) / 0.35), 1.0))
+        why.append(f"Volatilität (1 J., annualisiert) {pct(vol)} – Aktienmarkt zum Vergleich ca. 15–20 %")
+    if m.get("max_dd") is not None:
+        parts.append((clamp((0.45 + m["max_dd"]) / 0.3), 0.7))
+        why.append(f"Maximaler Rückgang im letzten Jahr {pct(m['max_dd'])}")
+    rank = m.get("rank")
+    if rank:
+        parts.append((0.3 if rank <= 10 else 0.0 if rank <= 30 else -0.6, 0.6))
+    if m.get("corr_btc") is not None:
+        why.append(f"Korrelation zu Bitcoin {fnum(m['corr_btc'], 2)}, Beta {fnum(m['beta_btc'], 2)} – bewegt sich stark mit dem Gesamtmarkt"
+                   if m["corr_btc"] > 0.6 else f"Korrelation zu Bitcoin {fnum(m['corr_btc'], 2)}")
+    r = wavg(parts)
+    if r is not None:
+        r = min(r, 0.1)  # Kryptowährungen sind grundsätzlich riskante Anlagen
+    vol = vol or 1
+    if m.get("stable"):
+        adj = "schwankungsarm"
+    elif vol < 0.35:
+        adj = "berechenbar"
+    elif (rank or 999) > 50 or vol > 0.9:
+        adj = "spekulativ"
+    elif vol < 0.6:
+        adj = "volatil"
+    else:
+        adj = "riskant"
+    return {"score": r, "adjective": adj, "reasons": why}
+
+
+def c_sentiment(m, news):
+    why, parts = [], []
+    fg, fgc = m.get("fg"), m.get("fg_class")
+    if fg is not None:
+        parts.append(((fg - 50) / 50, 1.0))
+        why.append(f"Crypto Fear & Greed Index {fg} von 100 ({FG_DE.get(fgc, fgc)})")
+    ns = news["sentiment"]
+    if ns is not None and news["count"]:
+        parts.append((clamp(ns * 2.5), 1.0))
+        why.append(f"News-Tonalität (30 Tage, tier-gewichtet) {'+' if ns >= 0 else ''}{fnum(ns, 2)} aus {news['count']} Meldungen "
+                   f"({news['pos']} positiv / {news['neg']} negativ)")
+    s_ = wavg(parts) or 0.0
+    cnt = news["count"]
+    split = news["pos"] >= 3 and news["neg"] >= 3 and min(news["pos"], news["neg"]) / max(news["pos"], news["neg"]) > 0.6
+    fg = fg if fg is not None else 50
+    if fg >= 75 and cnt >= 15:
+        adj = "gehypt"
+    elif cnt < 8:
+        adj = "vernachlässigt" if s_ <= 0 else "übersehen"
+    elif split:
+        adj = "umstritten"
+    elif fg >= 60 or s_ >= 0.25:
+        adj = "gefragt"
+    elif s_ >= 0.08:
+        adj = "beliebt"
+    elif fg <= 30 or s_ <= -0.15:
+        adj = "unbeliebt"
+    else:
+        adj = "umstritten"
+    return {"score": s_, "adjective": adj, "reasons": why}
+
+
+def c_macro(m, mac):
+    why, parts = [], []
+    if mac["rf"] is not None:
+        why.append(f"US-10J-Rendite {fnum(mac['rf'], 2)} % ({'+' if (mac['rf_chg'] or 0) >= 0 else ''}{fnum(mac['rf_chg'], 2)} Pp. in 6 Monaten)")
+        s_ = -0.4 if mac["rf"] >= 4 else 0.0 if mac["rf"] >= 3 else 0.3
+        if mac["rf_chg"] is not None:
+            s_ += -0.3 if mac["rf_chg"] > 0.3 else 0.3 if mac["rf_chg"] < -0.3 else 0
+        parts.append((clamp(s_), 1.0))
+        why.append("Kryptowährungen reagieren wie Wachstumswerte empfindlich auf steigende Zinsen und knappe Liquidität")
+    if m["currency"] == "USD" and mac.get("fx_chg") is not None:
+        parts.append((clamp(mac["fx_chg"] / 0.1) * 0.6, 0.6))
+        why.append(f"Kurs in US-Dollar – Wechselkursrisiko für Euro-Anleger ({pct(mac['fx_chg'])} ggü. EUR in 12 Monaten)")
+    elif m["currency"] == "EUR":
+        why.append("Kurs in Euro – der Wert hängt aber global am US-Dollar-Markt")
+    why.append("Regulierung (z. B. MiCA in der EU) und Bitcoin-ETF-Zuflüsse beeinflussen den gesamten Kryptomarkt")
+    s_ = wavg(parts)
+    return {"score": s_ if s_ is not None else 0.0, "adjective": None, "reasons": why}
+
+
+def crypto_competitors(cg_id, currency):
+    vs = "eur"  # Vergleich immer aus der Euro-Liste (Prozentwerte sind währungsunabhängig)
+    mk = cg_markets(vs)[:25]
+
+    def row(c):
+        return {"symbol": f"{c['symbol'].upper()}-{vs.upper()}", "name": c.get("name"), "currency": vs.upper(),
+                "mcap": num(c.get("market_cap")), "perf_30d": (num(c.get("price_change_percentage_30d_in_currency")) or 0) / 100,
+                "perf_1y": (num(c.get("price_change_percentage_1y_in_currency")) / 100) if num(c.get("price_change_percentage_1y_in_currency")) is not None else None,
+                "ath_change": (num(c.get("ath_change_percentage")) or 0) / 100, "rank": c.get("market_cap_rank")}
+    own = next((row(c) for c in mk if c.get("id") == cg_id), None)
+    peers = [row(c) for c in mk if c.get("id") != cg_id and c.get("symbol", "").upper() not in STABLE
+             and (num(c.get("price_change_percentage_30d_in_currency")) is None or abs(num(c.get("price_change_percentage_30d_in_currency"))) > 0.5)][:5]
+    return own, peers
+
+
+def crypto_peer_summary(own, peers):
+    def med(vals):
+        vals = sorted(v for v in vals if v is not None)
+        if not vals:
+            return None
+        k = len(vals) // 2
+        return vals[k] if len(vals) % 2 else (vals[k - 1] + vals[k]) / 2
+    out = {}
+    for key in ("perf_1y", "perf_30d", "ath_change"):
+        vals = [p.get(key) for p in peers if p.get(key) is not None]
+        ov = (own or {}).get(key)
+        out[key] = {"median": med(vals), "n": len(vals),
+                    "beats": sum(1 for v in vals if ov is not None and ov > v) if ov is not None and vals else None}
+    return out
+
+
+def analyze_crypto(cr):
+    # Details (Start, Kategorien, Beschreibung) ändern sich selten -> 24 h; Marktdaten aus der Top-250-Liste
+    cg = coingecko(f"coins/{cr['id']}?localization=false&tickers=false&market_data=true&community_data=false"
+                   f"&developer_data=false&sparkline=false", ttl=86400) if cr.get("id") else None
+    mk_eur = next((c for c in cg_markets("eur") if c.get("id") == cr.get("id")), None) if cr.get("id") else None
+    md = (cg or {}).get("market_data") or {}
+    if mk_eur:  # aktuelle Marktdaten haben Vorrang vor den (bis 24 h alten) Detaildaten
+        md = {**md,
+              "current_price": {**(md.get("current_price") or {}), "eur": mk_eur.get("current_price")},
+              "market_cap": {**(md.get("market_cap") or {}), "eur": mk_eur.get("market_cap")},
+              "total_volume": {**(md.get("total_volume") or {}), "eur": mk_eur.get("total_volume")},
+              "ath": {**(md.get("ath") or {}), "eur": mk_eur.get("ath")},
+              "ath_change_percentage": {**(md.get("ath_change_percentage") or {}), "eur": mk_eur.get("ath_change_percentage")},
+              "ath_date": {**(md.get("ath_date") or {}), "eur": mk_eur.get("ath_date")},
+              "atl": {**(md.get("atl") or {}), "eur": mk_eur.get("atl")},
+              "fully_diluted_valuation": {**(md.get("fully_diluted_valuation") or {}), "eur": mk_eur.get("fully_diluted_valuation")},
+              "circulating_supply": mk_eur.get("circulating_supply"), "total_supply": mk_eur.get("total_supply"),
+              "max_supply": mk_eur.get("max_supply")}
+        if not (md.get("current_price") or {}).get("usd"):
+            usd = next((c for c in cg_markets("usd") if c.get("id") == cr.get("id")), None)
+            if usd:
+                for k_ in ("current_price", "market_cap", "total_volume", "ath", "ath_change_percentage", "ath_date", "atl",
+                           "fully_diluted_valuation"):
+                    md[k_] = {**(md.get(k_) or {}), "usd": usd.get(k_)}
+    name = (cg or {}).get("name") or (mk_eur or {}).get("name") or cr["base"]
+    if not cg and mk_eur:
+        cg = {"name": name, "market_cap_rank": mk_eur.get("market_cap_rank")}
+    p_eur, p_usd = num((md.get("current_price") or {}).get("eur")), num((md.get("current_price") or {}).get("usd"))
+    ysym = crypto_yahoo_symbol(cr["base"], name, p_eur, p_usd)
+    if not ysym and not cg:
+        raise ValueError(f"Keine Kursdaten zu „{cr['base']}“ gefunden.")
+    cur = "USD" if (ysym or "").endswith("-USD") else "EUR"
+    vs = cur.lower()
+    pick = lambda d: num((d or {}).get(vs))
+    m = {"symbol": ysym or f"{cr['base']}-{cur}", "name": name, "currency": cur, "base": cr["base"],
+         "rank": (cg or {}).get("market_cap_rank"), "mcap": pick(md.get("market_cap")), "vol24": pick(md.get("total_volume")),
+         "ath": pick(md.get("ath")),
+         "ath_change": (pick(md.get("ath_change_percentage")) / 100) if pick(md.get("ath_change_percentage")) is not None else None,
+         "ath_date": ((md.get("ath_date") or {}).get(vs) or "")[:10] or None,
+         "atl": pick(md.get("atl")), "circ": num(md.get("circulating_supply")), "total_supply": num(md.get("total_supply")),
+         "max_supply": num(md.get("max_supply")), "fdv": pick(md.get("fully_diluted_valuation")),
+         "genesis": (cg or {}).get("genesis_date"), "categories": crypto_categories((cg or {}).get("categories")),
+         "homepage": (((cg or {}).get("links") or {}).get("homepage") or [""])[0]}
+    if m["ath_date"]:
+        m["ath_date"] = datetime.strptime(m["ath_date"], "%Y-%m-%d").strftime("%d.%m.%Y")
+    m["stable"] = cr["base"] in STABLE or any("stablecoin" in c.lower() for c in m["categories"])
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        fh = ex.submit(lambda: yf.Ticker(ysym).history(period="2y", auto_adjust=False) if ysym else None)
+        fbtc = ex.submit(lambda: yf.Ticker(f"BTC-{cur}").history(period="2y") if cr["base"] != "BTC" else None)
+        fmac = ex.submit(gather_macro, cur)
+        fnews = ex.submit(collect_news, m["symbol"], name, m["homepage"], (), ("crypto", "Kurs"))
+        ffg = ex.submit(fear_greed)
+        fpeers = ex.submit(crypto_competitors, cr.get("id"), cur)
+        hist, btc, mac, news = safe(fh.result), safe(fbtc.result), fmac.result(), fnews.result()
+        m["fg"], m["fg_class"] = safe(ffg.result, (None, None)) or (None, None)
+        own_peer, peers = safe(fpeers.result, (None, [])) or (None, [])
+    if hist is not None and not hist.empty:
+        crypto_indicators(m, hist, btc)
+        first = hist.index[0]
+        m["data_since"] = first.strftime("%d.%m.%Y")
+    else:
+        for k in ("last", "sma50", "sma200", "sma200_3m", "price_3m_ago", "perf_1m", "perf_3m", "perf_6m", "perf_1y",
+                  "rsi", "vol", "hi52", "lo52", "max_dd", "mayer", "corr_btc", "beta_btc"):
+            m[k] = None
+    m["price"] = (p_eur if cur == "EUR" else p_usd) or m.get("last")
+    if m.get("perf_1y") is None and num(md.get("price_change_percentage_1y")) is not None:
+        m["perf_1y"] = num(md["price_change_percentage_1y"]) / 100
+    if m["genesis"]:
+        m["age_years"] = (datetime.now() - datetime.strptime(m["genesis"], "%Y-%m-%d")).days / 365.25
+    else:
+        m["age_years"] = None
+
+    cats = {"valuation": c_valuation(m), "quality": c_quality(m), "growth": c_growth(m), "risk": c_risk(m),
+            "dividend": {"score": None, "adjective": "nicht anwendbar",
+                         "reasons": ["Kryptowährungen zahlen keine Dividende. Staking-Erträge werden nicht bewertet."]},
+            "chart": score_chart(m), "sentiment": c_sentiment(m, news), "macro": c_macro(m, mac)}
+    total = (wavg([(cats[k]["score"], w) for k, w in CRYPTO_WEIGHTS.items() if w]) or 0.0) * 100
+    notes = []
+    if m["stable"]:
+        total = 0.0
+        notes.append("Stablecoin: an eine Währung gekoppelt – Kursgewinne sind nicht vorgesehen, eine Kauf-/Verkaufsempfehlung ist nicht sinnvoll.")
+    elif (m.get("rank") or 999) > 50 and total > 8:
+        total = 8
+        notes.append("Deckel: Coin außerhalb der Top 50 nach Marktwert – hochspekulativ, daher höchstens „Halten“.")
+    if not cg:
+        notes.append("CoinGecko war nicht erreichbar – Rang, Angebot und Allzeithoch fehlen, die Einschätzung ist unvollständig.")
+    label, group = map_rating(total)
+    s_adj = summary_adj(total, cats)
+    confidence = "hoch" if cg and hist is not None and news["count_trusted"] >= 5 else "mittel" if cg or hist is not None else "niedrig"
+
+    titles = {"valuation": "Bewertung (Zyklus & Abstand zum Allzeithoch)", "quality": "Qualität des Netzwerks",
+              "growth": "Wachstum (Adoption & Angebot)", "risk": "Risiko und Schwankung", "dividend": "Dividende und Ausschüttung",
+              "chart": "Kursentwicklung und Charttechnik", "sentiment": "Stimmung und Wahrnehmung"}
+    out_cats = [{"key": k, "title": t_, "adjective": cats[k]["adjective"], "options": ADJ[k],
+                 "score": None if cats[k]["score"] is None else round(cats[k]["score"], 3),
+                 "weight": CRYPTO_WEIGHTS[k], "reasons": cats[k]["reasons"]} for k, t_ in titles.items()]
+    c = m["currency"]
+    share = (m["circ"] / m["max_supply"]) if m.get("circ") and m.get("max_supply") else None
+    fundamentals = [
+        {"title": "Markt & Netzwerk", "rows": [
+            ["Rang nach Marktwert", f"#{m['rank']}" if m.get("rank") else "–", ""],
+            ["Marktkapitalisierung", money(m.get("mcap"), c), ""],
+            ["Handelsvolumen 24 Std.", money(m.get("vol24"), c),
+             f"{pct(m['vol24'] / m['mcap'])} des Marktwerts" if m.get("vol24") and m.get("mcap") else ""],
+            ["Start / Alter", (datetime.strptime(m["genesis"], "%Y-%m-%d").strftime("%d.%m.%Y") if m.get("genesis") else "–"),
+             f"{fnum(m['age_years'], 1)} Jahre" if m.get("age_years") else ""],
+            ["Kategorien", ", ".join(m["categories"][:3]) or "–", ""]]},
+        {"title": "Angebot & Inflation", "rows": [
+            ["Umlaufmenge", fnum(m.get("circ"), 0), ""],
+            ["Maximalmenge", fnum(m.get("max_supply"), 0) if m.get("max_supply") else "unbegrenzt",
+             "feste Obergrenze" if m.get("max_supply") else "Neuausgabe ohne feste Grenze"],
+            ["Anteil im Umlauf", pct(share), ""],
+            ["Vollverwässerter Wert", money(m.get("fdv"), c), "bei Ausgabe aller Coins"]]},
+        {"title": "Bewertung & Marktzyklus", "rows": [
+            ["Allzeithoch", f"{fnum(m.get('ath'), 2)} {c}" if m.get("ath") else "–", m.get("ath_date") or ""],
+            ["Abstand zum Allzeithoch", pct(m.get("ath_change")), ""],
+            ["Mayer-Multiple (Kurs ÷ GD200)", fnum(m.get("mayer"), 2), "< 1 günstig · > 2,4 überhitzt"],
+            ["52-Wochen-Spanne", f"{fnum(m.get('lo52'), 2)} – {fnum(m.get('hi52'), 2)}" if m.get("hi52") else "–", ""]]},
+        {"title": "Risiko", "rows": [
+            ["Volatilität 1 Jahr", pct(m.get("vol")), "Aktien zum Vergleich ca. 15–20 %"],
+            ["Maximaler Rückgang 1 Jahr", pct(m.get("max_dd")), ""],
+            ["Korrelation zu Bitcoin", fnum(m.get("corr_btc"), 2), "1 = bewegt sich genau wie Bitcoin"],
+            ["Beta zu Bitcoin", fnum(m.get("beta_btc"), 2), "> 1 = stärkere Ausschläge als Bitcoin"]]},
+        {"title": "Marktstimmung & Umfeld", "rows": [
+            ["Crypto Fear & Greed Index", f"{m['fg']} / 100" if m.get("fg") is not None else "–", FG_DE.get(m.get("fg_class"), "")],
+            ["US-10J-Rendite", "–" if mac["rf"] is None else fnum(mac["rf"], 2) + " %", "hohe Zinsen belasten Risikoanlagen"],
+            ["Kurswährung", c, "Yahoo-Kürzel " + (ysym or "–")]]},
+    ]
+    desc = re.sub(r"<[^>]+>", "", (((cg or {}).get("description") or {}).get("de") or ((cg or {}).get("description") or {}).get("en") or "")).strip()
+    if desc:
+        desc = " ".join(re.split(r"(?<=[.!?])\s+", desc)[:3])
+    comp = {"crypto": True, "own": own_peer or {"symbol": m["symbol"], "name": name, "currency": c, "mcap": m.get("mcap"),
+                                               "perf_1y": m.get("perf_1y"), "perf_30d": m.get("perf_1m"), "ath_change": m.get("ath_change")},
+            "peers": peers, "source": "CoinGecko (größte Kryptowährungen nach Marktwert, ohne Stablecoins)", "industry": "Kryptowährungen"}
+    comp["own"]["own"] = True
+    comp["summary"] = crypto_peer_summary(comp["own"], peers)
+    alt_cur = "USD" if cur == "EUR" else "EUR"
+    return {
+        "asset": "crypto", "symbol": m["symbol"], "name": name, "exchange": "Krypto · 24/7", "currency": c, "price": m["price"],
+        "sector": "Kryptowährung", "industry": (m["categories"][0] if m["categories"] else ""),
+        "country": f"Rang #{m['rank']}" if m.get("rank") else "", "website": m["homepage"], "business": desc[:900],
+        "alternatives": [{"symbol": f"{cr['base']}-{alt_cur}", "name": f"{name} in {alt_cur}", "exchange": "Krypto"}],
+        "rating": {"label": label, "group": group, "score": round(total, 1),
+                   "scale": [{"label": l_, "group": g_, "min": thr} for thr, l_, g_ in RATING_SCALE]},
+        "summary": {"adjective": s_adj, "options": ADJ["summary"]},
+        "categories": out_cats,
+        "macro": {"score": round(cats["macro"]["score"], 3), "weight": CRYPTO_WEIGHTS["macro"], "reasons": cats["macro"]["reasons"]},
+        "fundamentals": fundamentals,
+        "facts": {k: m.get(k) for k in ("mcap", "rank", "vol24", "ath", "ath_change", "vol", "perf_1y", "perf_1m",
+                                        "hi52", "lo52", "fg", "fg_class", "mayer")},
+        "news": news, "notes": notes, "confidence": confidence, "events": [], "competitors": comp,
+        "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "sources": ["Yahoo Finance", "CoinGecko", "alternative.me (Fear & Greed)", "Google News"],
+    }
+
+
 CACHE = {}
 
 
@@ -1845,6 +2403,11 @@ def analyze(query):
     key = query.strip().lower()
     if key in CACHE and time.time() - CACHE[key][0] < 900:
         return CACHE[key][1]
+    cr = resolve_crypto(query)
+    if cr:
+        result = analyze_crypto(cr)
+        CACHE[key] = (time.time(), result)
+        return result
     symbol, t, info, alternatives = resolve(query)
     with ThreadPoolExecutor(max_workers=3) as ex:
         fm = ex.submit(gather, symbol, t, info)
@@ -2785,7 +3348,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
         if u.path == "/api/search":
-            return self.send(200, json.dumps(search_symbols(q) if len(q) >= 2 else []), "application/json")
+            return self.send(200, json.dumps(search_symbols(q, include_crypto=True) if len(q) >= 2 else []), "application/json")
         if u.path == "/api/analyze":
             if not q:
                 return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")

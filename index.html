@@ -498,7 +498,7 @@ table.peers .neg{color:var(--neg)}
     </div>
     <form class="search" id="f" autocomplete="off">
       <svg class="s" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <input id="q" placeholder="Unternehmen oder Ticker, z. B. Allianz, SAP.DE, NVDA">
+      <input id="q" placeholder="Aktie oder Krypto, z. B. Allianz, SAP.DE, Bitcoin">
       <button type="submit">Prüfen</button>
       <div class="suggest" id="sg"></div>
     </form>
@@ -572,7 +572,7 @@ $("#q").addEventListener("keydown", e => {
 function renderSg() {
   if (!sugg.length) return hideSg();
   $("#sg").innerHTML = sugg.map((s, i) => `<div class="${i === act ? "act" : ""}" data-s="${esc(s.symbol)}">
-    <span>${esc(s.name)}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
+    <span>${esc(s.name)}${s.crypto ? ` <span class="tag" style="font-size:11px;padding:1px 6px">Krypto</span>` : ""}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
   $("#sg").style.display = "block";
   $("#sg").querySelectorAll("div").forEach(d => d.onmousedown = () => pick(d.dataset.s));
 }
@@ -1033,9 +1033,9 @@ function welcome() {
   $("#subnav").style.display = "none";
   $("#out").innerHTML = `<section class="welcome">
     <h1>Kaufen, halten oder verkaufen?</h1>
-    <p>Gib ein Unternehmen oder einen Ticker ein. Die Einschätzung kombiniert Bewertung, Bilanzqualität,
-       Wachstum, Charttechnik, Analystenkonsens und aktuelle Nachrichten aus geprüften Quellen.</p>
-    <div class="quick">${["Allianz", "SAP.DE", "Apple", "NVIDIA", "Siemens", "Novo Nordisk", "Microsoft"]
+    <p>Gib eine Aktie oder Kryptowährung ein. Die Einschätzung kombiniert Bewertung, Qualität,
+       Wachstum, Charttechnik, Marktstimmung und aktuelle Nachrichten aus geprüften Quellen.</p>
+    <div class="quick">${["Allianz", "SAP.DE", "Apple", "NVIDIA", "Siemens", "Bitcoin", "Ethereum", "Solana"]
       .map(x => `<button data-q="${x}">${x}</button>`).join("")}</div>
     ${a2hsHint()}
     <div class="feat">
@@ -1319,6 +1319,10 @@ function evWhen(days) {
     : days < 60 ? `in ${Math.round(days / 7)} Wochen` : `in ${Math.round(days / 30)} Monaten`;
 }
 function eventsCard(d) {
+  if (d.asset === "crypto") return `<section class="card ev-card" id="termine" aria-label="Termine">
+    <div class="ev-head"><div><div class="eyebrow">Termine</div><h3>Nächste Ereignisse</h3></div></div>
+    <div class="empty">Kryptowährungen haben keine Quartalszahlen, Dividenden oder Hauptversammlungen.
+      Wichtige Ereignisse (z. B. Netzwerk-Upgrades) findest du in den News weiter unten.</div></section>`;
   const ev = d.events || [];
   const icsUrl = `/api/ics?q=${encodeURIComponent(d.symbol)}&name=${encodeURIComponent(d.name)}`;
   return `<section class="card ev-card" id="termine" aria-label="Termine">
@@ -1413,7 +1417,36 @@ function drawHistory(d) {
 }
 
 /* Konkurrenzvergleich */
+function cryptoPeersSection(d) {
+  const C = d.competitors || {}, peers = C.peers || [], own = C.own || {}, S = C.summary || {};
+  const head = `<h2 class="section" id="konkurrenz">Vergleich mit großen Kryptowährungen</h2>
+    <p class="section-sub">Die ${peers.length} größten Kryptowährungen nach Marktwert (ohne Stablecoins). Zeile antippen, um sie zu analysieren.</p>`;
+  if (!peers.length) return head + `<div class="card empty">Vergleichsdaten sind gerade nicht verfügbar (CoinGecko).</div>`;
+  const pcf = v => v == null ? "–" : `<span class="${v < 0 ? "neg" : ""}">${pc(v, 1, true)}</span>`;
+  const cap = (v, cur) => { if (v == null) return "–"; const [n, u] = big(v); return `${n} ${u}<small>${esc(cur || "")}</small>`; };
+  const verdict = (key, label) => {
+    const x = S[key] || {}, ov = own[key];
+    if (ov == null || !x.n) return `<div><dt>${label}</dt><dd>–</dd></div>`;
+    const good = x.beats >= Math.ceil(x.n / 2);
+    return `<div><dt>${label}</dt><dd class="num">${pc(ov, 1, true)} <span class="stamp">vs. Median ${pc(x.median, 1, true)}</span></dd>
+      <small style="color:${good ? "var(--pos)" : "var(--neg)"}">${key === "ath_change" ? (good ? "näher am Hoch als" : "weiter vom Hoch als") : (good ? "besser als" : "schwächer als")} ${x.beats === null ? "–" : (good ? x.beats : x.n - x.beats)} von ${x.n}</small></div>`;
+  };
+  const row = (r, cls) => `<tr class="${cls}" ${cls === "peer" ? `data-s="${esc(r.symbol)}"` : ""}>
+      <td>${esc(r.name || r.symbol)}<small>${esc(r.symbol)}${r.rank ? " · #" + r.rank : ""}${cls === "own" ? " · diese Kryptowährung" : ""}</small></td>
+      <td>${cap(r.mcap, r.currency)}</td><td>${pcf(r.perf_30d)}</td><td>${pcf(r.perf_1y)}</td><td>${pcf(r.ath_change)}</td></tr>`;
+  return head + `<div class="card peer-card">
+    <dl class="peer-sum" style="margin:0">${verdict("perf_30d", "Performance 30 Tage")}${verdict("perf_1y", "Performance 1 Jahr")}${verdict("ath_change", "Abstand Allzeithoch")}</dl>
+    <div class="peer-scroll"><table class="peers">
+      <thead><tr><th>Kryptowährung</th><th>Marktwert</th><th>30 Tage</th><th>1 Jahr</th><th>Abst. Hoch</th></tr></thead>
+      <tbody>${row(own, "own")}${peers.map(r => row(r, "peer")).join("")}
+        <tr class="med"><td>Median Vergleichsgruppe</td><td></td><td>${S.perf_30d?.median == null ? "–" : pc(S.perf_30d.median, 1, true)}</td>
+          <td>${S.perf_1y?.median == null ? "–" : pc(S.perf_1y.median, 1, true)}</td><td>${S.ath_change?.median == null ? "–" : pc(S.ath_change.median, 1, true)}</td></tr>
+      </tbody></table></div>
+    <div class="peer-foot">Quelle: ${esc(C.source || "CoinGecko")}. Marktwert in Euro.</div>
+  </div>`;
+}
 function peersSection(d) {
+  if (d.asset === "crypto") return cryptoPeersSection(d);
   const C = d.competitors || {};
   const peers = C.peers || [], own = C.own || {}, S = C.summary || {};
   const head = `<h2 class="section" id="konkurrenz">Konkurrenzvergleich</h2>
@@ -1447,8 +1480,10 @@ function peersSection(d) {
 }
 
 /* Render */
+const FG_DE = {"Extreme Fear": "extreme Angst", "Fear": "Angst", "Neutral": "neutral", "Greed": "Gier", "Extreme Greed": "extreme Gier"};
 function render(d) {
   const R = d.rating, F = d.facts || {}, N = d.news;
+  const crypto = d.asset === "crypto";
   const gt = groupTone[R.group];
   const idx = R.scale.findIndex(s => s.label === R.label);
   const segCls = {Kaufen: "p", Halten: "n", Verkaufen: "x"};
@@ -1495,8 +1530,10 @@ function render(d) {
       <dl class="v-meta" style="margin:0">
         <div><dt>Gesamturteil</dt><dd>${esc(d.summary.adjective)}</dd></div>
         <div><dt>Datenbasis</dt><dd>${esc(d.confidence)}</dd></div>
-        <div><dt>Analystenkonsens</dt><dd class="num">${F.rec_mean ? nf(F.rec_mean, 1) + " / 5" : "–"} <span class="stamp">${F.n_analysts ? `(${F.n_analysts} Analysten)` : ""}</span></dd></div>
-        <div><dt>Kursziel Ø</dt><dd class="num">${F.target ? nf(F.target) : "–"} <span class="stamp">${F.upside != null ? pc(F.upside, 1, true) : ""}</span></dd></div>
+        ${crypto ? `<div><dt>Fear &amp; Greed</dt><dd class="num">${F.fg != null ? F.fg + " / 100" : "–"} <span class="stamp">${esc(FG_DE[F.fg_class] || "")}</span></dd></div>
+        <div><dt>Abstand Allzeithoch</dt><dd class="num">${pc(F.ath_change, 1, true)}</dd></div>`
+        : `<div><dt>Analystenkonsens</dt><dd class="num">${F.rec_mean ? nf(F.rec_mean, 1) + " / 5" : "–"} <span class="stamp">${F.n_analysts ? `(${F.n_analysts} Analysten)` : ""}</span></dd></div>
+        <div><dt>Kursziel Ø</dt><dd class="num">${F.target ? nf(F.target) : "–"} <span class="stamp">${F.upside != null ? pc(F.upside, 1, true) : ""}</span></dd></div>`}
       </dl>
       ${d.notes.map(n => `<div class="note">${esc(n)}</div>`).join("")}
       <div class="stamp">Stand ${esc(d.generated)} · Quellen: ${esc((d.sources || ["Yahoo Finance", "Google News", "Pressedienste"]).join(", "))}</div>
@@ -1527,9 +1564,13 @@ function render(d) {
   ${historyCard(d)}
 
   <dl class="card facts" style="margin-bottom:0">
-    ${[["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["KGV", nf(F.pe, 1), F.fpe ? `fwd ${nf(F.fpe, 1)}` : ""],
+    ${(crypto
+      ? [["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["Rang", F.rank ? "#" + F.rank : "–"],
+         ["Volumen 24 Std.", big(F.vol24)[0], `${big(F.vol24)[1]} ${esc(d.currency)}`], ["Allzeithoch", F.ath ? nf(F.ath, F.ath < 10 ? 4 : 0) : "–", pc(F.ath_change, 0)],
+         ["Mayer-Multiple", nf(F.mayer, 2)], ["Performance 1J", pc(F.perf_1y, 0, true)], ["Volatilität 1J", pc(F.vol, 0)]]
+      : [["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["KGV", nf(F.pe, 1), F.fpe ? `fwd ${nf(F.fpe, 1)}` : ""],
        ["EV/EBITDA", nf(F.ev_ebitda, 1)], ["FCF-Rendite", pc(F.fcf_yield)], ["Dividendenrendite", pc(F.div_yield, 2)],
-       ["52-Wochen-Spanne", F.lo52 ? `${nf(F.lo52, 0)}–${nf(F.hi52, 0)}` : "–"], ["Volatilität 1J", pc(F.vol, 0), F.beta ? `β ${nf(F.beta, 2)}` : ""]]
+       ["52-Wochen-Spanne", F.lo52 ? `${nf(F.lo52, 0)}–${nf(F.hi52, 0)}` : "–"], ["Volatilität 1J", pc(F.vol, 0), F.beta ? `β ${nf(F.beta, 2)}` : ""]])
       .map(([k, v, s]) => `<div><dt>${k}</dt><dd class="num">${v}${s ? `<small>${s}</small>` : ""}</dd></div>`).join("")}
   </dl>
 
@@ -1568,7 +1609,8 @@ function render(d) {
   ${peersSection(d)}
 
   <h2 class="section" id="fundamental">Fundamentaldaten</h2>
-  <p class="section-sub">Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen.</p>
+  <p class="section-sub">${crypto ? "Markt und Netzwerk, Angebot und Inflation, Marktzyklus, Risiko und Stimmung."
+    : "Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen."}</p>
   <div class="fund">${d.fundamentals.map((s, i) => `
     <div class="card"><h3><span>${i + 1}</span>${esc(s.title)}</h3>
       <div>${s.rows.map(r => `<div class="frow"><div class="fk">${esc(r[0])}${r[2] ? `<div class="fh">${esc(r[2])}</div>` : ""}</div>
@@ -1600,8 +1642,12 @@ function render(d) {
     </div>
     <div class="card pad"><h3>Regeln</h3><ul>
       <li>Jede Kategorie erhält einen Teilscore von −100 bis +100 aus mehreren Kennzahlen; daraus folgt das passende Adjektiv.</li>
-      <li>Bewertung: KGV und EV/EBITDA gegen Branche und eigene Historie, FCF-Rendite, PEG, Kursziel und Reverse-DCF.</li>
-      <li>Deckel: Bei sehr hoher Bewertung oder schwacher Qualität ist höchstens „Halten“ möglich.</li>
+      ${crypto ? `<li>Bewertung: Mayer-Multiple (Kurs ÷ 200-Tage-Linie), Abstand zum Allzeithoch, Marktwert im Verhältnis zum Handelsvolumen.</li>
+      <li>Netzwerk: Rang nach Marktwert, Alter, Liquidität, begrenzte Maximalmenge. Wachstum: 12-Monats-Entwicklung und Verwässerung durch Neuausgabe.</li>
+      <li>Risiko ist bei Kryptowährungen grundsätzlich höchstens „neutral“. Coins außerhalb der Top 50: höchstens „Halten“. Stablecoins: immer „Neutral“.</li>
+      <li>Stimmung: Crypto Fear &amp; Greed Index und News-Tonalität. Dividende: nicht anwendbar (0 % Gewicht).</li>`
+      : `<li>Bewertung: KGV und EV/EBITDA gegen Branche und eigene Historie, FCF-Rendite, PEG, Kursziel und Reverse-DCF.</li>
+      <li>Deckel: Bei sehr hoher Bewertung oder schwacher Qualität ist höchstens „Halten“ möglich.</li>`}
       <li>News: Tier 1 = 100 %, Tier 2 = 90 %, Tier 3 = 50 % (unbestätigt 25 %), Sonstige = 30 %.</li>
     </ul></div>
     <div class="card pad"><h3>Skala</h3><div class="scale-list num">
@@ -1612,6 +1658,9 @@ function render(d) {
     <div class="legal-icon" aria-hidden="true">!</div>
     <div>
       <b>Automatisierte Kauf- und Verkaufsempfehlung – keine Anlageberatung</b>
+      ${crypto ? `<p><b>Kryptowährungen sind hochspekulativ.</b> Sie haben keinen inneren Wert aus Gewinnen oder Vermögen, schwanken extrem
+        (Rückgänge von 50–90 % sind mehrfach vorgekommen) und ein <b>Totalverlust</b> ist möglich. Anders als Aktien sind sie nicht durch die
+        Einlagensicherung oder ein Sondervermögen geschützt; Börsen und Verwahrer können ausfallen. Investiere nur Geld, dessen Verlust du verkraften kannst.</p>` : ""}
       <p>Die Empfehlung „${esc(R.label)}“ und alle Einschätzungen auf dieser Seite werden vollautomatisch von einem regelbasierten
         Computerprogramm aus öffentlich verfügbaren Daten erzeugt. Kein Mensch hat sie geprüft. Sie stellen <b>keine Anlageberatung</b>,
         keine Finanzanalyse im Sinne des Wertpapierhandelsgesetzes und keine Aufforderung zum Kauf oder Verkauf von Wertpapieren dar.</p>
