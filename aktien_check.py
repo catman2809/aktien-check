@@ -2221,6 +2221,16 @@ def save_alert(body, user):
 
 
 HTML_PATH = Path(__file__).with_name("index.html")
+STATIC_DIR = Path(__file__).with_name("static")
+WEB_MANIFEST = {
+    "name": "Aktien-Check", "short_name": "Aktien-Check", "lang": "de",
+    "description": "Kaufen, Halten oder Verkaufen – automatisierte Aktienanalyse",
+    "start_url": "/", "scope": "/", "display": "standalone",
+    "background_color": "#0c111d", "theme_color": "#1f4fd8",
+    "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+              {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+              {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+}
 
 # --- Login mit dauerhafter Sitzung (nur aktiv, wenn APP_PASSWORD gesetzt ist) ---
 SESSION_COOKIE = "ac_session"
@@ -2276,6 +2286,10 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aktien-Check">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f4fd8">
 <title>Anmelden · Aktien-Check</title>
 <style>
 :root{--bg:#f5f6f8;--surface:#fff;--border:#d0d5dd;--text:#101828;--text-2:#475467;--accent:#1f4fd8;--accent-soft:#eef3ff;--neg:#b42318;--neg-soft:#fef3f2}
@@ -2528,6 +2542,20 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/healthz":
             return self.send(200, "ok", "text/plain")
+        if u.path == "/manifest.webmanifest":
+            return self.send(200, json.dumps(WEB_MANIFEST, ensure_ascii=False), "application/manifest+json; charset=utf-8")
+        if u.path.startswith("/static/"):
+            f = STATIC_DIR / Path(u.path).name  # nur Dateien direkt im Ordner, kein Pfad-Ausbruch
+            if f.suffix == ".png" and f.is_file():
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "public, max-age=604800")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            return self.send(404, "Not found", "text/plain")
         qs = urllib.parse.parse_qs(u.query)
         if u.path == "/login":
             nxt = (qs.get("next") or ["/"])[0]

@@ -7,6 +7,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aktien-Check">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f4fd8">
 <title>Aktien-Check</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -426,6 +430,16 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .legal b{font-size:14.5px}
 .legal p{margin:8px 0 0;font-size:13px;line-height:1.65;color:var(--text-2)}
 .legal p b{font-size:inherit;color:var(--text)}
+
+/* ---------- Hinweis: zum Startbildschirm hinzufügen ---------- */
+.a2hs{display:flex;gap:14px;align-items:flex-start;text-align:left;margin:28px auto 0;max-width:560px;padding:16px 18px;position:relative}
+.a2hs img{width:48px;height:48px;border-radius:11px;flex:none}
+.a2hs b{display:block;font-size:15px;margin-bottom:2px}
+.a2hs p{margin:0;font-size:13.5px;color:var(--text-2);line-height:1.6}
+.a2hs ol{margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--text-2);line-height:1.7}
+.a2hs .share{display:inline-block;vertical-align:-3px}
+.a2hs .x-btn{position:absolute;top:6px;right:6px;width:28px;height:28px;font-size:18px}
+.a2hs .btn{margin-top:10px}
 
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
@@ -955,6 +969,43 @@ $("#wlbtn").onclick = () => showWatchlist();
 wlBadge();
 if (location.protocol !== "file:") { loadAlerts(); initAccount(); }
 
+/* Hinweis: App auf den Startbildschirm legen */
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; if ($(".welcome")) welcome(); });
+function isStandalone() {
+  return window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+}
+function a2hsHint() {
+  if (isStandalone()) return "";
+  try { if (localStorage.getItem("ac-a2hs-hidden") === "1") return ""; } catch (e) {}
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(ua);
+  const shareIcon = `<svg class="share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Teilen-Symbol"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v9h14v-9"/></svg>`;
+  const iosSteps = `<ol><li>Unten in Safari auf ${shareIcon} <b style="display:inline;font-size:inherit">Teilen</b> tippen</li>
+    <li><b style="display:inline;font-size:inherit">„Zum Home-Bildschirm“</b> wählen (ggf. etwas nach unten scrollen)</li>
+    <li>Auf <b style="display:inline;font-size:inherit">„Hinzufügen“</b> tippen</li></ol>`;
+  const androidSteps = `<ol><li>In Chrome oben rechts auf das Menü <b style="display:inline;font-size:inherit">⋮</b> tippen</li>
+    <li><b style="display:inline;font-size:inherit">„Zum Startbildschirm hinzufügen“</b> bzw. <b style="display:inline;font-size:inherit">„App installieren“</b> wählen</li></ol>`;
+  const body = ios ? iosSteps : android ? androidSteps
+    : `<p style="margin-top:6px"><b style="display:inline;font-size:inherit">iPhone (Safari):</b> Teilen ${shareIcon} → „Zum Home-Bildschirm“ ·
+       <b style="display:inline;font-size:inherit">Android (Chrome):</b> Menü ⋮ → „Zum Startbildschirm hinzufügen“</p>`;
+  return `<div class="card a2hs" id="a2hs" role="note">
+    <img src="/static/apple-touch-icon.png" alt="">
+    <div><b>Tipp: Aktien-Check auf den Startbildschirm legen</b>
+      <p>Auf dem Handy startet die App dann wie eine normale App – mit eigenem Symbol, ohne Adressleiste und mit einem Tipp sofort da.</p>
+      ${body}
+      ${installPrompt ? `<button class="btn primary" id="a2hs-install">Jetzt installieren</button>` : ""}</div>
+    <button class="x-btn" id="a2hs-close" title="Hinweis ausblenden" aria-label="Hinweis ausblenden">×</button>
+  </div>`;
+}
+function bindA2hs() {
+  const c = $("#a2hs-close");
+  if (c) c.onclick = () => { try { localStorage.setItem("ac-a2hs-hidden", "1"); } catch (e) {} $("#a2hs").remove(); };
+  const i = $("#a2hs-install");
+  if (i) i.onclick = async () => { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; welcome(); };
+}
+
 /* Welcome */
 function welcome() {
   wlView = false;
@@ -965,6 +1016,7 @@ function welcome() {
        Wachstum, Charttechnik, Analystenkonsens und aktuelle Nachrichten aus geprüften Quellen.</p>
     <div class="quick">${["Allianz", "SAP.DE", "Apple", "NVIDIA", "Siemens", "Novo Nordisk", "Microsoft"]
       .map(x => `<button data-q="${x}">${x}</button>`).join("")}</div>
+    ${a2hsHint()}
     <div class="feat">
       <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
       <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
@@ -977,6 +1029,7 @@ function welcome() {
   wlBind($("#out"));
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
+  bindA2hs();
 }
 
 /* Run */
