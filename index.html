@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aktien-Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface-2:#f8f9fb; --border:#e4e7ec; --border-strong:#d0d5dd;
+  --text:#101828; --text-2:#475467; --text-3:#98a2b3;
+  --accent:#1f4fd8; --accent-soft:#eef3ff;
+  --pos:#067647; --pos-soft:#ecfdf3; --pos-line:#abefc6;
+  --neu:#b54708; --neu-soft:#fffaeb; --neu-line:#fedf89;
+  --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca;
+  --track:#eaecf0; --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  --radius:12px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c111d; --surface:#131a2a; --surface-2:#182033; --border:#232c3f; --border-strong:#334056;
+    --text:#f2f4f7; --text-2:#b4bccb; --text-3:#7a859a;
+    --accent:#7c9cff; --accent-soft:#1a2547;
+    --pos:#47cd89; --pos-soft:#0f2a1e; --pos-line:#1d5c3e;
+    --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
+    --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
+    --track:#232c3f; --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c111d; --surface:#131a2a; --surface-2:#182033; --border:#232c3f; --border-strong:#334056;
+  --text:#f2f4f7; --text-2:#b4bccb; --text-3:#7a859a;
+  --accent:#7c9cff; --accent-soft:#1a2547;
+  --pos:#47cd89; --pos-soft:#0f2a1e; --pos-line:#1d5c3e;
+  --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
+  --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
+  --track:#232c3f; --shadow:none;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01"}
+.num{font-variant-numeric:tabular-nums}
+a{color:inherit}
+.container{max-width:1200px;margin:0 auto;padding:0 16px}
+
+/* ---------- Top bar ---------- */
+.topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 88%,transparent);
+  backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--border)}
+.topbar .container{display:flex;align-items:center;gap:20px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;white-space:nowrap}
+.logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
+.brand small{display:block;font-weight:500;font-size:11.5px;color:var(--text-3);letter-spacing:.02em;margin-top:-3px}
+.search{position:relative;flex:1;min-width:0;max-width:560px;margin-left:auto;display:flex}
+.search input{flex:1;min-width:0;width:100%;height:40px;padding:0 14px 0 38px;border:1px solid var(--border-strong);border-right:0;
+  border-radius:10px 0 0 10px;background:var(--surface);color:var(--text);font:inherit;font-size:14.5px}
+.search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search svg.s{position:absolute;left:12px;top:12px;color:var(--text-3)}
+.search button{height:40px;padding:0 18px;border:0;border-radius:0 10px 10px 0;background:var(--accent);color:#fff;
+  font:inherit;font-weight:600;font-size:14px;cursor:pointer}
+.search button:hover{filter:brightness(1.07)}
+.icon-btn{width:40px;height:40px;border-radius:10px;border:1px solid var(--border);background:var(--surface);
+  color:var(--text-2);cursor:pointer;display:grid;place-items:center;flex:none}
+.suggest{position:absolute;top:46px;left:0;right:0;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 12px 24px rgba(16,24,40,.12);overflow:hidden;display:none}
+.suggest div{padding:10px 14px;cursor:pointer;display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.suggest div+div{border-top:1px solid var(--border)}
+.suggest div:hover,.suggest div.act{background:var(--surface-2)}
+.suggest small{color:var(--text-3);white-space:nowrap}
+
+/* ---------- Section nav ---------- */
+.subnav{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:64px;z-index:15;display:none}
+.subnav .container{display:flex;gap:4px;overflow-x:auto;height:46px;align-items:center;scrollbar-width:none}
+.subnav a{padding:6px 12px;border-radius:8px;text-decoration:none;color:var(--text-2);font-size:13.5px;font-weight:500;white-space:nowrap}
+.subnav a:hover{background:var(--surface-2);color:var(--text)}
+.subnav .sym{margin-left:auto;font-size:13px;color:var(--text-3);white-space:nowrap}
+
+main{padding:28px 0 72px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.pad{padding:22px 24px}
+.eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+h2.section{font-size:19px;font-weight:700;letter-spacing:-.01em;margin:44px 0 4px}
+p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
+
+/* ---------- Hero ---------- */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px}
+@media (max-width:960px){.hero{grid-template-columns:1fr}}
+.co-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.co-name{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:6px 0 4px;line-height:1.2}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tag{font-size:12px;padding:3px 9px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2)}
+.price-box{text-align:right}
+.price{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.price small{font-size:15px;font-weight:600;color:var(--text-2);margin-left:4px}
+.delta{font-size:13px;font-weight:600;margin-top:4px}
+.biz{color:var(--text-2);font-size:14px;margin:18px 0 0;line-height:1.65}
+.biz.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.more{background:none;border:0;padding:0;color:var(--accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer;margin-top:6px}
+.alts{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-3);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.alts button{font:inherit;font-size:12px;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);cursor:pointer}
+.alts button:hover{border-color:var(--accent);color:var(--accent)}
+
+.verdict{display:flex;flex-direction:column;gap:18px;position:relative;overflow:hidden}
+.verdict::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--tone)}
+.verdict.pos{--tone:var(--pos);--tone-soft:var(--pos-soft)} .verdict.neu{--tone:var(--neu);--tone-soft:var(--neu-soft)} .verdict.neg{--tone:var(--neg);--tone-soft:var(--neg-soft)}
+.v-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:4px 10px;border-radius:999px;background:var(--tone-soft);color:var(--tone)}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.v-label{font-size:40px;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--tone);margin-top:10px}
+.v-score{text-align:right}
+.v-score b{display:block;font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1}
+.v-score span{font-size:12px;color:var(--text-3)}
+.scale{position:relative}
+.scale-bar{display:grid;grid-template-columns:repeat(14,1fr);gap:2px}
+.scale-bar i{height:8px;display:block;opacity:.22}
+.scale-bar i:first-child{border-radius:4px 0 0 4px} .scale-bar i:last-child{border-radius:0 4px 4px 0}
+.scale-bar i.p{background:var(--pos)} .scale-bar i.n{background:var(--neu)} .scale-bar i.x{background:var(--neg)}
+.scale-bar i.on{opacity:1}
+.scale-marker{position:absolute;top:-5px;width:2px;height:18px;background:var(--text);border-radius:1px;transform:translateX(-1px)}
+.scale-groups{display:grid;grid-template-columns:5fr 4fr 5fr;margin-top:8px;font-size:11.5px;color:var(--text-3);font-weight:500}
+.scale-groups span:nth-child(2){text-align:center} .scale-groups span:nth-child(3){text-align:right}
+.v-meta{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.v-meta div{background:var(--surface);padding:10px 12px}
+.v-meta dt{font-size:11.5px;color:var(--text-3);font-weight:500}
+.v-meta dd{margin:0;font-weight:600;font-size:15px}
+.note{font-size:13px;padding:10px 12px;border-radius:8px;background:var(--neu-soft);color:var(--neu);border:1px solid var(--neu-line)}
+.stamp{font-size:12px;color:var(--text-3)}
+
+/* ---------- Key facts ---------- */
+.facts{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--border);overflow:hidden;margin:16px 0 0}
+.facts div{padding:16px 18px;background:var(--surface)}
+@media (max-width:1100px){.facts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:640px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.facts dt{font-size:12px;color:var(--text-3);font-weight:500}
+.facts dd{margin:3px 0 0;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.facts dd small{font-size:12px;color:var(--text-3);font-weight:500;margin-left:4px}
+
+/* ---------- Overview ---------- */
+.overview{overflow:hidden}
+.ov-row{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(150px,1.3fr) minmax(120px,1fr) 52px;gap:16px;align-items:center;
+  padding:13px 24px;border-top:1px solid var(--border);text-decoration:none}
+.ov-row:first-child{border-top:0}
+.ov-row:hover{background:var(--surface-2)}
+.ov-cat{font-size:14px;color:var(--text-2)}
+.ov-adj{font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+.ov-w{font-size:12px;color:var(--text-3);text-align:right}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-3)}
+.dot.pos{background:var(--pos)} .dot.neu{background:var(--neu)} .dot.neg{background:var(--neg)}
+@media (max-width:640px){.ov-row{grid-template-columns:1fr 1fr;padding:12px 16px}.ov-row .meter{grid-column:1/-1}.ov-w{display:none}}
+.meter{position:relative;height:6px;background:var(--track);border-radius:3px}
+.meter i{position:absolute;top:0;bottom:0;border-radius:3px}
+.meter::after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--border-strong)}
+.meter i.pos{background:var(--pos)} .meter i.neu{background:var(--neu)} .meter i.neg{background:var(--neg)}
+
+/* ---------- Category details ---------- */
+.cats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:860px){.cats{grid-template-columns:1fr}}
+.cat{display:flex;flex-direction:column}
+.cat-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.cat-adj{font-size:22px;font-weight:700;letter-spacing:-.015em;margin:4px 0 0;line-height:1.25}
+.tone{font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.tone.pos{background:var(--pos-soft);color:var(--pos)} .tone.neu{background:var(--neu-soft);color:var(--neu)} .tone.neg{background:var(--neg-soft);color:var(--neg)}
+.cat .meter{margin:16px 0 4px}
+.meter-l{display:flex;justify-content:space-between;font-size:11px;color:var(--text-3)}
+.reasons{list-style:none;margin:16px 0 0;padding:0;font-size:13.5px;color:var(--text-2)}
+.reasons li{padding:7px 0;border-top:1px dashed var(--border);display:flex;gap:10px}
+.reasons li::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--text-3);margin-top:9px;flex:none}
+.options{margin-top:auto;padding-top:16px}
+.options .lbl{font-size:11.5px;color:var(--text-3);margin-bottom:6px}
+.opt{display:inline-block;font-size:12px;padding:2px 8px;border-radius:6px;margin:0 4px 4px 0;color:var(--text-3);background:var(--surface-2);border:1px solid var(--border)}
+.opt.sel{color:#fff;background:var(--accent);border-color:var(--accent);font-weight:600}
+.cat-foot{font-size:12px;color:var(--text-3);margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between}
+
+/* ---------- Fundamentals ---------- */
+.fund{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:860px){.fund{grid-template-columns:1fr}}
+.fund h3{font-size:14.5px;font-weight:600;margin:0;padding:16px 20px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+.fund h3 span{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:2px 7px}
+.frow{display:flex;justify-content:space-between;gap:16px;padding:11px 20px;border-top:1px solid var(--border);font-size:13.5px}
+.frow:first-child{border-top:0}
+.fk{color:var(--text-2);min-width:0}
+.fh{color:var(--text-3);font-size:12px;margin-top:2px}
+.fv{font-weight:600;text-align:right;flex:none;max-width:55%;overflow-wrap:anywhere}
+.wtable{width:100%;border-collapse:collapse;font-size:13.5px}
+
+/* ---------- News ---------- */
+.news-head{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--border)}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:none;font:inherit;font-size:13px;font-weight:500;color:var(--text-2);padding:6px 12px;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-weight:600}
+.seg button em{font-style:normal;color:var(--text-3);margin-left:4px;font-weight:500}
+.sent{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-2)}
+.sent-bar{width:120px;height:6px;border-radius:3px;background:var(--track);overflow:hidden;display:flex}
+.sent-bar i{display:block;height:100%}
+.tier-desc{font-size:12.5px;color:var(--text-3);padding:12px 20px 0}
+.nlist{list-style:none;margin:0;padding:4px 0 8px}
+.nlist li{display:flex;gap:12px;padding:12px 20px;border-top:1px solid var(--border)}
+.nlist li:first-child{border-top:0}
+.nlist .dot{margin-top:8px}
+.nlist a{text-decoration:none;font-weight:500;font-size:14.5px;line-height:1.45}
+.nlist a:hover{color:var(--accent)}
+.nmeta{font-size:12px;color:var(--text-3);margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px}
+.badge.ok{background:var(--pos-soft);color:var(--pos)} .badge.no{background:var(--neu-soft);color:var(--neu)}
+.news-foot{font-size:12.5px;color:var(--text-3);padding:14px 20px;border-top:1px solid var(--border);background:var(--surface-2);border-radius:0 0 var(--radius) var(--radius)}
+.empty{padding:28px 20px;color:var(--text-3);font-size:14px;text-align:center}
+
+/* ---------- Method ---------- */
+.method{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+@media (max-width:860px){.method{grid-template-columns:1fr}}
+.method h3{font-size:14.5px;margin:0 0 10px}
+.method p,.method li{font-size:13.5px;color:var(--text-2)}
+.method ul{margin:0;padding-left:18px}
+.wtable td{padding:6px 0;border-top:1px solid var(--border)} .wtable td:last-child{text-align:right;font-weight:600}
+.wtable tr:first-child td{border-top:0}
+.scale-list{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:13px}
+.scale-list span:nth-child(odd){color:var(--text-3);text-align:right}
+.disclaimer{margin-top:28px;font-size:12.5px;color:var(--text-3);line-height:1.7;border-top:1px solid var(--border);padding-top:18px}
+
+/* ---------- States ---------- */
+.welcome{max-width:640px;margin:56px auto 0;text-align:center}
+.welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
+.welcome p{color:var(--text-2);margin:0 0 26px}
+.quick{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.quick button{font:inherit;font-size:13.5px;padding:7px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);cursor:pointer}
+.quick button:hover{border-color:var(--accent);color:var(--accent)}
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:40px;text-align:left}
+@media (max-width:640px){.feat{grid-template-columns:1fr}}
+.feat div{padding:16px;font-size:13px;color:var(--text-2)}
+.feat b{display:block;color:var(--text);font-size:14px;margin-bottom:4px}
+.loading{max-width:420px;margin:72px auto;text-align:center}
+.spinner{width:34px;height:34px;border:3px solid var(--track);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;margin:0 auto 18px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.steps{list-style:none;padding:0;margin:18px 0 0;text-align:left;display:inline-block;font-size:13.5px;color:var(--text-3)}
+.steps li{padding:3px 0;transition:color .3s}
+.steps li.done{color:var(--text)} .steps li.done::before{content:"✓  ";color:var(--pos)}
+.steps li:not(.done)::before{content:"○  "}
+.error{max-width:520px;margin:64px auto;text-align:center;padding:28px}
+.error b{display:block;font-size:17px;margin-bottom:6px}
+@media (max-width:640px){
+  .brand>div:last-child{display:none} .topbar .container{gap:10px} .pad{padding:18px}
+  .search button{padding:0 12px} .v-meta{grid-template-columns:1fr}
+  .v-label{font-size:32px} .co-name{font-size:22px} .price-box{text-align:left}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="container">
+    <div class="brand">
+      <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
+      <div>Aktien-Check<small>Kaufen · Halten · Verkaufen</small></div>
+    </div>
+    <form class="search" id="f" autocomplete="off">
+      <svg class="s" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" placeholder="Unternehmen oder Ticker, z. B. Allianz, SAP.DE, NVDA">
+      <button type="submit">Prüfen</button>
+      <div class="suggest" id="sg"></div>
+    </form>
+    <button class="icon-btn" id="theme" title="Hell/Dunkel umschalten" aria-label="Farbschema umschalten">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+<nav class="subnav" id="subnav">
+  <div class="container">
+    <a href="#ueberblick">Überblick</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
+    <span class="sym" id="navsym"></span>
+  </div>
+</nav>
+<main><div class="container" id="out"></div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const nf = (x, d = 2) => x == null ? "–" : x.toLocaleString("de-DE", {minimumFractionDigits: d, maximumFractionDigits: d});
+const pc = (x, d = 1, sign = false) => x == null ? "–" : (sign && x > 0 ? "+" : "") + nf(x * 100, d) + " %";
+const big = x => {
+  if (x == null) return ["–", ""];
+  const a = Math.abs(x);
+  const [v, u] = a >= 1e12 ? [x / 1e12, "Bio."] : a >= 1e9 ? [x / 1e9, "Mrd."] : a >= 1e6 ? [x / 1e6, "Mio."] : [x, ""];
+  return [nf(v, a >= 1e6 ? 1 : 2), u];
+};
+const tone = s => s == null ? "" : s >= 0.15 ? "pos" : s <= -0.15 ? "neg" : "neu";
+const toneText = {pos: "positiv", neu: "neutral", neg: "negativ"};
+const groupTone = {Kaufen: "pos", Halten: "neu", Verkaufen: "neg"};
+
+/* Theme */
+try { const t = localStorage.getItem("ac-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("#theme").onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const nxt = cur === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = nxt;
+  try { localStorage.setItem("ac-theme", nxt); } catch (e) {}
+};
+
+/* Search & suggestions */
+let tmr, sugg = [], act = -1;
+$("#q").addEventListener("input", e => {
+  clearTimeout(tmr);
+  const v = e.target.value.trim();
+  if (v.length < 2) return hideSg();
+  tmr = setTimeout(async () => {
+    try { sugg = await (await fetch("/api/search?q=" + encodeURIComponent(v))).json(); act = -1; renderSg(); } catch (e) {}
+  }, 280);
+});
+$("#q").addEventListener("keydown", e => {
+  if (!sugg.length || $("#sg").style.display !== "block") return;
+  if (e.key === "ArrowDown") { act = Math.min(act + 1, sugg.length - 1); renderSg(); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { act = Math.max(act - 1, 0); renderSg(); e.preventDefault(); }
+  else if (e.key === "Enter" && act >= 0) { e.preventDefault(); pick(sugg[act].symbol); }
+  else if (e.key === "Escape") hideSg();
+});
+function renderSg() {
+  if (!sugg.length) return hideSg();
+  $("#sg").innerHTML = sugg.map((s, i) => `<div class="${i === act ? "act" : ""}" data-s="${esc(s.symbol)}">
+    <span>${esc(s.name)}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
+  $("#sg").style.display = "block";
+  $("#sg").querySelectorAll("div").forEach(d => d.onmousedown = () => pick(d.dataset.s));
+}
+function hideSg() { $("#sg").style.display = "none"; }
+function pick(sym) { $("#q").value = sym; hideSg(); run(sym); }
+document.addEventListener("click", e => { if (!e.target.closest(".search")) hideSg(); });
+$("#f").onsubmit = e => { e.preventDefault(); hideSg(); const v = $("#q").value.trim(); if (v) run(v); };
+
+/* Welcome */
+function welcome() {
+  $("#subnav").style.display = "none";
+  $("#out").innerHTML = `<section class="welcome">
+    <h1>Kaufen, halten oder verkaufen?</h1>
+    <p>Gib ein Unternehmen oder einen Ticker ein. Die Einschätzung kombiniert Bewertung, Bilanzqualität,
+       Wachstum, Charttechnik, Analystenkonsens und aktuelle Nachrichten aus geprüften Quellen.</p>
+    <div class="quick">${["Allianz", "SAP.DE", "Apple", "NVIDIA", "Siemens", "Novo Nordisk", "Microsoft"]
+      .map(x => `<button data-q="${x}">${x}</button>`).join("")}</div>
+    <div class="feat">
+      <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
+      <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
+      <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
+    </div></section>`;
+  document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
+}
+
+/* Run */
+let runId = 0;
+async function run(q) {
+  const id = ++runId;
+  $("#subnav").style.display = "none";
+  const steps = ["Unternehmen finden", "Kurs- und Bilanzdaten laden", "Nachrichten aus Tier 1–3 sammeln", "Kategorien bewerten"];
+  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div>
+    <b>Analysiere „${esc(q)}“</b><div class="stamp">Dauert in der Regel 10–25 Sekunden</div>
+    <ul class="steps">${steps.map(s => `<li>${s}</li>`).join("")}</ul></div>`;
+  const lis = [...document.querySelectorAll(".steps li")];
+  const timers = [1500, 5000, 10000].map((t, i) => setTimeout(() => lis[i]?.classList.add("done"), t));
+  try {
+    const r = await fetch("/api/analyze?q=" + encodeURIComponent(q));
+    const d = await r.json();
+    if (id !== runId) return;
+    if (!r.ok) throw new Error(d.error || "Unbekannter Fehler");
+    render(d);
+    window.scrollTo({top: 0});
+    history.replaceState(null, "", "?q=" + encodeURIComponent(d.symbol));
+  } catch (e) {
+    if (id !== runId) return;
+    $("#out").innerHTML = `<div class="card error"><b>Analyse nicht möglich</b><span class="stamp">${esc(e.message)}</span></div>`;
+  } finally { timers.forEach(clearTimeout); }
+}
+
+function meter(score) {
+  if (score == null) return `<div class="meter"></div>`;
+  const w = Math.min(1, Math.abs(score)) * 50;
+  const pos = score >= 0 ? `left:50%;width:${w}%` : `left:${50 - w}%;width:${w}%`;
+  return `<div class="meter"><i class="${tone(score)}" style="${pos}"></i></div>`;
+}
+
+/* Render */
+function render(d) {
+  const R = d.rating, F = d.facts || {}, N = d.news;
+  const gt = groupTone[R.group];
+  const idx = R.scale.findIndex(s => s.label === R.label);
+  const segCls = {Kaufen: "p", Halten: "n", Verkaufen: "x"};
+  const scaleBar = R.scale.map((s, i) => `<i class="${segCls[s.group]} ${i === idx ? "on" : ""}" title="${esc(s.label)}"></i>`).join("");
+  const markerLeft = ((idx + 0.5) / R.scale.length) * 100;
+  const perfTone = F.perf_1m == null ? "" : F.perf_1m >= 0 ? "var(--pos)" : "var(--neg)";
+  const allCats = [...d.categories, {key: "macro", title: "Makro & Umfeld", adjective: d.macro.score >= 0.15 ? "Rückenwind" : d.macro.score <= -0.15 ? "Gegenwind" : "neutral", score: d.macro.score, weight: d.macro.weight, reasons: d.macro.reasons, options: []}];
+
+  $("#navsym").textContent = `${d.name} · ${R.label}`;
+  $("#subnav").style.display = "block";
+
+  $("#out").innerHTML = `
+  <section id="ueberblick" class="hero">
+    <div class="card pad">
+      <div class="co-head">
+        <div>
+          <div class="eyebrow">${esc(d.symbol)} · ${esc(d.exchange)}</div>
+          <div class="co-name">${esc(d.name)}</div>
+          <div class="tags">${[d.sector, d.industry, d.country, d.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+        </div>
+        <div class="price-box">
+          <div class="price num">${nf(d.price)}<small>${esc(d.currency)}</small></div>
+          <div class="delta num" style="color:${perfTone}">${pc(F.perf_1m, 1, true)} <span class="stamp">1 Monat</span></div>
+          <div class="stamp num">1 Jahr: ${pc(F.perf_1y, 1, true)}</div>
+        </div>
+      </div>
+      ${d.business ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
+      ${d.alternatives?.length ? `<div class="alts">Andere Börsenplätze / Treffer:
+        ${d.alternatives.map(a => `<button data-s="${esc(a.symbol)}" title="${esc(a.name)}">${esc(a.symbol)} · ${esc(a.exchange)}</button>`).join("")}</div>` : ""}
+    </div>
+
+    <div class="card pad verdict ${gt}">
+      <div class="v-top">
+        <div><span class="pill">${esc(R.group)}</span><div class="v-label">${esc(R.label)}</div></div>
+        <div class="v-score"><b class="num">${R.score > 0 ? "+" : ""}${nf(R.score, 1)}</b><span>Score (−100 bis +100)</span></div>
+      </div>
+      <div class="scale">
+        <div class="scale-bar">${scaleBar}</div>
+        <div class="scale-marker" style="left:${markerLeft}%"></div>
+        <div class="scale-groups"><span>Kaufen</span><span>Halten</span><span>Verkaufen</span></div>
+      </div>
+      <dl class="v-meta" style="margin:0">
+        <div><dt>Gesamturteil</dt><dd>${esc(d.summary.adjective)}</dd></div>
+        <div><dt>Datenbasis</dt><dd>${esc(d.confidence)}</dd></div>
+        <div><dt>Analystenkonsens</dt><dd class="num">${F.rec_mean ? nf(F.rec_mean, 1) + " / 5" : "–"} <span class="stamp">${F.n_analysts ? `(${F.n_analysts} Analysten)` : ""}</span></dd></div>
+        <div><dt>Kursziel Ø</dt><dd class="num">${F.target ? nf(F.target) : "–"} <span class="stamp">${F.upside != null ? pc(F.upside, 1, true) : ""}</span></dd></div>
+      </dl>
+      ${d.notes.map(n => `<div class="note">${esc(n)}</div>`).join("")}
+      <div class="stamp">Stand ${esc(d.generated)} · Quellen: Yahoo Finance, Google News, Pressedienste</div>
+    </div>
+  </section>
+
+  <dl class="card facts" style="margin-bottom:0">
+    ${[["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["KGV", nf(F.pe, 1), F.fpe ? `fwd ${nf(F.fpe, 1)}` : ""],
+       ["EV/EBITDA", nf(F.ev_ebitda, 1)], ["FCF-Rendite", pc(F.fcf_yield)], ["Dividendenrendite", pc(F.div_yield, 2)],
+       ["52-Wochen-Spanne", F.lo52 ? `${nf(F.lo52, 0)}–${nf(F.hi52, 0)}` : "–"], ["Volatilität 1J", pc(F.vol, 0), F.beta ? `β ${nf(F.beta, 2)}` : ""]]
+      .map(([k, v, s]) => `<div><dt>${k}</dt><dd class="num">${v}${s ? `<small>${s}</small>` : ""}</dd></div>`).join("")}
+  </dl>
+
+  <h2 class="section">Auf einen Blick</h2>
+  <p class="section-sub">Das zutreffendste Adjektiv je Kategorie. Der Balken zeigt die Einordnung von negativ (links) bis positiv (rechts).</p>
+  <div class="card overview">
+    ${allCats.map(c => `<a class="ov-row" href="#cat-${c.key}">
+      <span class="ov-cat">${esc(c.title.replace(/ \(.*\)/, ""))}</span>
+      <span class="ov-adj"><span class="dot ${tone(c.score)}"></span>${esc(c.adjective)}</span>
+      ${meter(c.score)}
+      <span class="ov-w num">${nf(c.weight * 100, 0)} %</span></a>`).join("")}
+    <div class="ov-row" style="background:var(--surface-2)">
+      <span class="ov-cat"><b style="color:var(--text)">Zusammenfassendes Urteil</b></span>
+      <span class="ov-adj"><span class="dot ${gt}"></span>${esc(d.summary.adjective)}</span>
+      ${meter(R.score / 100)}<span class="ov-w">100 %</span></div>
+  </div>
+
+  <h2 class="section" id="kategorien">Einschätzung im Detail</h2>
+  <p class="section-sub">Welche Kennzahlen zu welchem Urteil geführt haben, inklusive aller möglichen Ausprägungen der Kategorie.</p>
+  <div class="cats">${allCats.map(c => `
+    <article class="card pad cat" id="cat-${c.key}">
+      <div class="cat-head">
+        <div><div class="eyebrow">${esc(c.title)}</div><div class="cat-adj">${esc(c.adjective)}</div></div>
+        ${c.score != null ? `<span class="tone ${tone(c.score)}">${toneText[tone(c.score)]}</span>` : ""}
+      </div>
+      ${meter(c.score)}
+      <div class="meter-l"><span>negativ</span><span>positiv</span></div>
+      <ul class="reasons">${c.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      ${c.options.length ? `<div class="options"><div class="lbl">Mögliche Ausprägungen</div>
+        ${c.options.map(o => `<span class="opt ${o === c.adjective ? "sel" : ""}">${esc(o)}</span>`).join("")}</div>` : ""}
+      <div class="cat-foot"><span>Teilscore <b class="num">${c.score == null ? "–" : (c.score > 0 ? "+" : "") + nf(c.score * 100, 0)}</b></span>
+        <span>Gewicht ${nf(c.weight * 100, 0)} %</span></div>
+    </article>`).join("")}
+  </div>
+
+  <h2 class="section" id="fundamental">Fundamentaldaten</h2>
+  <p class="section-sub">Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen.</p>
+  <div class="fund">${d.fundamentals.map((s, i) => `
+    <div class="card"><h3><span>${i + 1}</span>${esc(s.title)}</h3>
+      <div>${s.rows.map(r => `<div class="frow"><div class="fk">${esc(r[0])}${r[2] ? `<div class="fh">${esc(r[2])}</div>` : ""}</div>
+        <div class="fv num">${esc(r[1])}</div></div>`).join("")}</div>
+    </div>`).join("")}
+  </div>
+
+  <h2 class="section" id="news">Nachrichten der letzten 30 Tage</h2>
+  <p class="section-sub">${N.count} relevante Meldungen, davon ${N.count_trusted} aus Tier-1/2-Quellen. Punktfarbe = Tonalität der Schlagzeile.</p>
+  <div class="card">
+    <div class="news-head">
+      <div class="seg" id="seg">${["1", "2", "3", "0"].map((t, i) =>
+        `<button data-t="${t}" class="${i === 0 ? "on" : ""}">${t === "0" ? "Sonstige" : "Tier " + t}<em>${N.by_tier[t].length}</em></button>`).join("")}</div>
+      <div class="sent">Tonalität
+        <div class="sent-bar">${(() => { const tot = Math.max(1, N.pos + N.neg); return `<i style="width:${N.pos / tot * 100}%;background:var(--pos)"></i><i style="width:${N.neg / tot * 100}%;background:var(--neg)"></i>`; })()}</div>
+        <span class="num">${N.pos} positiv · ${N.neg} negativ</span></div>
+    </div>
+    <div class="tier-desc" id="tdesc"></div>
+    <ul class="nlist" id="nlist"></ul>
+    <div class="news-foot">Tier-3-Meldungen (Pressemitteilungen, Unternehmensseiten) gelten als <b>bestätigt</b>, wenn eine Tier-1/2-Quelle inhaltlich übereinstimmt. Unbestätigte fließen nur zur Hälfte ein.
+      ${N.errors.length ? `<br>Nicht erreichbar: ${esc(N.errors.join(", "))}` : ""}</div>
+  </div>
+
+  <h2 class="section" id="methodik">Methodik</h2>
+  <p class="section-sub">So entsteht die Empfehlung. Alle Regeln sind transparent und im Programmcode anpassbar.</p>
+  <div class="method">
+    <div class="card pad"><h3>Gewichtung</h3>
+      <table class="wtable">${allCats.map(c => `<tr><td>${esc(c.title.replace(/ \(.*\)/, ""))}</td><td>${nf(c.weight * 100, 0)} %</td></tr>`).join("")}</table>
+    </div>
+    <div class="card pad"><h3>Regeln</h3><ul>
+      <li>Jede Kategorie erhält einen Teilscore von −100 bis +100 aus mehreren Kennzahlen; daraus folgt das passende Adjektiv.</li>
+      <li>Bewertung: KGV und EV/EBITDA gegen Branche und eigene Historie, FCF-Rendite, PEG, Kursziel und Reverse-DCF.</li>
+      <li>Deckel: Bei sehr hoher Bewertung oder schwacher Qualität ist höchstens „Halten“ möglich.</li>
+      <li>News: Tier 1 = 100 %, Tier 2 = 90 %, Tier 3 = 50 % (unbestätigt 25 %), Sonstige = 30 %.</li>
+    </ul></div>
+    <div class="card pad"><h3>Skala</h3><div class="scale-list num">
+      ${R.scale.map((s, i) => `<span>${i === R.scale.length - 1 ? "darunter" : "ab " + (s.min > 0 ? "+" : "") + s.min}</span><span style="${s.label === R.label ? "font-weight:700;color:var(--text)" : ""}">${esc(s.label)}</span>`).join("")}
+    </div></div>
+  </div>
+  <p class="disclaimer">Hinweis: Automatisiertes, regelbasiertes Modell auf Basis öffentlich verfügbarer Daten – keine Anlageberatung und keine Aufforderung zum Kauf oder Verkauf von Wertpapieren.
+    Daten können verzögert, unvollständig oder fehlerhaft sein; Branchen-Referenzwerte sind Näherungen. Wichtige Entscheidungen bitte selbst prüfen.</p>`;
+
+  const showTier = t => {
+    document.querySelectorAll("#seg button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+    $("#tdesc").textContent = N.labels[t];
+    const items = N.by_tier[t];
+    $("#nlist").innerHTML = items.length ? items.map(n => `<li><span class="dot ${n.sentiment > 0 ? "pos" : n.sentiment < 0 ? "neg" : ""}"></span>
+      <div><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+      <div class="nmeta"><span>${esc(n.source)}</span><span>·</span><span>${esc(n.date)}</span>
+      ${n.verified === true ? `<span class="badge ok">bestätigt</span>` : n.verified === false ? `<span class="badge no">unbestätigt</span>` : ""}</div></div></li>`).join("")
+      : `<li class="empty">Keine Meldungen aus dieser Quellen-Gruppe gefunden.</li>`;
+  };
+  document.querySelectorAll("#seg button").forEach(b => b.onclick = () => showTier(b.dataset.t));
+  showTier("1");
+  document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
+  const bm = $("#bizmore");
+  if (bm) bm.onclick = () => { const b = $("#biz"); b.classList.toggle("clamp"); bm.textContent = b.classList.contains("clamp") ? "Mehr anzeigen" : "Weniger anzeigen"; };
+}
+
+if (location.protocol === "file:") {
+  $("#out").innerHTML = `<div class="card error"><b>Bitte über das Startskript öffnen</b>
+    <span class="stamp">Diese Datei wurde direkt geöffnet und kann so keine Daten laden. Im Ordner „Aktien-Check“
+    die Datei „Aktien-Check starten.bat“ doppelklicken – danach öffnet sich http://localhost:8765. Das schwarze Fenster offen lassen.</span></div>`;
+  $("#f").onsubmit = e => e.preventDefault();
+} else {
+  const pre = new URLSearchParams(location.search).get("q");
+  if (pre) { $("#q").value = pre; run(pre); } else welcome();
+}
+</script>
+</body>
+</html>
