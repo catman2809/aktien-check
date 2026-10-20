@@ -400,6 +400,24 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .hist-empty{color:var(--text-2);font-size:14px;line-height:1.6}
 .hist-empty b{color:var(--text)}
 
+/* ---------- Konto & Benutzerverwaltung ---------- */
+.acct-name{font-size:12px;font-weight:600;color:var(--text-2);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:640px){.acct-name{display:none}}
+.acct-btn{width:auto;padding:0 10px;gap:6px;display:inline-flex;align-items:center}
+.modal.wide{max-width:560px}
+.sec{margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+.sec h4{margin:0 0 4px;font-size:14.5px}
+.field input[type=text],.field input[type=password]{flex:1;min-width:0;height:42px;border-radius:9px;border:1px solid var(--border-strong);
+  background:var(--surface);color:var(--text);padding:0 12px;font:inherit;font-size:16px;width:100%}
+.form-msg{font-size:13px;margin-top:8px;min-height:18px}
+.form-msg.err{color:var(--neg)} .form-msg.ok{color:var(--pos)}
+.user-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.user-row b{font-size:14px}
+.user-row small{display:block;color:var(--text-3);font-size:12px}
+.user-row .acts{display:flex;gap:6px;flex-wrap:wrap}
+.user-row .btn{height:30px;font-size:12.5px;padding:0 10px}
+.role{font-size:11px;font-weight:700;padding:1px 7px;border-radius:5px;background:var(--accent-soft);color:var(--accent);margin-left:6px}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -443,6 +461,10 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
     <button class="icon-btn" id="wlbtn" title="Watchlist" aria-label="Watchlist öffnen">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>
       <span class="badge-n" id="wlcount" style="display:none">0</span>
+    </button>
+    <button class="icon-btn acct-btn" id="acctbtn" title="Konto" aria-label="Konto" style="display:none">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span class="acct-name" id="acctname"></span>
     </button>
     <button class="icon-btn" id="theme" title="Hell/Dunkel umschalten" aria-label="Farbschema umschalten">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
@@ -520,11 +542,40 @@ document.addEventListener("click", e => { if (!e.target.closest(".search")) hide
 $("#f").onsubmit = e => { e.preventDefault(); hideSg(); const v = $("#q").value.trim(); if (v) run(v); };
 
 /* Watchlist (pro Gerät im Browser gespeichert) */
-const WL_KEY = "ac-watchlist";
+let WL_KEY = "ac-watchlist";
+let ME = null, wlPushTimer = null;
 let wlSort = "score", wlView = false;
 const wlBusy = new Set();
 function wlLoad() { try { const l = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
-function wlSave(l) { try { localStorage.setItem(WL_KEY, JSON.stringify(l)); } catch (e) {} wlBadge(); }
+function wlSave(l, fromServer) {
+  try { localStorage.setItem(WL_KEY, JSON.stringify(l)); } catch (e) {}
+  wlBadge();
+  if (!fromServer && ME) {  // Änderungen gebündelt an den Server schicken (gilt dann auf allen Geräten)
+    clearTimeout(wlPushTimer);
+    wlPushTimer = setTimeout(() => api("/api/watchlist", {items: wlLoad()}).catch(() => {}), 600);
+  }
+}
+async function initAccount() {
+  if (location.protocol === "file:") return;
+  try { ME = await api("/api/me"); } catch (e) { return; }
+  WL_KEY = "ac-watchlist:" + ME.user;
+  // Einmalige Übernahme der bisherigen Geräte-Watchlist in das Konto
+  let legacy = [];
+  try { legacy = JSON.parse(localStorage.getItem("ac-watchlist")) || []; } catch (e) {}
+  try {
+    const srv = (await api("/api/watchlist")).items || [];
+    const have = new Set(srv.map(x => x.symbol));
+    const merged = [...srv, ...legacy.filter(x => x.symbol && !have.has(x.symbol))];
+    wlSave(merged, merged.length === srv.length);
+    if (legacy.length) { try { localStorage.removeItem("ac-watchlist"); } catch (e) {} }
+  } catch (e) {}
+  if (ME.multi) {
+    $("#acctbtn").style.display = "";
+    $("#acctname").textContent = ME.user;
+    $("#acctbtn").onclick = openAccount;
+  }
+  if (wlView) renderWl(); else if (!new URLSearchParams(location.search).get("q") && $(".welcome")) welcome();
+}
 function wlHas(sym) { return wlLoad().some(x => x.symbol === sym); }
 function wlSnap(d) {
   return {symbol: d.symbol, name: d.name, exchange: d.exchange, currency: d.currency, price: d.price,
@@ -620,7 +671,7 @@ function renderWl() {
   const l = wlSorted();
   $("#out").innerHTML = `
     <div class="wl-head">
-      <div><div class="eyebrow">Gespeichert auf diesem Gerät</div><h1>Watchlist <span class="stamp" style="font-size:15px">${l.length} ${l.length === 1 ? "Aktie" : "Aktien"}</span></h1></div>
+      <div><div class="eyebrow">${ME?.multi ? "Konto " + esc(ME.user) + " · auf allen Geräten" : "Gespeichert auf diesem Server"}</div><h1>Watchlist <span class="stamp" style="font-size:15px">${l.length} ${l.length === 1 ? "Aktie" : "Aktien"}</span></h1></div>
       ${l.length ? `<div class="wl-actions">
         <select id="wlsort" aria-label="Sortierung">
           ${[["score", "Nach Score"], ["name", "Nach Name"], ["perf", "Nach 1-Monats-Performance"], ["added", "Nach Hinzufügen"]]
@@ -638,7 +689,7 @@ function renderWl() {
     </div>
     <div id="wlsharebox"></div>
     <div id="pushbox"></div>
-    ${l.length ? `<p class="disclaimer">Die Watchlist wird nur in diesem Browser gespeichert. Mit „Liste teilen“ überträgst du sie auf ein anderes Gerät.
+    ${l.length ? `<p class="disclaimer">Die Watchlist gehört zu deinem Konto und ist auf allen deinen Geräten gleich. Mit „Liste teilen“ kannst du sie an andere weitergeben.
       Empfehlungen zeigen den Stand der letzten Analyse – „Alle aktualisieren“ analysiert jede Aktie neu (ca. 10–20 Sekunden pro Aktie).</p>` : ""}`;
   wlBind($("#out"));
   const sel = $("#wlsort"); if (sel) sel.onchange = () => { wlSort = sel.value; renderWl(); };
@@ -822,9 +873,76 @@ function renderPush() {
   };
 }
 
+/* Konto & Benutzerverwaltung */
+function fmtAgo(ts) { return ts ? ago(new Date(ts * 1000).toISOString()) : "nie"; }
+async function openAccount() {
+  closeModal();
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="card pad modal wide" role="dialog" aria-modal="true" aria-labelledby="acct-t">
+    <div class="eyebrow">Konto</div><h3 id="acct-t">Angemeldet als ${esc(ME.user)}${ME.admin ? `<span class="role">Admin</span>` : ""}</h3>
+    <div class="sec"><h4>Passwort ändern</h4>
+      <div class="field"><label for="pw-old">Aktuelles Passwort</label><input id="pw-old" type="password" autocomplete="current-password"></div>
+      <div class="field"><label for="pw-new">Neues Passwort (mind. 8 Zeichen)</label><input id="pw-new" type="password" autocomplete="new-password"></div>
+      <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="pw-save">Passwort ändern</button></div>
+      <div class="form-msg" id="pw-msg"></div>
+      <small class="stamp">Andere Geräte werden dabei abgemeldet, dieses bleibt angemeldet.</small></div>
+    ${ME.admin ? `<div class="sec"><h4>Benutzer verwalten</h4><div id="users-list" class="stamp">Lade …</div>
+      <h4 style="margin-top:18px">Neuen Benutzer anlegen</h4>
+      <div class="field"><label for="nu-name">Benutzername</label><input id="nu-name" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="z. B. anna"></div>
+      <div class="field"><label for="nu-pw">Startpasswort (mind. 8 Zeichen)</label><input id="nu-pw" type="text" autocomplete="off"></div>
+      <label class="check"><input type="checkbox" id="nu-admin"><span>Admin-Rechte (darf Benutzer verwalten)</span></label>
+      <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="nu-save">Benutzer anlegen</button></div>
+      <div class="form-msg" id="nu-msg"></div></div>` : ""}
+    <div class="modal-actions"><a class="btn danger" href="/logout">Abmelden</a><button class="btn" id="acct-close">Schließen</button></div>
+  </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) closeModal(); };
+  $("#acct-close").onclick = closeModal;
+  const msg = (id, text, ok) => { const m = $(id); m.textContent = text; m.className = "form-msg " + (ok ? "ok" : "err"); };
+  $("#pw-save").onclick = async () => {
+    try {
+      await api("/api/account/password", {old: $("#pw-old").value, new: $("#pw-new").value});
+      $("#pw-old").value = $("#pw-new").value = "";
+      msg("#pw-msg", "Passwort geändert.", true);
+    } catch (e) { if (e.message !== "login") msg("#pw-msg", e.message); }
+  };
+  if (!ME.admin) return;
+  const renderUsers = d => {
+    $("#users-list").innerHTML = d.users.map(u => `<div class="user-row">
+      <div><b>${esc(u.name)}</b>${u.admin ? `<span class="role">Admin</span>` : ""}
+        <small>Letzte Anmeldung: ${fmtAgo(u.last_login)} · ${u.watchlist} in Watchlist · ${u.alerts} Alarme</small></div>
+      <div class="acts">${u.name === d.me || u.name === "admin" ? `<span class="stamp">${u.name === d.me ? "du" : ""}</span>` : `
+        <button class="btn" data-act="reset" data-u="${esc(u.name)}">Passwort zurücksetzen</button>
+        <button class="btn" data-act="admin" data-u="${esc(u.name)}">${u.admin ? "Admin entziehen" : "Zum Admin machen"}</button>
+        <button class="btn danger" data-act="delete" data-u="${esc(u.name)}">Löschen</button>`}</div></div>`).join("");
+    $("#users-list").querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+      const name = b.dataset.u, act = b.dataset.act;
+      const body = {action: act, username: name};
+      if (act === "reset") {
+        const pw = prompt(`Neues Passwort für „${name}“ (mind. 8 Zeichen):`);
+        if (!pw) return;
+        body.password = pw;
+      }
+      if (act === "delete" && !confirm(`Benutzer „${name}“ mit allen Alarmen, Watchlist und Verlauf löschen?`)) return;
+      try { renderUsers(await api("/api/admin/users", body)); toast(act === "delete" ? "Benutzer gelöscht" : "Gespeichert"); }
+      catch (e) { if (e.message !== "login") toast(e.message); }
+    });
+  };
+  try { renderUsers(await api("/api/admin/users")); } catch (e) { $("#users-list").textContent = "Konnte Benutzer nicht laden."; }
+  $("#nu-save").onclick = async () => {
+    try {
+      renderUsers(await api("/api/admin/users", {action: "create", username: $("#nu-name").value.trim().toLowerCase(),
+                                                 password: $("#nu-pw").value, admin: $("#nu-admin").checked}));
+      msg("#nu-msg", `Benutzer „${$("#nu-name").value.trim().toLowerCase()}“ angelegt. Gib Benutzername und Startpasswort an die Person weiter.`, true);
+      $("#nu-name").value = $("#nu-pw").value = ""; $("#nu-admin").checked = false;
+    } catch (e) { if (e.message !== "login") msg("#nu-msg", e.message); }
+  };
+}
+
 $("#wlbtn").onclick = () => showWatchlist();
 wlBadge();
-if (location.protocol !== "file:") loadAlerts();
+if (location.protocol !== "file:") { loadAlerts(); initAccount(); }
 
 /* Welcome */
 function welcome() {

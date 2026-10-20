@@ -1755,7 +1755,6 @@ def analyze(query):
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
     }
-    result["history"] = safe(lambda: record_history(result), []) or []
     CACHE[key] = (time.time(), result)
     return result
 
@@ -1829,9 +1828,15 @@ class AlertStore:
             except Exception as e:
                 self.error = f"Speicher nicht lesbar: {type(e).__name__}"
                 data = {}
-            data.setdefault("alerts", {})
-            data.setdefault("topic", "aktien-check-" + secrets.token_urlsafe(12).replace("_", "-").lower())
+            data.setdefault("users", {})
+            data.setdefault("u", {})
             data.setdefault("last_check", None)
+            if any(k in data for k in ("alerts", "topic", "history")):  # altes Einzelbenutzer-Format -> Konto "admin"
+                sp = data["u"].setdefault("admin", {})
+                sp.setdefault("alerts", data.pop("alerts", {}))
+                if "topic" in data:
+                    sp.setdefault("topic", data.pop("topic"))
+                sp.setdefault("history", data.pop("history", {}))
             self.data = data
             return data
 
@@ -1860,14 +1865,70 @@ HISTORY_MAX_POINTS = 250    # Tage je Aktie
 HISTORY_MAX_SYMBOLS = 60
 
 
-def record_history(res):
-    """Speichert Score/Empfehlung/Kurs der Analyse (ein Punkt pro Tag) und liefert den Verlauf zurück."""
+USER_RE = re.compile(r"[a-z0-9_-]{2,32}")
+
+
+def new_topic():
+    return "aktien-check-" + secrets.token_urlsafe(12).replace("_", "-").lower()
+
+
+def user_space(user):
+    """Datenbereich eines Benutzers: Alarme, ntfy-Thema, Verlauf, Watchlist."""
     data = STORE.load()
+    with STORE.lock:
+        sp = data["u"].setdefault(user, {})
+        sp.setdefault("alerts", {})
+        sp.setdefault("history", {})
+        sp.setdefault("watchlist", [])
+        if not sp.get("topic"):
+            sp["topic"] = new_topic()
+        return sp
+
+
+def hash_pw(pw, salt=None, iterations=200_000):
+    salt = salt or secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), bytes.fromhex(salt), iterations).hex()
+    return f"pbkdf2${iterations}${salt}${h}"
+
+
+def check_pw(pw, stored):
+    try:
+        _, it, salt, h = stored.split("$")
+        return hmac.compare_digest(hash_pw(pw, salt, int(it)).split("$")[3], h)
+    except Exception:
+        return False
+
+
+def users():
+    data = STORE.load()
+    with STORE.lock:
+        u = data["users"]
+        if "admin" not in u:  # Admin-Konto: meldet sich (auch) mit APP_PASSWORD an
+            u["admin"] = {"pw": None, "admin": True, "created": time.time(), "ver": 0}
+        return u
+
+
+def authenticate(username, password):
+    acc = users().get(username)
+    if not acc or not password:
+        return False
+    if username == "admin" and app_password() and hmac.compare_digest(password.encode("utf-8"), app_password().encode("utf-8")):
+        return True  # APP_PASSWORD bleibt als Notfallzugang für den Admin gültig
+    return bool(acc.get("pw")) and check_pw(password, acc["pw"])
+
+
+def save_async():
+    threading.Thread(target=lambda: safe(STORE.save), daemon=True).start()
+
+
+def record_history(res, user):
+    """Speichert Score/Empfehlung/Kurs der Analyse (ein Punkt pro Tag) für den Benutzer und liefert den Verlauf."""
+    sp = user_space(user)
     sym, today = res["symbol"], datetime.now().strftime("%Y-%m-%d")
     entry = [today, round(res["rating"]["score"], 1), res["rating"]["label"],
              round(res["price"], 4) if res.get("price") else None]
     with STORE.lock:
-        hist = data.setdefault("history", {})
+        hist = sp["history"]
         pts = hist.setdefault(sym, [])
         if pts and pts[-1][0] == today:
             pts[-1] = entry
@@ -1880,6 +1941,21 @@ def record_history(res):
                     hist.pop(old, None)
         STORE.dirty = True
         return [list(x) for x in pts]
+
+
+def clean_watchlist(items):
+    out, seen = [], set()
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        sym = str(it.get("symbol") or "").upper()
+        if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym) or sym in seen:
+            continue
+        seen.add(sym)
+        keep = {k: it[k] for k in ("name", "exchange", "currency", "price", "label", "group", "score", "summary",
+                                   "perf_1m", "upside", "updated", "next_event") if k in it}
+        out.append({"symbol": sym, **keep})
+    return out[:150]
 
 
 def history_flush_loop():
@@ -1897,8 +1973,8 @@ def cron_key():
     return hashlib.sha256(("aktien-check-cron|" + app_password()).encode("utf-8")).hexdigest()[:24]
 
 
-def ntfy_send(title, message, symbol=None, tags=None, priority=4):
-    topic = STORE.load()["topic"]
+def ntfy_send(title, message, symbol=None, tags=None, priority=4, topic=None):
+    topic = topic or user_space("admin")["topic"]
     body = {"topic": topic, "title": title, "message": message, "tags": tags or [], "priority": priority}
     if symbol:
         body["click"] = f"{app_base_url()}/?q={urllib.parse.quote(symbol)}"
@@ -1928,7 +2004,9 @@ def run_alert_checks(force_rating=False):
         now = time.time()
         today = datetime.now().strftime("%Y-%m-%d")
         changed = False
-        for sym, a in list(data["alerts"].items()):
+        work = [(user, sp, sym, a) for user, sp in list(data["u"].items()) if user in users()
+                for sym, a in list(sp.get("alerts", {}).items())]
+        for user, sp, sym, a in work:
             st = a.setdefault("state", {})
             name, cur = a.get("name") or sym, a.get("currency") or ""
             msgs = []
@@ -1967,6 +2045,7 @@ def run_alert_checks(force_rating=False):
             if a.get("rating") and (force_rating or now - (st.get("rating_checked") or 0) > RATING_INTERVAL):
                 res = safe(lambda: analyze(sym))
                 if res:
+                    safe(lambda: record_history(res, user))
                     label, old = res["rating"]["label"], st.get("last_label")
                     st["rating_checked"] = now
                     if old and label != old:
@@ -1975,8 +2054,8 @@ def run_alert_checks(force_rating=False):
                                      ["bell"]))
                     st["last_label"] = label
             for title, msg, tags in msgs:
-                ok = safe(lambda: ntfy_send(title, msg, sym, tags), False)
-                fired.append({"symbol": sym, "title": title, "sent": bool(ok)})
+                ok = safe(lambda: ntfy_send(title, msg, sym, tags, topic=sp.get("topic")), False)
+                fired.append({"user": user, "symbol": sym, "title": title, "sent": bool(ok)})
                 st.setdefault("log", []).insert(0, {"t": now, "title": title})
                 st["log"] = st["log"][:10]
             changed = True
@@ -1995,16 +2074,17 @@ def alert_loop():
         time.sleep(CHECK_INTERVAL)
 
 
-def alerts_payload(host_url=""):
+def alerts_payload(user, host_url=""):
     data = STORE.load()
+    sp = user_space(user)
     base = host_url or app_base_url()
-    return {"alerts": data["alerts"], "topic": data["topic"], "last_check": data.get("last_check"),
+    return {"alerts": sp["alerts"], "topic": sp["topic"], "last_check": data.get("last_check"), "user": user,
             "storage": STORE.backend, "persistent": STORE.persistent, "error": STORE.error,
             "hosted": "RENDER" in os.environ,
             "cron_url": f"{base}/api/cron?key={cron_key()}" if app_password() else ""}
 
 
-def save_alert(body):
+def save_alert(body, user):
     sym = str(body.get("symbol") or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
         raise ValueError("Ungültiges Symbol")
@@ -2015,18 +2095,18 @@ def save_alert(body):
     cfg = {"name": str(body.get("name") or sym)[:80], "currency": str(body.get("currency") or "")[:6],
            "below": pos("below"), "above": pos("above"), "move": pos("move"), "rating": bool(body.get("rating")),
            "events": bool(body.get("events"))}
-    data = STORE.load()
+    alerts = user_space(user)["alerts"]
     with STORE.lock:
         if not (cfg["below"] or cfg["above"] or cfg["move"] or cfg["rating"] or cfg["events"]):
-            data["alerts"].pop(sym, None)
+            alerts.pop(sym, None)
         else:
-            old = data["alerts"].get(sym, {}).get("state", {})
+            old = alerts.get(sym, {}).get("state", {})
             # Neu gespeichert = scharf geschaltet; Verlauf und letzte Empfehlung bleiben erhalten
             cfg["state"] = {"log": old.get("log", []), "events_sent": old.get("events_sent", []),
                             "last_label": str(body.get("label") or "") or old.get("last_label"),
                             "rating_checked": time.time() if body.get("label") else old.get("rating_checked"),
                             "created": old.get("created") or time.time()}
-            data["alerts"][sym] = cfg
+            alerts[sym] = cfg
         STORE.save()
 
 
@@ -2048,21 +2128,24 @@ def session_secret():
     return hashlib.sha256(("aktien-check-session|" + app_password()).encode("utf-8")).digest()
 
 
-def make_session_token():
-    exp = str(int(time.time()) + SESSION_DAYS * 86400)
-    sig = hmac.new(session_secret(), exp.encode(), hashlib.sha256).hexdigest()
-    return f"{exp}.{sig}"
+def make_session_token(user):
+    """Token "benutzer.ablauf.version.signatur"; Version steigt bei Passwortwechsel -> alte Sitzungen ungültig."""
+    ver = int(users().get(user, {}).get("ver", 0))
+    payload = f"{user}.{int(time.time()) + SESSION_DAYS * 86400}.{ver}"
+    sig = hmac.new(session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
 
 
-def session_valid(token):
+def session_user(token):
     try:
-        exp, sig = token.split(".", 1)
-        if int(exp) < time.time():
-            return False
-        good = hmac.new(session_secret(), exp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, good)
+        user, exp, ver, sig = token.split(".")
+        good = hmac.new(session_secret(), f"{user}.{exp}.{ver}".encode(), hashlib.sha256).hexdigest()
+        if int(exp) < time.time() or not hmac.compare_digest(sig, good):
+            return None
+        acc = users().get(user)
+        return user if acc and int(acc.get("ver", 0)) == int(ver) else None
     except Exception:
-        return False
+        return None
 
 
 def too_many_failures(ip):
@@ -2110,10 +2193,13 @@ small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-al
   <p>Bitte einmal anmelden – dieses Gerät bleibt danach angemeldet.</p>
   {error}
   <input type="hidden" name="next" value="{next}">
-  <label for="pw">Passwort</label>
-  <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
+  <label for="un">Benutzername</label>
+  <input id="un" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"
+    value="{user}" required {ufocus}>
+  <label for="pw" style="margin-top:12px">Passwort</label>
+  <input id="pw" name="password" type="password" autocomplete="current-password" required {pfocus}>
   <button type="submit">Anmelden</button>
-  <small>Angemeldet für {days} Tage oder bis das Passwort geändert wird.</small>
+  <small>Angemeldet für {days} Tage oder bis das Passwort geändert wird. Zugang erhältst du vom Administrator.</small>
 </form></body></html>"""
 
 
@@ -2121,9 +2207,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, ctype):
+    def send(self, code, body, ctype, cookie=None):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(code)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
@@ -2134,16 +2222,29 @@ class Handler(BaseHTTPRequestHandler):
         fwd = self.headers.get("X-Forwarded-For", "")
         return fwd.split(",")[0].strip() if fwd else self.client_address[0]
 
-    def logged_in(self):
+    def current_user(self):
         if not app_password():
-            return True
+            return "admin"  # lokal ohne Passwort: ein Benutzer
+        if hasattr(self, "_user"):
+            return self._user
         jar = http.cookies.SimpleCookie()
         try:
             jar.load(self.headers.get("Cookie", ""))
         except http.cookies.CookieError:
-            return False
+            jar = {}
         c = jar.get(SESSION_COOKIE)
-        return bool(c and session_valid(c.value))
+        self._user = session_user(c.value) if c else None
+        return self._user
+
+    def logged_in(self):
+        return self.current_user() is not None
+
+    def is_admin(self):
+        u = self.current_user()
+        return bool(u and users().get(u, {}).get("admin"))
+
+    def send_json(self, obj, code=200, cookie=None):
+        return self.send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8", cookie)
 
     def redirect(self, location, cookie=None):
         self.send_response(303)
@@ -2158,10 +2259,12 @@ class Handler(BaseHTTPRequestHandler):
         secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "") == "https" else ""
         return f"{SESSION_COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax{secure}"
 
-    def login_page(self, error="", nxt="/", code=200):
+    def login_page(self, error="", nxt="/", code=200, user=""):
         err = f'<div class="err">{error}</div>' if error else ""
-        safe_next = nxt.replace('"', "").replace("<", "").replace(">", "")
-        page = LOGIN_PAGE.replace("{error}", err).replace("{next}", safe_next).replace("{days}", str(SESSION_DAYS))
+        clean = lambda v: v.replace('"', "").replace("<", "").replace(">", "")
+        page = (LOGIN_PAGE.replace("{error}", err).replace("{next}", clean(nxt)).replace("{days}", str(SESSION_DAYS))
+                .replace("{user}", clean(user)).replace("{ufocus}", "" if user else "autofocus")
+                .replace("{pfocus}", "autofocus" if user else ""))
         return self.send(code, page, "text/html; charset=utf-8")
 
     def require_login(self, u):
@@ -2189,20 +2292,47 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
-        if u.path.startswith("/api/alerts"):
+        if u.path.startswith("/api/"):
             if not self.require_login(u):
                 return
             if "application/json" not in self.headers.get("Content-Type", ""):
                 return self.send(415, json.dumps({"error": "JSON erwartet"}), "application/json")
             body = self.json_body()
+            user = self.current_user()
             try:
+                if u.path == "/api/watchlist":
+                    with STORE.lock:
+                        user_space(user)["watchlist"] = clean_watchlist(body.get("items"))
+                    save_async()
+                    return self.send_json({"items": user_space(user)["watchlist"]})
+                if u.path == "/api/account/password":
+                    if not app_password():
+                        raise ValueError("Lokal ohne Anmeldung nicht nötig")
+                    if not authenticate(user, str(body.get("old") or "")):
+                        raise ValueError("Das aktuelle Passwort stimmt nicht.")
+                    new = str(body.get("new") or "")
+                    if len(new) < 8:
+                        raise ValueError("Das neue Passwort muss mindestens 8 Zeichen haben.")
+                    with STORE.lock:
+                        acc = users()[user]
+                        acc["pw"], acc["ver"] = hash_pw(new), int(acc.get("ver", 0)) + 1  # andere Geräte abmelden
+                    STORE.save()
+                    return self.send_json({"ok": True}, cookie=self.cookie(make_session_token(user), SESSION_DAYS * 86400))
+                if u.path == "/api/admin/users":
+                    if not self.is_admin():
+                        return self.send_json({"error": "Nur für Administratoren"}, 403)
+                    self.admin_action(body, user)
+                    return self.send_json(self.admin_list())
+                if not u.path.startswith("/api/alerts"):
+                    return self.send(404, json.dumps({"error": "unbekannt"}), "application/json")
                 if u.path == "/api/alerts":
-                    save_alert(body)
+                    save_alert(body, user)
                 elif u.path == "/api/alerts/test":
-                    ntfy_send("✅ Aktien-Check: Test", "Push-Benachrichtigungen funktionieren.", tags=["white_check_mark"])
+                    ntfy_send("✅ Aktien-Check: Test", f"Push-Benachrichtigungen für „{user}“ funktionieren.",
+                              tags=["white_check_mark"], topic=user_space(user)["topic"])
                 elif u.path == "/api/alerts/check":
-                    fired = run_alert_checks(force_rating=bool(body.get("rating")))
-                    return self.send(200, json.dumps({**alerts_payload(self.host_url()), "fired": fired},
+                    fired = [f for f in run_alert_checks(force_rating=bool(body.get("rating"))) if f.get("user") == user]
+                    return self.send(200, json.dumps({**alerts_payload(user, self.host_url()), "fired": fired},
                                                      ensure_ascii=False), "application/json; charset=utf-8")
                 else:
                     return self.send(404, json.dumps({"error": "unbekannt"}), "application/json")
@@ -2211,7 +2341,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send(502, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False),
                                  "application/json")
-            return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
+            return self.send(200, json.dumps(alerts_payload(user, self.host_url()), ensure_ascii=False),
                              "application/json; charset=utf-8")
         if u.path != "/login":
             return self.send(404, "Not found", "text/plain")
@@ -2224,11 +2354,61 @@ class Handler(BaseHTTPRequestHandler):
         if too_many_failures(ip):
             return self.login_page("Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.", nxt, 429)
         given = (form.get("password") or [""])[0]
-        if app_password() and hmac.compare_digest(given.encode("utf-8"), app_password().encode("utf-8")):
-            return self.redirect(nxt, self.cookie(make_session_token(), SESSION_DAYS * 86400))
+        username = (form.get("username") or [""])[0].strip().lower()
+        if app_password() and USER_RE.fullmatch(username) and authenticate(username, given):
+            with STORE.lock:
+                users()[username]["last_login"] = time.time()
+            STORE.dirty = True
+            return self.redirect(nxt, self.cookie(make_session_token(username), SESSION_DAYS * 86400))
         note_failure(ip)
         time.sleep(1)  # bremst Durchprobieren
-        return self.login_page("Falsches Passwort.", nxt, 401)
+        return self.login_page("Benutzername oder Passwort falsch.", nxt, 401, username)
+
+    def admin_list(self):
+        out = []
+        for name, acc in sorted(users().items()):
+            sp = STORE.load()["u"].get(name, {})
+            out.append({"name": name, "admin": bool(acc.get("admin")), "created": acc.get("created"),
+                        "last_login": acc.get("last_login"), "alerts": len(sp.get("alerts", {})),
+                        "watchlist": len(sp.get("watchlist", []))})
+        return {"users": out, "me": self.current_user()}
+
+    def admin_action(self, body, me):
+        action = body.get("action")
+        if not action:
+            return
+        name = str(body.get("username") or "").strip().lower()
+        if not USER_RE.fullmatch(name):
+            raise ValueError("Benutzername: 2–32 Zeichen, nur a–z, 0–9, - und _")
+        accs = users()
+        with STORE.lock:
+            if action == "create":
+                if name in accs:
+                    raise ValueError("Diesen Benutzer gibt es bereits.")
+                pw = str(body.get("password") or "")
+                if len(pw) < 8:
+                    raise ValueError("Das Startpasswort muss mindestens 8 Zeichen haben.")
+                accs[name] = {"pw": hash_pw(pw), "admin": bool(body.get("admin")), "created": time.time(), "ver": 0}
+                user_space(name)
+            elif name not in accs:
+                raise ValueError("Unbekannter Benutzer")
+            elif action == "reset":
+                pw = str(body.get("password") or "")
+                if len(pw) < 8:
+                    raise ValueError("Das neue Passwort muss mindestens 8 Zeichen haben.")
+                accs[name]["pw"], accs[name]["ver"] = hash_pw(pw), int(accs[name].get("ver", 0)) + 1
+            elif action == "delete":
+                if name == me or name == "admin":
+                    raise ValueError("Dieses Konto kann nicht gelöscht werden.")
+                accs.pop(name)
+                STORE.load()["u"].pop(name, None)
+            elif action == "admin":
+                if name == me or name == "admin":
+                    raise ValueError("Die eigenen Admin-Rechte können nicht geändert werden.")
+                accs[name]["admin"] = not accs[name].get("admin")
+            else:
+                raise ValueError("Unbekannte Aktion")
+        STORE.save()
 
     def do_HEAD(self):
         self.send_response(200)
@@ -2277,8 +2457,15 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     out[name] = f"{type(e).__name__}: {e}"[:300]
             return self.send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+        user = self.current_user()
+        if u.path == "/api/me":
+            return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
+        if u.path == "/api/watchlist":
+            return self.send_json({"items": user_space(user)["watchlist"]})
+        if u.path == "/api/admin/users":
+            return self.send_json(self.admin_list()) if self.is_admin() else self.send_json({"error": "Nur für Administratoren"}, 403)
         if u.path == "/api/alerts":
-            return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
+            return self.send(200, json.dumps(alerts_payload(user, self.host_url()), ensure_ascii=False),
                              "application/json; charset=utf-8")
         if u.path == "/api/ics":
             sym = q.upper()
@@ -2308,6 +2495,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 print(f"Analysiere: {q} …")
                 res = analyze(q)
+                res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
                 print(f"  -> {res['symbol']}: {res['rating']['label']} ({res['rating']['score']})")
                 return self.send(200, json.dumps(res, ensure_ascii=False), "application/json; charset=utf-8")
             except ValueError as e:
