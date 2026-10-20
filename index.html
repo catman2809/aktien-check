@@ -478,6 +478,77 @@ table.peers .neg{color:var(--neg)}
 .guide .code{margin-top:6px}
 .guide .btn{height:32px;font-size:13px}
 
+/* ---------- PDF-/Drucklayout ---------- */
+.print-only{display:none}
+@media print{
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"]{
+    --bg:#ffffff; --surface:#ffffff; --surface-2:#f6f7f9; --border:#d9dde3; --border-strong:#c4cad3;
+    --text:#101828; --text-2:#344054; --text-3:#667085; --accent:#1f4fd8; --accent-soft:#eef3ff;
+    --pos:#067647; --pos-soft:#ecfdf3; --pos-line:#abefc6; --neu:#b54708; --neu-soft:#fffaeb; --neu-line:#fedf89;
+    --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca; --track:#eaecf0; --shadow:none;
+    --sma50:#eb6834; --sma200:#6250d6;
+  }
+  @page{size:A4;margin:14mm 12mm}
+  html,body{background:#fff !important;font-size:12px}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .topbar,.subnav,.watch-row,.alts,.more,.chart-ctrl,#ch-seg,.ind-row,.toggle,.seg,#nlist,.tier-desc,.ev-head .btn,
+  .bell-btn,.x-btn,.toast,.modal-bg,.a2hs,#ch-hover,#ch-tip,.chart-tip,.peer-foot br{display:none !important}
+  .print-only{display:block !important}
+  main{padding:0}
+  .container{max-width:none;padding:0}
+  .card{box-shadow:none !important;break-inside:avoid;page-break-inside:avoid}
+  h2.section{margin:18px 0 4px;break-after:avoid;page-break-after:avoid}
+  p.section-sub{break-after:avoid}
+  .hero{grid-template-columns:1.2fr 1fr}
+  .biz.clamp{display:block;-webkit-line-clamp:unset;overflow:visible}
+  .cats,.fund,.method{grid-template-columns:1fr 1fr}
+  .facts{grid-template-columns:repeat(7,minmax(0,1fr))}
+  .chart-wrap{height:230px}
+  .peer-scroll{overflow:visible}
+  table.peers{min-width:0}
+  .ov-row{padding:7px 14px}
+  .print-head{display:flex !important;justify-content:space-between;gap:12px;font-size:11px;color:var(--text-2);
+    border-bottom:2px solid var(--accent);padding-bottom:6px;margin-bottom:12px}
+  .print-news{padding:4px 20px 12px}
+  .print-news h4{font-size:12px;margin:10px 0 4px}
+  .print-news ul{margin:0;padding-left:0;list-style:none}
+  .print-news li{font-size:11.5px;padding:3px 0;display:flex;gap:8px;align-items:baseline}
+  .print-news .dot{margin-top:0;flex:none}
+  .legal{break-inside:avoid}
+  a{text-decoration:none;color:inherit}
+  /* kompakter: mehr Inhalt pro Seite */
+  .pad{padding:12px 14px}
+  .grid,.cats,.fund,.method{gap:10px}
+  .cats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .fund{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .method{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .co-name{font-size:20px} .price{font-size:22px} .v-label{font-size:30px}
+  .biz{font-size:11px;line-height:1.5;margin-top:10px}
+  h2.section{font-size:15px;margin-top:14px}
+  p.section-sub{font-size:11px;margin-bottom:8px}
+  .cat-adj{font-size:15px}
+  .cat .meter{margin:8px 0 2px}
+  .reasons{font-size:10.5px;margin-top:8px}
+  .reasons li{padding:3px 0}
+  .options{padding-top:8px}
+  .opt{font-size:9px;padding:1px 5px;margin:0 3px 3px 0}
+  .cat-foot{margin-top:6px;padding-top:6px;font-size:10px}
+  .ov-row{padding:5px 12px}
+  .ov-cat,.ov-adj{font-size:11.5px}
+  .frow{padding:6px 12px;font-size:11px}
+  .fund h3{padding:9px 12px;font-size:12px}
+  .ev-item{padding:7px 14px}
+  .ev-head{padding:10px 14px}
+  .hist-body{padding:10px 14px}
+  .hist-wrap{height:150px}
+  table.peers td,table.peers th{padding:6px 10px}
+  .facts div{padding:10px 12px}
+  .facts dd{font-size:14px}
+  .chart-card{padding:12px 14px 8px}
+  .legal{margin-top:16px;padding:12px 14px}
+  .legal p{font-size:11px}
+}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -1564,6 +1635,19 @@ function peersSection(d) {
   </div>`;
 }
 
+/* PDF-Export über die Druckfunktion des Browsers (Drucklayout siehe @media print) */
+function exportPdf(d) {
+  const old = document.title;
+  const date = new Date().toLocaleDateString("de-DE");
+  document.title = `Aktien-Check ${d.name} ${date}`.replace(/[\\/:*?"<>|]/g, "");  // wird zum Dateinamen
+  const restore = () => { document.title = old; window.removeEventListener("afterprint", restore); };
+  window.addEventListener("afterprint", restore);
+  if (isStandalone() && /iPhone|iPad/.test(navigator.userAgent)) {
+    toast("Tipp: Im Druckdialog auf „Teilen“ → „In Dateien sichern“ tippen");
+  }
+  setTimeout(() => { window.print(); setTimeout(restore, 1500); }, 50);
+}
+
 /* Render */
 const FG_DE = {"Extreme Fear": "extreme Angst", "Fear": "Angst", "Neutral": "neutral", "Greed": "Gier", "Extreme Greed": "extreme Gier"};
 function render(d) {
@@ -1581,6 +1665,10 @@ function render(d) {
   $("#subnav").style.display = "block";
 
   $("#out").innerHTML = `
+  <div class="print-only print-head">
+    <div><b>Aktien-Check</b> · Analyse ${esc(d.name)} (${esc(d.symbol)})</div>
+    <div>Stand ${esc(d.generated)}${ME?.multi ? " · erstellt für " + esc(ME.user) : ""} · ${esc(location.host)}</div>
+  </div>
   <section id="ueberblick" class="hero">
     <div class="card pad">
       <div class="co-head">
@@ -1596,7 +1684,8 @@ function render(d) {
         </div>
       </div>
       <div class="watch-row"><button class="btn ${wlHas(d.symbol) ? "on" : ""}" id="wltoggle">${wlHas(d.symbol) ? "★ In der Watchlist" : "☆ Zur Watchlist"}</button>
-        <button class="btn ${ALERTS?.alerts?.[d.symbol] ? "on" : ""}" id="alertbtn">${BELL_SVG} Preisalarm</button></div>
+        <button class="btn ${ALERTS?.alerts?.[d.symbol] ? "on" : ""}" id="alertbtn">${BELL_SVG} Preisalarm</button>
+        <button class="btn" id="pdfbtn" title="Analyse als PDF speichern"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6"/><path d="M9 15l3 3 3-3"/></svg> Als PDF speichern</button></div>
       ${d.business ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
       ${d.alternatives?.length ? `<div class="alts">Andere Börsenplätze / Treffer:
         ${d.alternatives.map(a => `<button data-s="${esc(a.symbol)}" title="${esc(a.name)}">${esc(a.symbol)} · ${esc(a.exchange)}</button>`).join("")}</div>` : ""}
@@ -1715,6 +1804,9 @@ function render(d) {
     </div>
     <div class="tier-desc" id="tdesc"></div>
     <ul class="nlist" id="nlist"></ul>
+    <div class="print-only print-news">${["1", "2", "3"].map(t => N.by_tier[t].length ? `<h4>${esc(N.labels[t])}</h4><ul>
+      ${N.by_tier[t].slice(0, 6).map(n => `<li><span class="dot ${n.sentiment > 0 ? "pos" : n.sentiment < 0 ? "neg" : ""}"></span>
+        ${esc(n.title)} <span class="stamp">– ${esc(n.source)}, ${esc(n.date)}${n.verified === true ? ", bestätigt" : n.verified === false ? ", unbestätigt" : ""}</span></li>`).join("")}</ul>` : "").join("")}</div>
     <div class="news-foot">Tier-3-Meldungen (Pressemitteilungen, Unternehmensseiten) gelten als <b>bestätigt</b>, wenn eine Tier-1/2-Quelle inhaltlich übereinstimmt. Unbestätigte fließen nur zur Hälfte ein.
       ${N.errors.length ? `<br>Nicht erreichbar: ${esc(N.errors.join(", "))}` : ""}</div>
   </div>
@@ -1776,6 +1868,7 @@ function render(d) {
     new ResizeObserver(() => { const w = $("#hist-wrap")?.clientWidth; if (w && w !== lastW) { lastW = w; drawHistory(d); } }).observe($("#hist-wrap"));
   }
   $("#alertbtn").onclick = () => openAlert(d.symbol, d);
+  $("#pdfbtn").onclick = () => exportPdf(d);
   const wt = $("#wltoggle");
   wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
   const bm = $("#bizmore");
