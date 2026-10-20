@@ -13,6 +13,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -1547,6 +1548,228 @@ def analyze(query):
 # ---------------------------------------------------------------------------
 # Webserver
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Preisalarme mit Push über ntfy (https://ntfy.sh)
+# ---------------------------------------------------------------------------
+ALERT_FILE = Path(__file__).with_name("alerts.json")
+GIST_DESCRIPTION = "aktien-check-alerts (automatisch verwaltet)"
+CHECK_INTERVAL = 600          # Sekunden zwischen Kursprüfungen
+RATING_INTERVAL = 12 * 3600   # Empfehlungswechsel höchstens alle 12 Std. prüfen (volle Analyse)
+
+
+def github_token():
+    return (os.environ.get("GITHUB_TOKEN") or "").strip()
+
+
+def gh_api(method, path, body=None):
+    req = urllib.request.Request(
+        "https://api.github.com" + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": f"Bearer {github_token()}", "Accept": "application/vnd.github+json",
+                 "User-Agent": "aktien-check", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read() or b"null")
+
+
+class AlertStore:
+    """Speichert Alarme dauerhaft: privates GitHub-Gist (wenn GITHUB_TOKEN gesetzt) oder lokale Datei."""
+
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.data = None
+        self.gist_id = None
+        self.error = ""
+
+    @property
+    def backend(self):
+        return "gist" if github_token() else "file"
+
+    @property
+    def persistent(self):
+        # Auf Render ist das Dateisystem flüchtig -> nur das Gist ist dauerhaft
+        return self.backend == "gist" or "RENDER" not in os.environ
+
+    def _find_gist(self):
+        for page in range(1, 4):
+            for g in gh_api("GET", f"/gists?per_page=100&page={page}") or []:
+                if g.get("description") == GIST_DESCRIPTION:
+                    return g["id"]
+        return None
+
+    def load(self):
+        with self.lock:
+            if self.data is not None:
+                return self.data
+            data = {}
+            try:
+                if self.backend == "gist":
+                    self.gist_id = self._find_gist()
+                    if self.gist_id:
+                        g = gh_api("GET", f"/gists/{self.gist_id}")
+                        data = json.loads(g["files"]["alerts.json"]["content"] or "{}")
+                elif ALERT_FILE.exists():
+                    data = json.loads(ALERT_FILE.read_text(encoding="utf-8") or "{}")
+                self.error = ""
+            except Exception as e:
+                self.error = f"Speicher nicht lesbar: {type(e).__name__}"
+                data = {}
+            data.setdefault("alerts", {})
+            data.setdefault("topic", "aktien-check-" + secrets.token_urlsafe(12).replace("_", "-").lower())
+            data.setdefault("last_check", None)
+            self.data = data
+            return data
+
+    def save(self):
+        with self.lock:
+            content = json.dumps(self.data, ensure_ascii=False, indent=1)
+            try:
+                if self.backend == "gist":
+                    files = {"alerts.json": {"content": content}}
+                    if self.gist_id:
+                        gh_api("PATCH", f"/gists/{self.gist_id}", {"files": files})
+                    else:
+                        g = gh_api("POST", "/gists", {"description": GIST_DESCRIPTION, "public": False, "files": files})
+                        self.gist_id = g["id"]
+                else:
+                    ALERT_FILE.write_text(content, encoding="utf-8")
+                self.error = ""
+            except Exception as e:
+                self.error = f"Speichern fehlgeschlagen: {type(e).__name__}"
+
+
+STORE = AlertStore()
+CHECK_LOCK = threading.Lock()
+
+
+def app_base_url():
+    return (os.environ.get("RENDER_EXTERNAL_URL") or f"http://localhost:{os.environ.get('PORT', PORT)}").rstrip("/")
+
+
+def cron_key():
+    return hashlib.sha256(("aktien-check-cron|" + app_password()).encode("utf-8")).hexdigest()[:24]
+
+
+def ntfy_send(title, message, symbol=None, tags=None, priority=4):
+    topic = STORE.load()["topic"]
+    body = {"topic": topic, "title": title, "message": message, "tags": tags or [], "priority": priority}
+    if symbol:
+        body["click"] = f"{app_base_url()}/?q={urllib.parse.quote(symbol)}"
+    req = urllib.request.Request("https://ntfy.sh/", data=json.dumps(body).encode("utf-8"),
+                                 headers={**UA, "Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status == 200
+
+
+def fmt_price(v, cur):
+    return f"{fnum(v, 2)} {cur}".strip()
+
+
+def live_quote(symbol):
+    fi = yf.Ticker(symbol).fast_info
+    last, prev = num(safe(lambda: fi.last_price)), num(safe(lambda: fi.previous_close))
+    return last, prev
+
+
+def run_alert_checks(force_rating=False):
+    """Prüft alle Alarme einmal. Gibt die Liste der ausgelösten Meldungen zurück."""
+    if not CHECK_LOCK.acquire(blocking=False):
+        return []
+    fired = []
+    try:
+        data = STORE.load()
+        now = time.time()
+        today = datetime.now().strftime("%Y-%m-%d")
+        changed = False
+        for sym, a in list(data["alerts"].items()):
+            st = a.setdefault("state", {})
+            name, cur = a.get("name") or sym, a.get("currency") or ""
+            msgs = []
+            if a.get("below") or a.get("above") or a.get("move"):
+                last, prev = safe(lambda: live_quote(sym), (None, None))
+                if last:
+                    st["last_price"] = last
+                    if a.get("below") and not st.get("below_fired") and last <= a["below"]:
+                        st["below_fired"] = now
+                        msgs.append((f"📉 {name} unter {fmt_price(a['below'], cur)}",
+                                     f"Aktueller Kurs: {fmt_price(last, cur)}", ["chart_with_downwards_trend"]))
+                    if a.get("above") and not st.get("above_fired") and last >= a["above"]:
+                        st["above_fired"] = now
+                        msgs.append((f"📈 {name} über {fmt_price(a['above'], cur)}",
+                                     f"Aktueller Kurs: {fmt_price(last, cur)}", ["chart_with_upwards_trend"]))
+                    if a.get("move") and prev:
+                        chg = last / prev - 1
+                        st["day_change"] = chg
+                        if abs(chg) * 100 >= a["move"] and st.get("move_day") != today:
+                            st["move_day"] = today
+                            sign = "+" if chg > 0 else ""
+                            msgs.append((f"⚡ {name} {sign}{fnum(chg * 100, 1)} % heute",
+                                         f"Kurs {fmt_price(last, cur)} (Vortag {fmt_price(prev, cur)}) – "
+                                         f"Schwelle ±{fnum(a['move'], 1)} %", ["zap"]))
+            if a.get("rating") and (force_rating or now - (st.get("rating_checked") or 0) > RATING_INTERVAL):
+                res = safe(lambda: analyze(sym))
+                if res:
+                    label, old = res["rating"]["label"], st.get("last_label")
+                    st["rating_checked"] = now
+                    if old and label != old:
+                        msgs.append((f"🔔 {name}: Empfehlung {old} → {label}",
+                                     f"Score {fnum(res['rating']['score'], 1)} · Urteil: {res['summary']['adjective']}",
+                                     ["bell"]))
+                    st["last_label"] = label
+            for title, msg, tags in msgs:
+                ok = safe(lambda: ntfy_send(title, msg, sym, tags), False)
+                fired.append({"symbol": sym, "title": title, "sent": bool(ok)})
+                st.setdefault("log", []).insert(0, {"t": now, "title": title})
+                st["log"] = st["log"][:10]
+            changed = True
+        data["last_check"] = now
+        if changed or fired:
+            STORE.save()
+        return fired
+    finally:
+        CHECK_LOCK.release()
+
+
+def alert_loop():
+    time.sleep(30)
+    while True:
+        safe(run_alert_checks)
+        time.sleep(CHECK_INTERVAL)
+
+
+def alerts_payload(host_url=""):
+    data = STORE.load()
+    base = host_url or app_base_url()
+    return {"alerts": data["alerts"], "topic": data["topic"], "last_check": data.get("last_check"),
+            "storage": STORE.backend, "persistent": STORE.persistent, "error": STORE.error,
+            "hosted": "RENDER" in os.environ,
+            "cron_url": f"{base}/api/cron?key={cron_key()}" if app_password() else ""}
+
+
+def save_alert(body):
+    sym = str(body.get("symbol") or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
+        raise ValueError("Ungültiges Symbol")
+
+    def pos(key):
+        v = num(body.get(key))
+        return v if v and v > 0 else None
+    cfg = {"name": str(body.get("name") or sym)[:80], "currency": str(body.get("currency") or "")[:6],
+           "below": pos("below"), "above": pos("above"), "move": pos("move"), "rating": bool(body.get("rating"))}
+    data = STORE.load()
+    with STORE.lock:
+        if not (cfg["below"] or cfg["above"] or cfg["move"] or cfg["rating"]):
+            data["alerts"].pop(sym, None)
+        else:
+            old = data["alerts"].get(sym, {}).get("state", {})
+            # Neu gespeichert = scharf geschaltet; Verlauf und letzte Empfehlung bleiben erhalten
+            cfg["state"] = {"log": old.get("log", []),
+                            "last_label": str(body.get("label") or "") or old.get("last_label"),
+                            "rating_checked": time.time() if body.get("label") else old.get("rating_checked"),
+                            "created": old.get("created") or time.time()}
+            data["alerts"][sym] = cfg
+        STORE.save()
+
+
 HTML_PATH = Path(__file__).with_name("index.html")
 
 # --- Login mit dauerhafter Sitzung (nur aktiv, wenn APP_PASSWORD gesetzt ist) ---
@@ -1692,8 +1915,44 @@ class Handler(BaseHTTPRequestHandler):
             self.redirect("/login?" + urllib.parse.urlencode({"next": target}))
         return False
 
+    def host_url(self):
+        host = self.headers.get("Host", "")
+        proto = self.headers.get("X-Forwarded-Proto", "http")
+        return f"{proto}://{host}" if host else ""
+
+    def json_body(self):
+        length = min(int(self.headers.get("Content-Length") or 0), 16384)
+        try:
+            return json.loads(self.rfile.read(length) or b"{}")
+        except ValueError:
+            return {}
+
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path.startswith("/api/alerts"):
+            if not self.require_login(u):
+                return
+            if "application/json" not in self.headers.get("Content-Type", ""):
+                return self.send(415, json.dumps({"error": "JSON erwartet"}), "application/json")
+            body = self.json_body()
+            try:
+                if u.path == "/api/alerts":
+                    save_alert(body)
+                elif u.path == "/api/alerts/test":
+                    ntfy_send("✅ Aktien-Check: Test", "Push-Benachrichtigungen funktionieren.", tags=["white_check_mark"])
+                elif u.path == "/api/alerts/check":
+                    fired = run_alert_checks(force_rating=bool(body.get("rating")))
+                    return self.send(200, json.dumps({**alerts_payload(self.host_url()), "fired": fired},
+                                                     ensure_ascii=False), "application/json; charset=utf-8")
+                else:
+                    return self.send(404, json.dumps({"error": "unbekannt"}), "application/json")
+            except ValueError as e:
+                return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+            except Exception as e:
+                return self.send(502, json.dumps({"error": f"{type(e).__name__}: {e}"[:200]}, ensure_ascii=False),
+                                 "application/json")
+            return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
+                             "application/json; charset=utf-8")
         if u.path != "/login":
             return self.send(404, "Not found", "text/plain")
         length = min(int(self.headers.get("Content-Length") or 0), 4096)
@@ -1727,6 +1986,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect(nxt) if self.logged_in() else self.login_page(nxt=nxt)
         if u.path == "/logout":
             return self.redirect("/login", self.cookie("", 0))
+        if u.path == "/api/cron":  # Weckruf von cron-job.org: prüft Alarme im Hintergrund
+            if not app_password() or not hmac.compare_digest((qs.get("key") or [""])[0], cron_key()):
+                return self.send(403, "forbidden", "text/plain")
+            threading.Thread(target=lambda: safe(run_alert_checks), daemon=True).start()
+            return self.send(200, "ok", "text/plain")
         if not self.require_login(u):
             return
         q = (qs.get("q") or [""])[0].strip()
@@ -1751,6 +2015,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     out[name] = f"{type(e).__name__}: {e}"[:300]
             return self.send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+        if u.path == "/api/alerts":
+            return self.send(200, json.dumps(alerts_payload(self.host_url()), ensure_ascii=False),
+                             "application/json; charset=utf-8")
         if u.path == "/api/search":
             return self.send(200, json.dumps(search_symbols(q) if len(q) >= 2 else []), "application/json")
         if u.path == "/api/analyze":
@@ -1812,6 +2079,7 @@ def main():
     if "--no-browser" not in sys.argv and not hosted:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
+        threading.Thread(target=alert_loop, daemon=True).start()
         srv.serve_forever()
     except KeyboardInterrupt:
         print("Beendet.")

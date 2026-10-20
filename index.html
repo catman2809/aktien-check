@@ -239,7 +239,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-head h1{font-size:24px;letter-spacing:-.02em;margin:0}
 .wl-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .wl-actions select{height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:13.5px;padding:0 10px}
-.wl-row{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1.1fr) minmax(0,1.3fr) 64px minmax(0,1.1fr) minmax(0,1fr) 36px;
+.wl-row{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1.1fr) minmax(0,1.3fr) 64px minmax(0,1.1fr) minmax(0,1fr) 72px;
   gap:14px;align-items:center;padding:14px 20px;border-top:1px solid var(--border);cursor:pointer}
 .wl-row:first-child{border-top:0}
 .wl-row:hover{background:var(--surface-2)}
@@ -254,7 +254,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .x-btn:hover{background:var(--neg-soft);color:var(--neg)}
 .wl-busy{display:inline-block;width:14px;height:14px;border:2px solid var(--track);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;vertical-align:-2px}
 @media (max-width:760px){
-  .wl-row{grid-template-columns:minmax(0,1fr) auto 32px;gap:10px;padding:12px 16px}
+  .wl-row{grid-template-columns:minmax(0,1fr) auto 68px;gap:8px;padding:12px 16px}
   .wl-row .m-hide{display:none}
   .wl-row.head{display:none}
   .wl-rating{grid-column:2;text-align:right}
@@ -268,6 +268,42 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
   border-radius:10px;font-size:14px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:calc(100% - 32px)}
 .share-box{display:flex;gap:8px;margin-top:12px} .share-box input{flex:1;min-width:0;height:36px;border-radius:9px;border:1px solid var(--border);
   background:var(--surface-2);color:var(--text);padding:0 10px;font:inherit;font-size:13px}
+
+/* ---------- Preisalarme ---------- */
+.bell-btn{width:32px;height:32px;border-radius:8px;border:0;background:none;color:var(--text-3);cursor:pointer;display:grid;place-items:center;position:relative}
+.bell-btn:hover{background:var(--accent-soft);color:var(--accent)}
+.bell-btn.on{color:var(--accent)}
+.bell-btn.fired{color:var(--neu)}
+.wl-btns{display:flex;gap:2px;justify-content:flex-end}
+.modal-bg{position:fixed;inset:0;background:rgba(12,17,29,.55);z-index:70;display:grid;place-items:center;padding:16px}
+.modal{width:100%;max-width:440px;max-height:calc(100vh - 32px);overflow:auto}
+.modal h3{margin:0;font-size:18px}
+.field{margin-top:14px}
+.field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
+.field .in{display:flex;align-items:center;gap:8px}
+.field input[type=number]{flex:1;min-width:0;height:42px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface);
+  color:var(--text);padding:0 12px;font:inherit;font-size:16px}
+.field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.field .unit{color:var(--text-3);font-size:13px;width:40px}
+.field small{display:block;color:var(--text-3);font-size:12px;margin-top:4px}
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:16px;font-size:14px;cursor:pointer}
+.check input{width:18px;height:18px;margin-top:2px;accent-color:var(--accent)}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+.btn.danger{color:var(--neg)}
+.state-line{font-size:12.5px;color:var(--text-3);margin-top:6px}
+.state-line b{color:var(--neu)}
+.push-card{margin-top:16px}
+.push-card h3{margin:0 0 4px;font-size:16px}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:3px 9px;border-radius:999px}
+.status.ok{background:var(--pos-soft);color:var(--pos)} .status.warn{background:var(--neu-soft);color:var(--neu)}
+.steps-list{margin:14px 0 0;padding-left:20px;font-size:14px;color:var(--text-2)}
+.steps-list li{margin:8px 0}
+.code{display:flex;gap:8px;margin-top:6px}
+.code input{flex:1;min-width:0;height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+  padding:0 10px;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}
+.alert-list{margin-top:14px;border-top:1px solid var(--border)}
+.alert-item{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13.5px;align-items:center}
+.alert-item small{display:block;color:var(--text-3);font-size:12px}
 
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
@@ -451,12 +487,14 @@ function wlRow(x) {
     <div class="wl-score num m-hide">${x.score != null ? (x.score > 0 ? "+" : "") + nf(x.score, 1) : "–"}</div>
     <div class="m-hide">${esc(x.summary || "")}</div>
     <div class="wl-time m-hide">${busy ? "wird aktualisiert …" : ago(x.updated)}</div>
-    <button class="x-btn" data-rm="${esc(x.symbol)}" title="Entfernen" aria-label="${esc(x.name || x.symbol)} entfernen">×</button>
+    <div class="wl-btns">${bellBtn(x.symbol)}
+    <button class="x-btn" data-rm="${esc(x.symbol)}" title="Entfernen" aria-label="${esc(x.name || x.symbol)} entfernen">×</button></div>
   </div>`;
 }
 function wlBind(root) {
+  root.querySelectorAll("[data-bell]").forEach(b => b.onclick = e => { e.stopPropagation(); openAlert(b.dataset.bell); });
   root.querySelectorAll(".wl-row[data-s]").forEach(r => r.onclick = e => {
-    if (e.target.closest("[data-rm]")) return;
+    if (e.target.closest("[data-rm]") || e.target.closest("[data-bell]")) return;
     $("#q").value = r.dataset.s; run(r.dataset.s);
   });
   root.querySelectorAll("[data-rm]").forEach(b => b.onclick = e => {
@@ -472,6 +510,7 @@ function showWatchlist() {
   $("#subnav").style.display = "none";
   history.replaceState(null, "", "?view=watchlist");
   renderWl(); window.scrollTo({top: 0});
+  loadAlerts().then(() => renderWl());
 }
 function renderWl() {
   if (!wlView) return;
@@ -495,12 +534,14 @@ function renderWl() {
         Analysiere eine Aktie und tippe auf <b style="display:inline">☆ Zur Watchlist</b>, um sie hier zu speichern.</div>`}
     </div>
     <div id="wlsharebox"></div>
+    <div id="pushbox"></div>
     ${l.length ? `<p class="disclaimer">Die Watchlist wird nur in diesem Browser gespeichert. Mit „Liste teilen“ überträgst du sie auf ein anderes Gerät.
       Empfehlungen zeigen den Stand der letzten Analyse – „Alle aktualisieren“ analysiert jede Aktie neu (ca. 10–20 Sekunden pro Aktie).</p>` : ""}`;
   wlBind($("#out"));
   const sel = $("#wlsort"); if (sel) sel.onchange = () => { wlSort = sel.value; renderWl(); };
   const up = $("#wlupd"); if (up) up.onclick = () => wlUpdateAll();
   const sh = $("#wlshare"); if (sh) sh.onclick = () => wlShare();
+  renderPush();
 }
 async function wlUpdate(sym) {
   wlBusy.add(sym); renderWl();
@@ -542,8 +583,141 @@ function wlImport(list) {
   toast(added.length ? `${added.length} ${added.length === 1 ? "Aktie" : "Aktien"} importiert – werden analysiert` : "Alle Aktien sind bereits in der Watchlist");
   if (added.length) wlUpdateAll(added);
 }
+/* Preisalarme (auf dem Server gespeichert, Versand per ntfy-Push) */
+let ALERTS = null;
+const BELL_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`;
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.status === 401) { toLogin(); throw new Error("login"); }
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Fehler");
+  return d;
+}
+async function loadAlerts() {
+  try { ALERTS = await api("/api/alerts"); } catch (e) { ALERTS = ALERTS || null; }
+  return ALERTS;
+}
+function alertFired(a) { const st = a?.state || {}; return !!(st.below_fired || st.above_fired); }
+function alertSummary(a, cur) {
+  if (!a) return "";
+  const c = cur || a.currency || "";
+  const parts = [];
+  if (a.below) parts.push(`unter ${nf(a.below)} ${c}`);
+  if (a.above) parts.push(`über ${nf(a.above)} ${c}`);
+  if (a.move) parts.push(`±${nf(a.move, 1)} % am Tag`);
+  if (a.rating) parts.push("Empfehlungswechsel");
+  return parts.join(" · ");
+}
+function bellBtn(sym) {
+  const a = ALERTS?.alerts?.[sym];
+  const cls = !a ? "" : alertFired(a) ? "fired" : "on";
+  return `<button class="bell-btn ${cls}" data-bell="${esc(sym)}" title="${a ? "Alarm: " + esc(alertSummary(a)) : "Preisalarm einrichten"}" aria-label="Preisalarm">${BELL_SVG}</button>`;
+}
+function closeModal() { document.querySelector(".modal-bg")?.remove(); }
+async function openAlert(sym, d) {
+  if (!ALERTS) await loadAlerts();
+  const w = wlLoad().find(x => x.symbol === sym) || {};
+  const info = d ? {name: d.name, currency: d.currency, price: d.price, label: d.rating.label}
+                 : {name: w.name || sym, currency: w.currency || "", price: w.price, label: w.label};
+  const a = ALERTS?.alerts?.[sym] || {};
+  const st = a.state || {};
+  const fired = [st.below_fired && `Kurs unter ${nf(a.below)} ausgelöst`, st.above_fired && `Kurs über ${nf(a.above)} ausgelöst`].filter(Boolean);
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="card pad modal" role="dialog" aria-modal="true" aria-labelledby="mt">
+    <div class="eyebrow">${esc(sym)}</div><h3 id="mt">Preisalarm · ${esc(info.name)}</h3>
+    <div class="state-line">Aktueller Kurs: <span class="num">${info.price != null ? nf(info.price) + " " + esc(info.currency) : "–"}</span>
+      ${info.label ? ` · Empfehlung: ${esc(info.label)}` : ""}</div>
+    ${fired.length ? `<div class="state-line"><b>${fired.join(" · ")}</b> – Speichern schaltet den Alarm wieder scharf.</div>` : ""}
+    <div class="field"><label for="a-below">Benachrichtigen, wenn Kurs fällt unter</label>
+      <div class="in"><input id="a-below" type="number" inputmode="decimal" step="any" min="0" value="${a.below ?? ""}" placeholder="z. B. ${info.price ? nf(info.price * 0.9, 0) : ""}"><span class="unit">${esc(info.currency)}</span></div></div>
+    <div class="field"><label for="a-above">Benachrichtigen, wenn Kurs steigt über</label>
+      <div class="in"><input id="a-above" type="number" inputmode="decimal" step="any" min="0" value="${a.above ?? ""}" placeholder="z. B. ${info.price ? nf(info.price * 1.1, 0) : ""}"><span class="unit">${esc(info.currency)}</span></div></div>
+    <div class="field"><label for="a-move">Tagesbewegung größer als</label>
+      <div class="in"><input id="a-move" type="number" inputmode="decimal" step="any" min="0" value="${a.move ?? ""}" placeholder="z. B. 5"><span class="unit">± %</span></div>
+      <small>Höchstens eine Meldung pro Tag, gemessen am Schlusskurs des Vortags.</small></div>
+    <label class="check"><input type="checkbox" id="a-rating" ${a.rating ? "checked" : ""}>
+      <span>Bei Änderung der Empfehlung benachrichtigen<br><small style="color:var(--text-3)">z. B. von „Hold“ auf „Buy“ – wird zweimal täglich geprüft.</small></span></label>
+    <div class="modal-actions">
+      ${ALERTS?.alerts?.[sym] ? `<button class="btn danger" id="a-del">Alarm löschen</button>` : ""}
+      <button class="btn" id="a-cancel">Abbrechen</button>
+      <button class="btn primary" id="a-save">Speichern</button>
+    </div>
+    ${ALERTS && !ALERTS.persistent ? `<div class="note" style="margin-top:14px">Alarme werden auf diesem Server noch nicht dauerhaft gespeichert – siehe „Push-Benachrichtigungen einrichten“ in der Watchlist.</div>` : ""}
+  </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) closeModal(); };
+  $("#a-cancel").onclick = closeModal;
+  const save = async payload => {
+    try {
+      ALERTS = await api("/api/alerts", payload);
+      closeModal(); toast(payload.below || payload.above || payload.move || payload.rating ? "Preisalarm gespeichert" : "Preisalarm gelöscht");
+      if (wlView) renderWl(); else { const b = $("#alertbtn"); if (b) b.classList.toggle("on", !!ALERTS.alerts[sym]); }
+    } catch (e) { if (e.message !== "login") toast("Speichern fehlgeschlagen: " + e.message); }
+  };
+  $("#a-save").onclick = () => save({symbol: sym, name: info.name, currency: info.currency, label: info.label,
+    below: $("#a-below").value, above: $("#a-above").value, move: $("#a-move").value, rating: $("#a-rating").checked});
+  const del = $("#a-del"); if (del) del.onclick = () => save({symbol: sym});
+  setTimeout(() => $("#a-below").focus(), 50);
+}
+function copyBtn(id, value) {
+  const el = $(id); if (!el) return;
+  el.onclick = async () => {
+    try { await navigator.clipboard.writeText(value); } catch (e) { const i = el.previousElementSibling; i.select(); document.execCommand("copy"); }
+    toast("Kopiert");
+  };
+}
+function renderPush() {
+  const box = $("#pushbox"); if (!box) return;
+  if (!ALERTS) { box.innerHTML = ""; loadAlerts().then(a => { if (a && wlView) renderWl(); }); return; }
+  const A = ALERTS, list = Object.entries(A.alerts || {});
+  const ready = A.persistent && (!A.hosted || A.cron_url);
+  box.innerHTML = `<div class="card pad push-card">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <div><h3>Preisalarme & Push-Benachrichtigungen</h3>
+        <div class="stamp">Letzte Prüfung: ${A.last_check ? ago(new Date(A.last_check * 1000).toISOString()) : "noch keine"} · ${list.length} ${list.length === 1 ? "Alarm" : "Alarme"} aktiv</div></div>
+      <span class="status ${A.persistent ? "ok" : "warn"}">${A.persistent ? (A.storage === "gist" ? "Gespeichert in GitHub-Gist" : "Lokal gespeichert") : "Nicht dauerhaft gespeichert"}</span>
+    </div>
+    ${A.error ? `<div class="note" style="margin-top:12px">${esc(A.error)}</div>` : ""}
+    ${list.length ? `<div class="alert-list">${list.map(([sym, a]) => `<div class="alert-item">
+      <div><b>${esc(a.name || sym)}</b> <span class="stamp">${esc(sym)}</span><small>${esc(alertSummary(a))}${alertFired(a) ? " · <b style='color:var(--neu)'>ausgelöst</b>" : ""}${a.state?.log?.[0] ? " · zuletzt: " + esc(a.state.log[0].title) : ""}</small></div>
+      <button class="bell-btn ${alertFired(a) ? "fired" : "on"}" data-bell="${esc(sym)}" aria-label="Alarm bearbeiten">${BELL_SVG}</button></div>`).join("")}</div>` : ""}
+    <details ${ready && list.length ? "" : "open"} style="margin-top:14px"><summary style="cursor:pointer;font-weight:600;font-size:14px">Push-Benachrichtigungen einrichten</summary>
+      <ol class="steps-list">
+        <li>App <b>ntfy</b> installieren (kostenlos, App Store / Google Play).</li>
+        <li>In ntfy auf <b>+</b> tippen und dieses Thema abonnieren (Server: ntfy.sh):
+          <div class="code"><input readonly value="${esc(A.topic)}" onclick="this.select()"><button class="btn" id="cp-topic">Kopieren</button></div>
+          <small class="stamp">Das Thema ist wie ein Passwort – wer es kennt, kann deine Alarme mitlesen. Nicht weitergeben.</small></li>
+        <li><button class="btn" id="push-test">Test-Benachrichtigung senden</button></li>
+        ${A.hosted ? `<li>${A.persistent ? `<span class="status ok">erledigt</span> Alarme werden im GitHub-Gist gespeichert.`
+          : `<b>Alarme dauerhaft speichern:</b> Auf github.com → Settings → Developer settings → <i>Personal access tokens (classic)</i> einen Token nur mit dem Recht <b>gist</b> erstellen und bei Render unter Environment als <code>GITHUB_TOKEN</code> eintragen.`}</li>
+        <li><b>Server wach halten:</b> Auf <b>cron-job.org</b> (kostenlos) einen Cronjob mit dieser Adresse anlegen, Ausführung <b>alle 10 Minuten</b>:
+          <div class="code"><input readonly value="${esc(A.cron_url)}" onclick="this.select()"><button class="btn" id="cp-cron">Kopieren</button></div>
+          <small class="stamp">Ohne Weckruf schläft der kostenlose Server nach 15 Minuten ein und prüft dann keine Alarme.</small></li>`
+          : `<li>Lokal prüft das Programm die Alarme alle 10 Minuten, solange das Fenster geöffnet ist.</li>`}
+      </ol></details>
+    <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="push-check">Alarme jetzt prüfen</button></div>
+  </div>`;
+  copyBtn("#cp-topic", A.topic); copyBtn("#cp-cron", A.cron_url);
+  box.querySelectorAll("[data-bell]").forEach(b => b.onclick = () => openAlert(b.dataset.bell));
+  $("#push-test").onclick = async () => {
+    try { await api("/api/alerts/test", {}); toast("Test gesendet – erscheint gleich in der ntfy-App"); }
+    catch (e) { if (e.message !== "login") toast("Senden fehlgeschlagen: " + e.message); }
+  };
+  $("#push-check").onclick = async e => {
+    e.target.disabled = true; e.target.textContent = "Prüfe …";
+    try {
+      const r = await api("/api/alerts/check", {});
+      ALERTS = r;
+      toast(r.fired.length ? `${r.fired.length} Alarm(e) ausgelöst und gesendet` : "Geprüft – kein Alarm ausgelöst");
+    } catch (err) { if (err.message !== "login") toast("Prüfung fehlgeschlagen: " + err.message); }
+    renderWl();
+  };
+}
+
 $("#wlbtn").onclick = () => showWatchlist();
 wlBadge();
+if (location.protocol !== "file:") loadAlerts();
 
 /* Welcome */
 function welcome() {
@@ -633,7 +807,8 @@ function render(d) {
           <div class="stamp num">1 Jahr: ${pc(F.perf_1y, 1, true)}</div>
         </div>
       </div>
-      <div class="watch-row"><button class="btn ${wlHas(d.symbol) ? "on" : ""}" id="wltoggle">${wlHas(d.symbol) ? "★ In der Watchlist" : "☆ Zur Watchlist"}</button></div>
+      <div class="watch-row"><button class="btn ${wlHas(d.symbol) ? "on" : ""}" id="wltoggle">${wlHas(d.symbol) ? "★ In der Watchlist" : "☆ Zur Watchlist"}</button>
+        <button class="btn ${ALERTS?.alerts?.[d.symbol] ? "on" : ""}" id="alertbtn">${BELL_SVG} Preisalarm</button></div>
       ${d.business ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
       ${d.alternatives?.length ? `<div class="alts">Andere Börsenplätze / Treffer:
         ${d.alternatives.map(a => `<button data-s="${esc(a.symbol)}" title="${esc(a.name)}">${esc(a.symbol)} · ${esc(a.exchange)}</button>`).join("")}</div>` : ""}
@@ -757,6 +932,7 @@ function render(d) {
   document.querySelectorAll("#seg button").forEach(b => b.onclick = () => showTier(b.dataset.t));
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
+  $("#alertbtn").onclick = () => openAlert(d.symbol, d);
   const wt = $("#wltoggle");
   wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
   const bm = $("#bizmore");
