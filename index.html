@@ -199,6 +199,8 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .seg button{border:0;background:none;font:inherit;font-size:13px;font-weight:500;color:var(--text-2);padding:6px 12px;border-radius:7px;cursor:pointer}
 .seg button.on{background:var(--surface);color:var(--text);box-shadow:var(--shadow);font-weight:600}
 .seg button em{font-style:normal;color:var(--text-3);margin-left:4px;font-weight:500}
+@media (max-width:640px){#ch-seg{display:grid;grid-template-columns:repeat(6,1fr);width:100%}
+  #ch-seg button{padding:6px 0;font-size:12.5px;white-space:nowrap}}
 .sent{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-2)}
 .sent-bar{width:120px;height:6px;border-radius:3px;background:var(--track);overflow:hidden;display:flex}
 .sent-bar i{display:block;height:100%}
@@ -891,10 +893,13 @@ try {
   CHART.ind = {...CHART.ind, ...(JSON.parse(localStorage.getItem("ac-chart-ind")) || {})};
 } catch (e) {}
 const fmtVol = v => v >= 1e9 ? nf(v / 1e9, 1) + " Mrd." : v >= 1e6 ? nf(v / 1e6, 1) + " Mio." : v >= 1e3 ? nf(v / 1e3, 0) + " Tsd." : nf(v, 0);
-const RANGE_TEXT = {"1d": "heute", "1mo": "1 Monat", "1y": "1 Jahr", "5y": "5 Jahre", "max": "seit Beginn der Daten"};
+const RANGE_TEXT = {"1d": "heute", "5d": "1 Woche", "1mo": "1 Monat", "1y": "1 Jahr", "5y": "5 Jahre", "max": "seit Beginn der Daten"};
 function fmtTime(ms, rng, long) {
   const d = new Date(ms);
   if (rng === "1d") return d.toLocaleTimeString("de-DE", {hour: "2-digit", minute: "2-digit"}) + (long ? " Uhr" : "");
+  if (rng === "5d") return long
+    ? d.toLocaleString("de-DE", {weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " Uhr"
+    : d.toLocaleDateString("de-DE", {weekday: "short", day: "2-digit", month: "2-digit"});
   if (rng === "1mo") return long ? d.toLocaleString("de-DE", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) + " Uhr"
                                  : d.toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit"});
   if (rng === "1y") return long ? d.toLocaleDateString("de-DE") : d.toLocaleDateString("de-DE", {month: "short", year: "2-digit"});
@@ -1267,7 +1272,7 @@ function render(d) {
         <div class="chart-val num" id="ch-val">–</div>
         <div class="chart-chg num" id="ch-chg"></div></div>
       <div class="chart-ctrl">
-        <div class="seg" id="ch-seg">${[["1d", "Tag"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
+        <div class="seg" id="ch-seg">${[["1d", "Tag"], ["5d", "Woche"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
           .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div>
         <label class="toggle" id="ch-trl"><input type="checkbox" id="ch-tr"><span class="sw"></span>inkl. Dividenden (Gesamtrendite)</label>
         <div class="ind-row" role="group" aria-label="Indikatoren">

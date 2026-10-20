@@ -1605,7 +1605,7 @@ def ics_calendar(symbol, name, events):
 # Kursverlauf für den Chart
 # ---------------------------------------------------------------------------
 CHART_RANGES = {  # Zeitraum -> (yfinance-Periode, Intervall, Cache-Sekunden)
-    "1d": ("5d", "5m", 120), "1mo": ("1mo", "60m", 900), "1y": ("1y", "1d", 3600),
+    "1d": ("5d", "5m", 120), "5d": ("5d", "15m", 300), "1mo": ("1mo", "60m", 900), "1y": ("1y", "1d", 3600),
     "5y": ("5y", "1wk", 6 * 3600), "max": ("max", "1mo", 12 * 3600),
 }
 CHART_CACHE = {}
@@ -1634,7 +1634,7 @@ def chart_data(symbol, rng):
     pts = [[int(ts.timestamp() * 1000), round(float(c), 4)] for ts, c in zip(h.index, h["Close"])]
     # Dividendenbereinigter Kurs (für die Gesamtrendite mit wieder angelegten Dividenden)
     adj = [round(float(a), 4) for a in h["Adj Close"]] if "Adj Close" in h and rng != "1d" else None
-    if rng in ("1d", "1mo"):  # letzten Live-Kurs ergänzen
+    if rng in ("1d", "5d", "1mo"):  # letzten Live-Kurs ergänzen
         last = num(safe(lambda: t.fast_info.last_price))
         if last and pts and abs(last / pts[-1][1] - 1) < 0.2:
             if adj:
@@ -1649,7 +1649,7 @@ def chart_data(symbol, rng):
                     if lo <= ts.timestamp() * 1000 <= hi and v > 0]
     # Gleitende Durchschnitte (50/200 Handelstage) aus Tageskursen, auf die Chartpunkte übertragen
     sma50 = sma200 = None
-    daily = safe(lambda: t.history(period={"1d": "2y", "1mo": "2y", "1y": "2y", "5y": "10y", "max": "max"}[rng],
+    daily = safe(lambda: t.history(period={"1d": "2y", "5d": "2y", "1mo": "2y", "1y": "2y", "5y": "10y", "max": "max"}[rng],
                                    interval="1d", auto_adjust=False))
     if daily is not None and len(daily) >= 60 and pts:
         import pandas as pd
@@ -1664,7 +1664,7 @@ def chart_data(symbol, rng):
         sma200 = on_points(dc.rolling(200).mean()) if len(dc) >= 200 else None
     volume = [int(v) if v == v else 0 for v in h["Volume"]] if "Volume" in h else None
     base = prev_close if prev_close else (pts[0][1] if pts else None)
-    out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "1mo"),
+    out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "5d", "1mo"),
            "sma50": sma50, "sma200": sma200,
            "volume": volume if volume and any(volume) and len(volume) == len(pts) else None,
            "change": (pts[-1][1] / base - 1) if pts and base else None,
