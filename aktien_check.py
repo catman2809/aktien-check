@@ -145,6 +145,17 @@ NEG_WORDS = ["miss", "misses", "plunge", "plunges", "fall", "falls", "drop", "dr
 # ---------------------------------------------------------------------------
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
+def json_safe(o):
+    """Ersetzt NaN/Unendlich rekursiv durch None – Browser akzeptieren kein NaN in JSON."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [json_safe(v) for v in o]
+    return o
+
+
 def num(x):
     try:
         v = float(x)
@@ -593,6 +604,8 @@ def gather(symbol, t, info):
     cf = safe(lambda: t.cashflow)
     bs = safe(lambda: t.balance_sheet)
     hist = safe(lambda: t.history(period="5y", auto_adjust=True))
+    if hist is not None and not hist.empty:
+        hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]  # laufender Tag ohne Schlusskurs
     divs = safe(lambda: t.dividends)
 
     # --- Bewertung
@@ -2341,7 +2354,7 @@ class Handler(BaseHTTPRequestHandler):
         return bool(u and users().get(u, {}).get("admin"))
 
     def send_json(self, obj, code=200, cookie=None):
-        return self.send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8", cookie)
+        return self.send(code, json.dumps(json_safe(obj), ensure_ascii=False), "application/json; charset=utf-8", cookie)
 
     def redirect(self, location, cookie=None):
         self.send_response(303)
@@ -2580,7 +2593,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/chart":
             try:
-                return self.send(200, json.dumps(chart_data(q, (qs.get("range") or ["1y"])[0])),
+                return self.send(200, json.dumps(json_safe(chart_data(q, (qs.get("range") or ["1y"])[0]))),
                                  "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
@@ -2594,7 +2607,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = analyze(q)
                 res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
                 print(f"  -> {res['symbol']}: {res['rating']['label']} ({res['rating']['score']})")
-                return self.send(200, json.dumps(res, ensure_ascii=False), "application/json; charset=utf-8")
+                return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send(404, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             except Exception as e:

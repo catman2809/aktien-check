@@ -418,6 +418,15 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .user-row .btn{height:30px;font-size:12.5px;padding:0 10px}
 .role{font-size:11px;font-weight:700;padding:1px 7px;border-radius:5px;background:var(--accent-soft);color:var(--accent);margin-left:6px}
 
+/* ---------- Rechtlicher Hinweis ---------- */
+.legal{display:flex;gap:14px;margin-top:32px;padding:18px 20px;border-radius:var(--radius);border:1px solid var(--neu-line);
+  background:var(--neu-soft);color:var(--text)}
+.legal-icon{flex:none;width:26px;height:26px;border-radius:50%;background:var(--neu);color:var(--surface);display:grid;
+  place-items:center;font-weight:800;font-size:15px;margin-top:1px}
+.legal b{font-size:14.5px}
+.legal p{margin:8px 0 0;font-size:13px;line-height:1.65;color:var(--text-2)}
+.legal p b{font-size:inherit;color:var(--text)}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -1489,9 +1498,18 @@ function render(d) {
       ${R.scale.map((s, i) => `<span>${i === R.scale.length - 1 ? "darunter" : "ab " + (s.min > 0 ? "+" : "") + s.min}</span><span style="${s.label === R.label ? "font-weight:700;color:var(--text)" : ""}">${esc(s.label)}</span>`).join("")}
     </div></div>
   </div>
-  <p class="disclaimer">Hinweis: Automatisiertes, regelbasiertes Modell auf Basis öffentlich verfügbarer Daten – keine Anlageberatung und keine Aufforderung zum Kauf oder Verkauf von Wertpapieren.
-    Daten können verzögert, unvollständig oder fehlerhaft sein; Branchen-Referenzwerte sind Näherungen. Wichtige Entscheidungen bitte selbst prüfen.
-    · <a href="/logout">Abmelden</a></p>`;
+  <aside class="legal" role="note" aria-label="Rechtlicher Hinweis">
+    <div class="legal-icon" aria-hidden="true">!</div>
+    <div>
+      <b>Automatisierte Kauf- und Verkaufsempfehlung – keine Anlageberatung</b>
+      <p>Die Empfehlung „${esc(R.label)}“ und alle Einschätzungen auf dieser Seite werden vollautomatisch von einem regelbasierten
+        Computerprogramm aus öffentlich verfügbaren Daten erzeugt. Kein Mensch hat sie geprüft. Sie stellen <b>keine Anlageberatung</b>,
+        keine Finanzanalyse im Sinne des Wertpapierhandelsgesetzes und keine Aufforderung zum Kauf oder Verkauf von Wertpapieren dar.</p>
+      <p>Die Daten können verzögert, unvollständig oder fehlerhaft sein. Deine persönliche finanzielle Situation, Ziele und Risikobereitschaft
+        werden nicht berücksichtigt. Investitionen in Aktien können zum Verlust des eingesetzten Kapitals führen. Triff Anlageentscheidungen
+        eigenverantwortlich und hole bei Bedarf Rat bei einer unabhängigen, zugelassenen Anlageberatung ein.</p>
+    </div>
+  </aside>`;
 
   const showTier = t => {
     document.querySelectorAll("#seg button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
