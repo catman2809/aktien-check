@@ -462,6 +462,22 @@ table.peers td small{display:block;font-size:11.5px;color:var(--text-3);font-wei
 table.peers .neg{color:var(--neg)}
 .peer-foot{font-size:12px;color:var(--text-3);padding:12px 18px;border-top:1px solid var(--border);background:var(--surface-2)}
 
+/* ---------- Anleitung Push (Startseite) ---------- */
+.guide{margin-top:36px;text-align:left}
+.guide-head{display:flex;gap:14px;align-items:flex-start}
+.guide-head svg{flex:none;width:40px;height:40px;padding:10px;border-radius:11px;background:var(--accent-soft);color:var(--accent)}
+.guide-head h2{font-size:17px;margin:0 0 4px}
+.guide-head p{margin:0;font-size:14px;color:var(--text-2)}
+.guide-grid{display:grid;grid-template-columns:1fr;gap:18px;margin-top:18px}
+.guide-grid > div + div{padding-top:16px;border-top:1px solid var(--border)}
+.guide h3{font-size:14px;margin:0 0 6px}
+.guide ol{margin:0;padding-left:20px;font-size:14px;color:var(--text-2);line-height:1.65}
+.guide ol li{margin:6px 0}
+.guide ul{margin:4px 0 0;padding-left:18px}
+.guide a{color:var(--accent);font-weight:600}
+.guide .code{margin-top:6px}
+.guide .btn{height:32px;font-size:13px}
+
 /* ---------- States ---------- */
 .welcome{max-width:640px;margin:56px auto 0;text-align:center}
 .welcome h1{font-size:30px;letter-spacing:-.025em;margin:0 0 10px}
@@ -1028,6 +1044,61 @@ function bindA2hs() {
 }
 
 /* Welcome */
+/* Anleitung: Push-Benachrichtigungen mit ntfy (Startseite) */
+function pushGuide() {
+  if (location.protocol === "file:") return "";
+  if (!ALERTS) {  // Thema des Benutzers nachladen, dann Startseite neu zeichnen
+    loadAlerts().then(a => { if (a && $(".welcome")) welcome(); });
+  }
+  const topic = ALERTS?.topic;
+  const b = t => `<b style="display:inline;font-size:inherit">${t}</b>`;
+  return `<div class="card pad guide" id="push-guide">
+    <div class="guide-head">${BELL_SVG}<div><h2>Benachrichtigungen aufs Handy</h2>
+      <p>Lass dich per Push informieren, wenn eine Aktie oder Kryptowährung eine Kursgrenze erreicht, sich stark bewegt,
+        ihre Empfehlung wechselt oder ein Termin ansteht – auch wenn die App geschlossen ist.</p></div></div>
+    <div class="guide-grid">
+      <div><h3>1 · Einmalig einrichten</h3>
+        <ol>
+          <li>Die kostenlose App ${b("ntfy")} installieren:
+            <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> ·
+            <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></li>
+          <li>In ntfy auf ${b("+")} tippen, dein persönliches Thema einfügen, Server ${b("ntfy.sh")} lassen und ${b("Abonnieren")}.
+            <div class="code"><input readonly value="${esc(topic || "wird geladen …")}" onclick="this.select()" aria-label="Dein ntfy-Thema">
+              <button class="btn" id="pg-copy" ${topic ? "" : "disabled"}>Kopieren</button></div>
+            <small class="stamp">Das Thema ist wie ein Passwort – nicht weitergeben, sonst kann jemand deine Benachrichtigungen mitlesen.</small></li>
+          <li>Testen: <button class="btn" id="pg-test" ${topic ? "" : "disabled"}>Test-Benachrichtigung senden</button></li>
+        </ol></div>
+      <div><h3>2 · Alarm für eine Aktie anlegen</h3>
+        <ol>
+          <li>Aktie oder Kryptowährung suchen und öffnen.</li>
+          <li>Unter dem Kurs auf ${b("🔔 Preisalarm")} tippen – oder in der ${b("Watchlist")} auf die Glocke neben der Aktie.</li>
+          <li>Gewünschte Alarme wählen:
+            <ul>
+              <li>${b("Kurs fällt unter")} / ${b("steigt über")} einen Wert</li>
+              <li>${b("Tagesbewegung")} größer als ± x %</li>
+              <li>${b("Empfehlung ändert sich")} (z. B. Hold → Buy)</li>
+              <li>${b("An Termine erinnern")} (Quartalszahlen, Ex-Dividende)</li>
+            </ul></li>
+          <li>${b("Speichern")} – fertig. Ein Tipp auf die Benachrichtigung öffnet direkt die Analyse.</li>
+        </ol></div>
+    </div>
+    <p class="stamp" style="margin:12px 0 0">Alarme werden etwa alle 10 Minuten geprüft. Kursgrenzen melden sich einmal; mit „Speichern“ im Alarm-Dialog werden sie wieder scharf geschaltet.
+      Alle deine Alarme siehst du in der Watchlist unter „Preisalarme &amp; Push-Benachrichtigungen“.</p>
+  </div>`;
+}
+function bindPushGuide() {
+  const cp = $("#pg-copy"), ts = $("#pg-test");
+  if (cp) cp.onclick = async () => {
+    try { await navigator.clipboard.writeText(ALERTS.topic); }
+    catch (e) { const i = cp.previousElementSibling; i.select(); document.execCommand("copy"); }
+    toast("Thema kopiert – jetzt in ntfy einfügen");
+  };
+  if (ts) ts.onclick = async () => {
+    try { await api("/api/alerts/test", {}); toast("Test gesendet – erscheint gleich in der ntfy-App"); }
+    catch (e) { if (e.message !== "login") toast("Senden fehlgeschlagen: " + e.message); }
+  };
+}
+
 function welcome() {
   wlView = false;
   $("#subnav").style.display = "none";
@@ -1046,8 +1117,10 @@ function welcome() {
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
+    ${pushGuide()}
     </section>`;
   wlBind($("#out"));
+  bindPushGuide();
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
   bindA2hs();
