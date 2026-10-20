@@ -278,6 +278,44 @@ def ttm(q_df, a_df, *names, flow=True):
     return first(row(a_df, *names))
 
 
+# Bilanzwährung ≠ Kurswährung (z. B. Novo Nordisk in USD gehandelt, Bilanz in DKK) -> Bilanzwerte umrechnen
+NON_MONEY_ROWS = {"Tax Rate For Calcs", "Diluted Average Shares", "Basic Average Shares", "Ordinary Shares Number",
+                  "Share Issued", "Treasury Shares Number"}
+FIN_CUR_CACHE = {}
+
+
+def financial_currency(symbol, info=None):
+    """Währung der Geschäftsberichte (Yahoo-'info' oder Zeitreihen-Schnittstelle, die auch auf Servern antwortet)."""
+    if info and info.get("financialCurrency"):
+        return info["financialCurrency"]
+    if symbol in FIN_CUR_CACHE:
+        return FIN_CUR_CACHE[symbol]
+    url = (f"https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{urllib.parse.quote(symbol)}"
+           f"?type=annualTotalRevenue&period1=1500000000&period2={int(time.time()) + 86400}")
+    pts = safe(lambda: json.loads(http_get(url))["timeseries"]["result"][0].get("annualTotalRevenue")) or []
+    cur = next((p.get("currencyCode") for p in reversed(pts) if p and p.get("currencyCode")), None)
+    FIN_CUR_CACHE[symbol] = cur
+    return cur
+
+
+def fx_rate(frm, to):
+    """Umrechnungsfaktor von Währung frm in Währung to (1.0, wenn gleich oder unbekannt)."""
+    if not frm or not to or frm == to:
+        return 1.0
+    a_, b_ = usd_rate(frm), usd_rate(to)
+    return a_ / b_ if a_ and b_ else 1.0
+
+
+def convert_df(df, k):
+    """Geldbeträge einer Bilanz-/GuV-/Cashflow-Tabelle mit Faktor k umrechnen (Stückzahlen bleiben)."""
+    if df is None or getattr(df, "empty", True) or abs(k - 1.0) < 1e-12:
+        return df
+    df = df.copy()
+    money = [i for i in df.index if i not in NON_MONEY_ROWS]
+    df.loc[money] = df.loc[money].astype(float) * k
+    return df
+
+
 def fill_info(t, info, hint=None):
     """Ergänzt fehlende Yahoo-'info'-Felder aus Kursverlauf und Geschäftsberichten.
 
@@ -311,6 +349,12 @@ def fill_info(t, info, hint=None):
     inc, qinc = safe(lambda: t.income_stmt), safe(lambda: t.quarterly_income_stmt)
     cf, qcf = safe(lambda: t.cashflow), safe(lambda: t.quarterly_cashflow)
     bs, qbs = safe(lambda: t.balance_sheet), safe(lambda: t.quarterly_balance_sheet)
+    fin_cur = financial_currency(t.ticker, info)
+    k = fx_rate(fin_cur, info.get("currency"))
+    inc, qinc, cf, qcf, bs, qbs = (convert_df(x, k) for x in (inc, qinc, cf, qcf, bs, qbs))
+    if fin_cur:
+        info["financialCurrency"] = fin_cur
+    info["_fx_done"] = True  # Bilanzwerte in info liegen bereits in Kurswährung vor
     rev = ttm(qinc, inc, "Total Revenue")
     ni = ttm(qinc, inc, "Net Income")
     op = ttm(qinc, inc, "Operating Income")
@@ -607,9 +651,18 @@ def gather(symbol, t, info):
     m["mcap"] = num(g("marketCap"))
     m["is_financial"] = m["sector"] == "Financial Services" or "Bank" in m["industry"] or "Insurance" in m["industry"]
 
-    inc = safe(lambda: t.income_stmt)
-    cf = safe(lambda: t.cashflow)
-    bs = safe(lambda: t.balance_sheet)
+    # Bilanzwerte in die Kurswährung umrechnen (z. B. DKK-Bilanz bei USD-Notierung)
+    m["fin_currency"] = financial_currency(symbol, info) or m["currency"]
+    k = fx_rate(m["fin_currency"], m["currency"])
+    inc = convert_df(safe(lambda: t.income_stmt), k)
+    cf = convert_df(safe(lambda: t.cashflow), k)
+    bs = convert_df(safe(lambda: t.balance_sheet), k)
+    if abs(k - 1.0) > 1e-12 and not info.get("_fx_done"):
+        info = dict(info)  # Yahoo-'info' liefert absolute Bilanzwerte in Berichtswährung
+        for key_ in ("totalRevenue", "freeCashflow", "totalDebt", "totalCash", "ebitda", "operatingCashflow"):
+            if num(info.get(key_)) is not None:
+                info[key_] = num(info[key_]) * k
+        g = info.get
     hist = safe(lambda: t.history(period="5y", auto_adjust=True))
     if hist is not None and not hist.empty:
         hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]  # laufender Tag ohne Schlusskurs
@@ -666,6 +719,13 @@ def gather(symbol, t, info):
     equity = first(row(bs, "Stockholders Equity", "Common Stock Equity"))
     invested = first(row(bs, "Invested Capital")) or ((m["debt"] or 0) + (equity or 0))
     m["roic"] = ebit * (1 - tax) / invested if ebit is not None and invested > 0 else None
+    if abs(k - 1.0) > 1e-12 and m["mcap"]:
+        # Yahoo mischt bei abweichender Bilanzwährung die Währungen -> mit umgerechneten Werten selbst berechnen
+        m["ev"] = m["mcap"] + (m["debt"] or 0) - (m["cash"] or 0)
+        m["ev_ebitda"] = m["ev"] / m["ebitda"] if m["ebitda"] and m["ebitda"] > 0 else None
+        m["pb"] = m["mcap"] / equity if equity and equity > 0 else None
+        if m["revenue"]:
+            m["ps"] = m["mcap"] / m["revenue"]
     revs = row(inc, "Total Revenue")
     ops = row(inc, "Operating Income")
     nis = row(inc, "Net Income")
