@@ -1564,7 +1564,8 @@ class Handler(BaseHTTPRequestHandler):
     def require_login(self, u):
         if self.logged_in():
             return True
-        if u.path.startswith("/api/"):
+        # Abrufe aus der Seite (fetch) bekommen 401; direkt im Browser geöffnete Links die Login-Seite
+        if u.path.startswith("/api/") and "text/html" not in self.headers.get("Accept", ""):
             self.send(401, json.dumps({"error": "login"}), "application/json")
         else:
             target = u.path + (("?" + u.query) if u.query else "")
