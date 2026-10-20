@@ -99,6 +99,17 @@ class TestHelpers(unittest.TestCase):
         self.assertGreater(a.headline_sentiment("Aktie steigt auf Rekordhoch"), 0)
         self.assertLess(a.headline_sentiment("Stock plunges after earnings miss"), 0)
         self.assertEqual(a.headline_sentiment("This Biotech Could Be a Winner in the Weight Loss Market"), 0)
+        for s in (a.headline_sentiment(t) for t in ("Aktie fällt trotz Rekordgewinn", "Company reports no growth")):
+            self.assertLess(s, 0)  # Gegensatz und Verneinung
+        self.assertGreater(a.headline_sentiment("Weak quarter, but outlook raised"), 0)
+
+    def test_headline_sentiment_accuracy(self):
+        """Mindestens 90 % der von Hand bewerteten Schlagzeilen müssen richtig eingeordnet werden."""
+        sys.path.insert(0, str(Path(__file__).parent))
+        from sentiment_cases import CASES
+        lab = lambda v: 1 if v > 0.15 else -1 if v < -0.15 else 0
+        wrong = [(t, w, round(a.headline_sentiment(t), 2)) for t, w in CASES if lab(a.headline_sentiment(t)) != w]
+        self.assertGreaterEqual(1 - len(wrong) / len(CASES), 0.9, wrong)
 
     def test_reverse_dcf_is_monotonic(self):
         g1 = a.reverse_dcf(100, 2_000, 0.09)

@@ -134,21 +134,103 @@ TIER_LABEL = {
 JOB_AD = re.compile(r"\b(m/w/d|m/f/d|f/m/d|w/m/d|m/f/x|jobs?|careers?|karriere|stellenangebot|internship|"
                     r"praktikum|werkstudent|trainee|vacancy|hiring)\b|\(m/f/d\)|\(m/w/d\)")
 
-POS_WORDS = ["beat", "beats", "surge", "surges", "soar", "soars", "jump", "jumps", "rally", "rallies",
-             "upgrade", "upgraded", "upgrades", "record", "raises", "raised", "strong", "outperform",
-             "bullish", "gain", "gains", "rise", "rises", "tops", "exceeds", "expands", "wins", "approval",
-             "approved", "partnership", "boost", "boosts", "buy rating", "growth", "higher", "climbs",
-             "steigt", "steigen", "rekord", "hebt", "erhöht", "übertrifft", "stark", "starke", "kaufempfehlung",
-             "plus", "legt zu", "zulegen", "hoch", "gewinnt", "kursziel erhöht", "hochgestuft", "wachstum",
-             "optimistisch", "rally", "aufwärts"]
-NEG_WORDS = ["miss", "misses", "plunge", "plunges", "fall", "falls", "drop", "drops", "slump", "slumps",
-             "downgrade", "downgraded", "downgrades", "cut", "cuts", "weak", "loss", "losses", "lawsuit",
-             "probe", "investigation", "recall", "warning", "warns", "bearish", "decline", "declines",
-             "layoffs", "fraud", "fine", "fined", "bankruptcy", "tumble", "tumbles", "sinks", "lower",
-             "slides", "sell-off", "selloff", "concern", "concerns", "fällt", "fallen", "sinkt", "verlust",
-             "warnung", "warnt", "senkt", "gesenkt", "herabstufung", "abgestuft", "bricht ein", "schwach",
-             "schwache", "klage", "minus", "einbruch", "kursrutsch", "ermittlung", "rückruf", "stellenabbau",
-             "pleite", "insolvenz", "abwärts"]
+# ---------------------------------------------------------------------------
+# Tonalität von Schlagzeilen (Deutsch/Englisch): gewichtetes Lexikon + Regeln für Verneinung,
+# Gegensätze ("trotz", "aber"), Verstärker, Prozentangaben und Fragen
+# ---------------------------------------------------------------------------
+SENT_PHRASES = [  # (Muster, Gewicht) – werden vor Einzelwörtern geprüft
+    (r"(hebt|erhöht|hievt)( das)? (kurs)?ziel|(kurs)?ziel (erhöht|angehoben)", 2.0),
+    (r"(senkt|kappt|reduziert|streicht)( das)? (kurs)?ziel|(kurs)?ziel (gesenkt|gekappt)", -2.0),
+    (r"price target (raised|lifted|boosted|increased|hiked)|(raises|lifts|boosts|ups|hikes) (its )?(price )?target", 2.0),
+    (r"price target (cut|lowered|slashed|trimmed|reduced)|(cuts|lowers|slashes|trims) (its )?(price )?target", -2.0),
+    (r"(hebt|erhöht) (die )?(jahres)?prognose|prognose (angehoben|erhöht)|(raises|lifts|boosts|hikes) (its )?"
+     r"(guidance|outlook|forecast)|(guidance|outlook|forecast) (raised|lifted)", 2.0),
+    (r"(senkt|kappt|kassiert) (die )?(jahres)?prognose|prognose (gesenkt|gekappt)|(cuts|lowers|slashes|trims) (its )?"
+     r"(guidance|outlook|forecast)|(guidance|outlook|forecast) (cut|lowered)|(weak|soft|disappointing) (guidance|outlook)|"
+     r"(schwache[rn]?|enttäuschende[rn]?) (ausblick|prognose)", -2.0),
+    (r"(beats?|tops?|exceeds?|surpass(es)?) (analyst |wall street )?(estimates|expectations|forecasts)|"
+     r"übertrifft (die )?erwartungen", 1.8),
+    (r"miss(es|ed)? (analyst |wall street )?(estimates|expectations|forecasts)|verfehlt (die )?erwartungen", -1.8),
+    (r"nicht (mehr )?zu stoppen", 2.0),
+    (r"legt (deutlich |kräftig )?zu", 1.0),
+    (r"bricht (deutlich )?ein", -1.8),
+    (r"unter druck", -1.0),
+    (r"auf talfahrt", -1.6),
+    (r"fallen weg|streicht (\S+ )?(stellen|jobs)|cuts? (\S+ )?jobs", -1.3),
+    (r"short[- ]seller|leerverkäufer", -1.6),
+    (r"(rekord|record)[- ]?(hoch|high|gewinn|profit|umsatz|revenue|quartal|quarter)|all[- ]time high|allzeithoch", 1.5),
+    # Börsendeutsch der Kursmeldungen
+    (r"gibt (deutlich |kräftig )?nach|mit abschlag|im minus|rote zahlen|in den roten zahlen", -1.0),
+    (r"mit aufschlag|im plus|schwarze zahlen|in den schwarzen zahlen|gesucht\s*$", 0.8),
+    (r"(not even|nicht einmal|selbst) .{0,60}(can't|cannot|can|could|kann|können) (lift|help|save|stützen|retten|helfen)"
+     r"|(can't|cannot|fails to|unable to) (lift|help|save|boost)", -1.3),
+    (r"dividend (hike|increase|raise)|(raises|hikes|boosts) (its |the )?dividend|erhöht (die )?dividende", 1.5),
+    (r"(cuts|slashes|suspends) (its |the )?dividend|dividend (cut|suspension)|streicht (die )?dividende", -2.0),
+    (r"(\d+[- ]year|multi[- ]year|\d+-jahres|mehrjahres)[- ]?(low|tief)|tiefststand|lowest (level )?since|"
+     r"(jahres|mehrjahres)tief", -1.4),
+    (r"(\d+[- ]year|multi[- ]year)[- ]?high|höchststand|highest (level )?since|(jahres|mehrjahres)hoch", 1.3),
+]
+SENT_NEUTRAL = r"weight[- ]loss|stop[- ]loss|abnehm\w*|was anleger (jetzt )?wissen|should you (buy|sell)|buy or sell|" \
+               r"kaufen oder verkaufen|is (it )?time to buy|(\w+ ){0,3}stock (to )?watch"
+SENT_WORDS = {  # exakte Wörter
+    # Englisch positiv
+    "surge": 1.5, "surges": 1.5, "surged": 1.5, "soar": 1.6, "soars": 1.6, "soared": 1.6, "jump": 1.2, "jumps": 1.2,
+    "jumped": 1.2, "rally": 1.2, "rallies": 1.2, "rallied": 1.2, "rise": 1.0, "rises": 1.0, "rose": 1.0, "rising": 0.8,
+    "gain": 0.9, "gains": 0.9, "gained": 0.9, "climb": 1.0, "climbs": 1.0, "climbed": 1.0, "beat": 1.3, "beats": 1.3,
+    "tops": 1.0, "exceeds": 1.0, "strong": 0.8, "stronger": 0.8, "upgrade": 1.8, "upgrades": 1.8, "upgraded": 1.8,
+    "outperform": 1.2, "outperforms": 1.2, "bullish": 1.2, "boost": 1.0, "boosts": 1.0, "boosted": 1.0, "wins": 1.0,
+    "win": 0.8, "won": 0.8, "approval": 1.2, "approved": 1.2, "breakthrough": 1.3, "growth": 0.6, "grows": 0.8,
+    "grew": 0.8, "recovery": 1.0, "rebound": 1.0, "rebounds": 1.0, "relief": 0.8, "higher": 0.5, "buyback": 0.8,
+    "raises": 0.8, "raised": 0.8, "expands": 0.6, "optimistic": 1.0, "profit": 0.4, "profits": 0.4, "record": 1.0,
+    "surging": 1.4, "soaring": 1.5, "jumping": 1.1, "rallying": 1.1, "climbing": 0.9, "gaining": 0.8,
+    "lift": 1.0, "lifts": 1.0, "lifted": 1.0, "repurchase": 0.8, "buybacks": 0.8, "outperforming": 1.0,
+    "upbeat": 1.0, "strength": 0.6, "tumbling": -1.5, "plunging": -1.7, "sinking": -1.3, "slumping": -1.4,
+    "sliding": -1.0, "dropping": -1.0, "dip": -0.9, "dips": -0.9, "dipped": -0.9, "slips": -0.9, "slipped": -0.9,
+    "underperforming": -1.0, "downbeat": -1.0, "selling": -0.3, "sells": -0.3,
+    # Englisch negativ
+    "plunge": -1.8, "plunges": -1.8, "plunged": -1.8, "plummet": -2.0, "plummets": -2.0, "tumble": -1.6,
+    "tumbles": -1.6, "tumbled": -1.6, "sink": -1.4, "sinks": -1.4, "sank": -1.4, "slump": -1.5, "slumps": -1.5,
+    "crash": -2.0, "crashes": -2.0, "fall": -1.1, "falls": -1.1, "fell": -1.1, "falling": -1.0, "drop": -1.1,
+    "drops": -1.1, "dropped": -1.1, "decline": -1.0, "declines": -1.0, "declined": -1.0, "slide": -1.0, "slides": -1.0,
+    "lower": -0.5, "miss": -1.4, "misses": -1.4, "missed": -1.4, "weak": -1.0, "weaker": -1.0, "downgrade": -1.8,
+    "downgrades": -1.8, "downgraded": -1.8, "underperform": -1.2, "bearish": -1.2, "cut": -0.8, "cuts": -0.8,
+    "loss": -1.0, "losses": -1.0, "lawsuit": -1.0, "lawsuits": -1.2, "probe": -1.2, "investigation": -1.2,
+    "fraud": -2.5, "recall": -1.2, "warning": -1.3, "warns": -1.3, "layoffs": -1.2, "bankruptcy": -3.0,
+    "default": -2.0, "concerns": -0.8, "fears": -0.8, "selloff": -1.5, "sell-off": -1.5, "disappoints": -1.3,
+    "disappointing": -1.3, "disappointed": -1.3, "scandal": -2.0, "halts": -0.8, "delay": -0.8, "delayed": -0.8,
+    "fine": -0.8, "fined": -1.2, "sued": -1.2, "slashes": -1.0, "struggles": -1.0, "slowdown": -1.0,
+    # Deutsch positiv
+    "steigt": 1.0, "steigen": 1.0, "gestiegen": 1.0, "stieg": 1.0, "springt": 1.3, "klettert": 1.1, "zieht": 0.3,
+    "hebt": 0.8, "erhöht": 0.8, "übertrifft": 1.5, "überzeugt": 1.2, "stark": 0.8, "starke": 0.8, "starken": 0.8,
+    "starkes": 0.8, "starker": 0.8, "gewinnt": 1.0, "zulegen": 1.0, "plus": 0.8, "erholt": 1.0, "erholung": 1.0,
+    "hochgestuft": 1.8, "optimistisch": 1.0, "wächst": 0.8, "wachstum": 0.6, "zulassung": 1.0, "durchbruch": 1.3,
+    "aufwärts": 0.8, "gefragt": 0.6, "boomt": 1.2, "glänzt": 1.2, "jubel": 1.0, "rally": 1.2,
+    # Deutsch negativ
+    "fällt": -1.1, "fallen": -1.0, "gefallen": -1.0, "fiel": -1.1, "sinkt": -1.1, "gesunken": -1.1, "sank": -1.1,
+    "rutscht": -1.3, "stürzt": -1.8, "senkt": -0.9, "gesenkt": -0.9, "abgestuft": -1.8, "herabgestuft": -1.8,
+    "schwach": -1.0, "schwache": -1.0, "schwachen": -1.0, "schwacher": -1.0, "schwaches": -1.0, "klage": -1.0,
+    "klagen": -1.0, "warnt": -1.3, "minus": -0.8, "verfehlt": -1.4, "belastet": -1.0, "sorgen": -0.8, "pleite": -3.0,
+    "attackiert": -0.8, "streicht": -0.8, "abwärts": -0.8, "rückläufig": -1.0, "tiefrot": -1.5, "flop": -1.5,
+    "schwächelt": -1.0, "schwächer": -0.8, "verliert": -1.0, "verlieren": -1.0, "abverkauft": -1.3, "leichter": -0.5,
+    "fester": 0.6, "freundlich": 0.5, "erholt": 1.0, "zieht": 0.3, "haussiert": 1.3, "gebrochen": -0.6,
+}
+SENT_STEMS = {  # Wortanfänge für deutsche Zusammensetzungen (Kursrutsch, Gewinnsprung, ...)
+    "kurssprung": 1.5, "gewinnsprung": 1.6, "umsatzsprung": 1.4, "rekord": 1.2, "allzeithoch": 1.4,
+    "kaufempfehlung": 1.5, "großauftrag": 1.5, "milliardenauftrag": 1.5, "dividendenerhöh": 1.5,
+    "aktienrückkauf": 0.8, "rückkaufprogramm": 0.8, "hochstuf": 1.8, "kurssteigerung": 1.2, "aufwärtstrend": 1.0,
+    "kursrutsch": -1.8, "kurseinbruch": -1.8, "einbruch": -1.6, "absturz": -1.8, "talfahrt": -1.6,
+    "gewinnwarnung": -2.5, "umsatzwarnung": -2.3, "warnung": -1.3, "gewinnrückgang": -1.3, "umsatzrückgang": -1.2,
+    "rückgang": -1.0, "verlust": -1.0, "enttäusch": -1.4, "ermittlung": -1.3, "betrug": -2.5, "skandal": -2.0,
+    "insolvenz": -3.0, "stellenabbau": -1.2, "rückruf": -1.2, "verkaufsempfehlung": -1.5, "herabstuf": -1.8,
+    "abstufung": -1.8, "dividendenkürz": -2.0, "abwärtstrend": -1.0, "leerverkäufer": -1.6, "kursverlust": -1.3,
+    "schock": -1.3, "tiefststand": -1.4, "jahrestief": -1.3, "sparprogramm": -0.6,
+    "höchststand": 1.2, "jahreshoch": 1.2, "kaufsignal": 1.2, "verkaufssignal": -1.2, "ausverkauf": -1.4,
+}
+SENT_NEGATORS = {"nicht", "kein", "keine", "keinen", "keiner", "keines", "nie", "ohne", "weder",
+                 "no", "not", "never", "without", "nor", "isn't", "doesn't", "didn't", "won't", "can't"}
+SENT_INTENS = {"deutlich", "massiv", "kräftig", "kräftige", "kräftigen", "dramatisch", "drastisch", "sehr", "extrem",
+               "sharply", "massively", "heavily", "steeply", "significantly", "hugely", "big", "huge", "massive"}
+
 
 
 # ---------------------------------------------------------------------------
@@ -512,15 +594,68 @@ def yahoo_rss(symbol):
     return items
 
 
+def _sentiment_segments(t):
+    """Zerlegt nach Gegensatz-Wörtern: 'trotz X' zählt kaum, nach 'aber' zählt stärker."""
+    m = re.search(r"\b(trotz|despite|in spite of|ungeachtet|obwohl|although|even though)\b", t)
+    if m:
+        after = t[m.end():]
+        brk = re.search(r"[,:;–]|\s-\s", after)
+        conc, rest = (after[:brk.start()], after[brk.end():]) if brk else (after, "")
+        return [(t[:m.start()], 1.0), (conc, 0.25), (rest, 1.0)]
+    m = re.search(r"\b(aber|doch|jedoch|but|however|yet)\b", t)
+    if m:
+        return [(t[:m.start()], 0.4), (t[m.end():], 1.3)]
+    return [(t, 1.0)]
+
+
+def _segment_score(seg):
+    total = 0.0
+    for pat, w in SENT_PHRASES:  # Wortgruppen zuerst, danach aus dem Text entfernen (keine Doppelzählung)
+        for mm in list(re.finditer(pat, seg)):
+            pre = re.findall(r"[a-zäöüß']+", seg[:mm.start()])[-3:]
+            total += -0.8 * w if any(x in SENT_NEGATORS for x in pre) else w
+        seg = re.sub(pat, " ", seg)
+    for sign, num_ in re.findall(r"([+\-−])\s?(\d+(?:[.,]\d+)?)\s?(?:%|prozent|percent)", seg):  # "+9 %", "-7%"
+        v = float(num_.replace(",", "."))
+        total += (1 if sign == "+" else -1) * min(2.0, 0.6 + v / 5)
+    # Verneinung und Verstärker wirken nur innerhalb eines Satzteils (nicht über ":", "–", "," hinweg)
+    for clause in re.split(r"\s[–\-]\s|[:;,.!?–|]", seg):
+        total += _clause_score(re.findall(r"[a-zäöüß][a-zäöüß'\-]*", clause))
+    return total
+
+
+def _clause_score(toks):
+    total = 0.0
+    for i, tok in enumerate(toks):
+        parts = [tok] + (tok.split("-") if "-" in tok else [])
+        w = 0.0
+        for part in parts:
+            w = SENT_WORDS.get(part)
+            if w is None:
+                w = next((v for st, v in SENT_STEMS.items() if len(part) >= len(st) and part.startswith(st)), 0.0)
+                if not w:  # Zusammensetzung mit Stamm am Ende, z. B. "SAP-Kursrutsch", "Q3-Gewinnsprung"
+                    w = next((v for st, v in SENT_STEMS.items() if len(st) >= 6 and st in part), 0.0)
+            if w:
+                break
+        if not w:
+            continue
+        window = toks[max(0, i - 3):i]
+        if any(x in SENT_NEGATORS for x in window) or (i + 1 < len(toks) and toks[i + 1] in ("nicht", "kaum")):
+            w *= -0.8  # Verneinung: "nicht gestiegen", "wächst nicht", "no growth"
+        if any(x in SENT_INTENS for x in toks[max(0, i - 1):i + 2]):
+            w *= 1.5
+        total += w
+    return total
+
+
 def headline_sentiment(title):
-    t = " " + title.lower() + " "
-    for phrase in ("weight loss", "weight-loss", "stop-loss", "stop loss", "abnehm"):  # keine Wertung
-        t = t.replace(phrase, " ")
-    pos = sum(1 for w in POS_WORDS if re.search(r"(?<![a-zäöüß])" + re.escape(w) + r"(?![a-zäöüß])", t))
-    neg = sum(1 for w in NEG_WORDS if re.search(r"(?<![a-zäöüß])" + re.escape(w) + r"(?![a-zäöüß])", t))
-    if pos == neg:
-        return 0.0
-    return clamp((pos - neg) / max(1, pos + neg))
+    """Tonalität einer Schlagzeile zwischen -1 (negativ) und +1 (positiv)."""
+    t = " " + title.lower().replace("’", "'") + " "
+    t = re.sub(SENT_NEUTRAL, " ", t)
+    total = sum(f * _segment_score(seg) for seg, f in _sentiment_segments(t))
+    if "?" in title:
+        total *= 0.4  # Fragen ("Is X a buy?") sind meist Klickköder, keine Nachricht
+    return clamp(total / 2.5)
 
 
 def words(title):
