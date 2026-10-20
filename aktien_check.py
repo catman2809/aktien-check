@@ -34,6 +34,13 @@ except ImportError:
     sys.exit(1)
 
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+LOG = logging.getLogger("aktien-check")
+if not LOG.handlers:
+    _h = logging.StreamHandler(sys.stdout)  # StreamHandler schreibt jede Zeile sofort (flush)
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    LOG.addHandler(_h)
+    LOG.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+    LOG.propagate = False
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -1954,6 +1961,8 @@ def coingecko(path, ttl=600):
         except Exception:
             break
     if data is None:
+        LOG.warning("[CoinGecko] keine Antwort für %s – %s", path.split("?")[0],
+                    "nutze Zwischenspeicher" if hit else "ohne Daten")
         return hit[1] if hit else None  # bei Limit/Fehler: letzter bekannter Stand
     CG_CACHE[path] = (time.time(), data)
     return data
@@ -2703,11 +2712,12 @@ class AlertStore:
             if migrate:
                 self.save()
             # Protokoll ohne Inhalte – nur der Zustand des Speichers
-            print(f"[Speicher] {self.backend} · {'verschlüsselt' if self.encrypted else 'unverschlüsselt'}"
+            state = "GESPERRT" if self.locked else ("verschlüsselt" if self.encrypted else "unverschlüsselt")
+            (LOG.error if self.error else LOG.info)(f"[Speicher] {self.backend} · {state}"
                   f" · Schlüssel {'gesetzt' if key else 'fehlt'} · Benutzer: {len(data['users'])}"
                   f" · altes Klartext-Gist: {'vorhanden' if self.plain_gist_id else 'keins'}"
                   f"{' · Umzug durchgeführt' if migrate and not self.error else ''}"
-                  f"{' · FEHLER: ' + self.error if self.error else ''}", flush=True)
+                  f"{' · FEHLER: ' + self.error if self.error else ''}")
             return data
 
     def save(self):
@@ -2748,6 +2758,7 @@ class AlertStore:
             except Exception as e:
                 self.dirty = True
                 self.error = f"Speichern fehlgeschlagen: {type(e).__name__}"
+                LOG.error("[Speicher] Speichern fehlgeschlagen (%s): %s", self.backend, e)
 
 
 STORE = AlertStore()
@@ -2947,10 +2958,12 @@ def run_alert_checks(force_rating=False):
             for title, msg, tags in msgs:
                 ok = safe(lambda: ntfy_send(title, msg, sym, tags, topic=sp.get("topic")), False)
                 fired.append({"user": user, "symbol": sym, "title": title, "sent": bool(ok)})
+                (LOG.info if ok else LOG.warning)("[Alarm] %s · %s · %s%s", user, sym, title, "" if ok else " – Push NICHT zugestellt")
                 st.setdefault("log", []).insert(0, {"t": now, "title": title})
                 st["log"] = st["log"][:10]
             changed = True
         data["last_check"] = now
+        LOG.info("[Alarm] Prüfung: %d Alarm(e), %d ausgelöst, %.1f s", len(work), len(fired), time.time() - now)
         if changed or fired:
             STORE.save()
         return fired
@@ -2961,7 +2974,10 @@ def run_alert_checks(force_rating=False):
 def alert_loop():
     time.sleep(30)
     while True:
-        safe(run_alert_checks)
+        try:
+            run_alert_checks()
+        except Exception:
+            LOG.exception("[Alarm] Prüfung abgebrochen")
         time.sleep(CHECK_INTERVAL)
 
 
@@ -3196,7 +3212,22 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return {}
 
+    def _guard(self, fn):
+        try:
+            fn()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Browser hat die Verbindung geschlossen
+        except Exception:
+            LOG.exception("[Server] Fehler bei %s %s", self.command, urllib.parse.urlparse(self.path).path)
+            try:
+                self.send(500, json.dumps({"error": "Interner Fehler"}), "application/json")
+            except Exception:
+                pass
+
     def do_POST(self):
+        self._guard(self._do_POST)
+
+    def _do_POST(self):
         u = urllib.parse.urlparse(self.path)
         if u.path.startswith("/api/"):
             if not self.require_login(u):
@@ -3258,6 +3289,7 @@ class Handler(BaseHTTPRequestHandler):
             nxt = "/"
         ip = self.client_ip()
         if too_many_failures(ip):
+            LOG.warning("[Login] gesperrt wegen Fehlversuchen: IP %s", ip)
             return self.login_page("Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.", nxt, 429)
         given = (form.get("password") or [""])[0]
         username = (form.get("username") or [""])[0].strip().lower()
@@ -3265,7 +3297,9 @@ class Handler(BaseHTTPRequestHandler):
             with STORE.lock:
                 users()[username]["last_login"] = time.time()
             STORE.dirty = True
+            LOG.info("[Login] angemeldet: %s", username)
             return self.redirect(nxt, self.cookie(make_session_token(username), SESSION_DAYS * 86400))
+        LOG.warning("[Login] fehlgeschlagen: Benutzer %r, IP %s", username[:40], ip)
         note_failure(ip)
         time.sleep(1)  # bremst Durchprobieren
         return self.login_page("Benutzername oder Passwort falsch.", nxt, 401, username)
@@ -3283,6 +3317,7 @@ class Handler(BaseHTTPRequestHandler):
         action = body.get("action")
         if not action:
             return
+        LOG.info("[Admin] %s: %s %s", me, action, str(body.get("username") or "")[:40])
         name = str(body.get("username") or "").strip().lower()
         if not USER_RE.fullmatch(name):
             raise ValueError("Benutzername: 2–32 Zeichen, nur a–z, 0–9, - und _")
@@ -3321,6 +3356,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        self._guard(self._do_GET)
+
+    def _do_GET(self):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/healthz":
             return self.send(200, "ok", "text/plain")
@@ -3412,17 +3450,18 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/analyze":
             if not q:
                 return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")
+            t0 = time.time()
             try:
-                print(f"Analysiere: {q} …")
                 res = analyze(q)
                 res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
-                print(f"  -> {res['symbol']}: {res['rating']['label']} ({res['rating']['score']})")
+                LOG.info("[Analyse] %s -> %s · %s (%+.1f) · %.1f s · %s", q, res["symbol"], res["rating"]["label"],
+                         res["rating"]["score"], time.time() - t0, user)
                 return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
             except ValueError as e:
+                LOG.warning("[Analyse] %s nicht möglich: %s", q, e)
                 return self.send(404, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             except Exception as e:
-                import traceback
-                traceback.print_exc()
+                LOG.exception("[Analyse] %s abgebrochen nach %.1f s", q, time.time() - t0)
                 return self.send(500, json.dumps({"error": f"Fehler bei der Analyse: {e}"}, ensure_ascii=False),
                                  "application/json")
         self.send(404, "Not found", "text/plain")
@@ -3459,6 +3498,9 @@ def main():
     port = int(os.environ.get("PORT", PORT))
     network = "--netz" in sys.argv or hosted
     srv = ThreadingHTTPServer(("0.0.0.0" if network else "127.0.0.1", port), Handler)
+    LOG.info("[Start] Python %s · yfinance %s · Port %s · Login %s · Finnhub %s · Speicher %s%s",
+             sys.version.split()[0], getattr(yf, "__version__", "?"), port, "an" if app_password() else "aus",
+             "an" if finnhub_key() else "aus", STORE.backend, " (verschlüsselt)" if store_key() else "")
     url = f"http://localhost:{port}"
     print(f"Aktien-Check läuft auf {url}  (Beenden mit Strg+C)")
     if network and not hosted:
