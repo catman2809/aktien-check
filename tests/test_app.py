@@ -592,5 +592,53 @@ class TestEtfAndReport(Isolated):
         self.assertEqual(sent, ["anna"])
 
 
+class TestForecastAndFairValue(unittest.TestCase):
+    """Analystenprognosen, Forward-KGV und fairer Wert in drei Szenarien."""
+    MAC = {"rf": 4.0}
+
+    def m(self, **kw):
+        from collections import defaultdict
+        base = {"price": 100.0, "mcap": 100e9, "beta": 1.0, "currency": "USD", "biz": "standard", "net_debt": 0,
+                "fcf": 5e9, "fcf_hist": [5e9, 4.5e9, 4e9], "sbc": None, "owner_earnings": None, "rev_cagr": 0.06,
+                "est_rev": {"0y": {"growth": 0.08, "avg": 100, "low": 95, "high": 105, "n": 20, "ago": 92},
+                            "+1y": {"growth": 0.10, "avg": 110, "low": 100, "high": 120, "n": 18, "ago": 100}},
+                "est_eps": {}}
+        return defaultdict(lambda: None, {**base, **kw})
+
+    def test_dcf_monotonic(self):
+        lo = a.dcf_value(1e9, 0.02, 0.10, 0.025, 0, 1e8)
+        hi = a.dcf_value(1e9, 0.10, 0.10, 0.025, 0, 1e8)
+        self.assertGreater(hi, lo)                                           # mehr Wachstum -> höherer Wert
+        self.assertGreater(a.dcf_value(1e9, 0.05, 0.08, 0.025, 0, 1e8), a.dcf_value(1e9, 0.05, 0.11, 0.025, 0, 1e8))
+        self.assertIsNone(a.dcf_value(1e9, 0.0, 0.10, 0.02, 1e12, 1e8))     # Schulden > Unternehmenswert
+
+    def test_scenarios_ordered(self):
+        f = a.fair_value(self.m(), self.MAC)
+        self.assertEqual(f["method"], "Discounted-Cashflow (10 Jahre)")
+        self.assertLess(f["bear"], f["base"])
+        self.assertLess(f["base"], f["bull"])
+        self.assertAlmostEqual(f["upside"], f["base"] / 100 - 1)
+
+    def test_owner_earnings_for_heavy_investors(self):
+        plain = a.fair_value(self.m(), self.MAC)["base"]
+        invest = a.fair_value(self.m(owner_earnings=9e9), self.MAC)
+        self.assertGreater(invest["base"], plain)
+        self.assertTrue(invest["assumptions"][0].startswith("Owner Earnings"))
+
+    def test_models_without_dcf(self):
+        self.assertIn("na", a.fair_value(self.m(fcf=-2e9), self.MAC))           # negativer Free Cashflow
+        self.assertIn("na", a.fair_value(self.m(biz="pre_revenue"), self.MAC))
+        bank = a.fair_value(self.m(biz="bank", pb=1.0, roe=0.12), self.MAC)
+        self.assertEqual(bank["method"], "Kurs-Buchwert aus Eigenkapitalrendite")
+        reit = a.fair_value(self.m(biz="real_estate", ocf=7e9), self.MAC)
+        self.assertAlmostEqual(reit["base"], 7e9 / 1e9 * 15)                    # FFO je Aktie × 15
+
+    def test_forecast_growth(self):
+        self.assertAlmostEqual(a.est_growth(self.m(), "est_rev"), 0.09)
+        loss_base = {"0y": {"growth": 3.0, "ago": -0.5}, "+1y": {"growth": 0.2, "ago": 1.0}}
+        self.assertAlmostEqual(a.est_growth(self.m(est_eps=loss_base), "est_eps"), 0.2)  # Wachstum aus Verlust ignoriert
+        self.assertEqual(a.est_analysts(self.m()), 20)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

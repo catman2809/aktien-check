@@ -301,6 +301,34 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .gl-item b{font-size:14.5px}
 .gl-item p{margin:3px 0 0;color:var(--text-2);font-size:14px;line-height:1.55}
 @media print{.gl{border-bottom:0}}
+.cats > .cat{min-width:0}
+.reasons li{overflow-wrap:anywhere}
+.fv-card{margin-top:16px;padding:20px 24px}
+.fv-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:28px}
+.fv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.fv-val{font-size:26px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.fv-val small{font-size:13px;color:var(--text-2);font-weight:600}
+.fv-up{text-align:right}
+.fv-up span{display:block;font-size:20px;font-weight:700}
+.fv-up small{color:var(--text-3);font-size:12px}
+.fv-bar{position:relative;height:8px;background:var(--track);border-radius:4px;margin:46px 6px 40px}
+.fv-span{position:absolute;top:0;height:100%;background:var(--accent-soft);border:1px solid var(--accent);border-radius:4px;opacity:.9}
+.fv-tick,.fv-price{position:absolute;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center}
+.fv-tick::before{content:"";width:2px;height:16px;background:var(--accent)}
+.fv-tick b,.fv-tick small,.fv-price b,.fv-price small{position:absolute;white-space:nowrap}
+.fv-tick b{top:22px;font-size:12.5px} .fv-tick small{top:38px;font-size:11px;color:var(--text-3)}
+.fv-tick.base::before{width:3px;height:20px}
+.fv-price::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--text);border:3px solid var(--surface)}
+.fv-price b{bottom:24px;font-size:12.5px} .fv-price small{bottom:40px;font-size:11px;color:var(--text-3)}
+.fv-ass{margin-top:6px;font-size:13px}
+.fv-ass summary{cursor:pointer;color:var(--text-2);font-weight:600}
+.fv-ass ul{margin:8px 0 6px;padding-left:18px;color:var(--text-2)}
+.fc{border-left:1px solid var(--border);padding-left:24px}
+.fc-row{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;padding:7px 0;border-top:1px solid var(--border);font-size:13.5px}
+.fc-row.head{border-top:0;color:var(--text-3);font-size:12px;padding-top:10px}
+.fc-row span:not(:first-child){text-align:right}
+@media (max-width:760px){.fv-grid{grid-template-columns:1fr;gap:18px}.fc{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
+  .fv-card{padding:16px}}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -671,7 +699,7 @@ table.peers .neg{color:var(--neg)}
 </header>
 <nav class="subnav" id="subnav">
   <div class="container">
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -1313,6 +1341,9 @@ const GLOSSARY = [
   ["Operative Marge", "Operative Marge", "Operativer Gewinn (EBIT) geteilt durch den Umsatz – wie profitabel das Kerngeschäft ist.", ["Operative Marge", "operative Marge"]],
   ["Nettomarge", "Nettomarge", "Gewinn nach allen Kosten, Zinsen und Steuern geteilt durch den Umsatz.", ["Nettomarge"]],
   ["Nettoverschuldung", "Nettoverschuldung / EBITDA", "Schulden minus Cash, geteilt durch das EBITDA: In wie vielen Jahren könnte die Firma ihre Schulden aus dem operativen Ergebnis tilgen? Unter 2 solide, über 3,5 hoch.", ["Nettoverschuldung"]],
+  ["Fairer Wert", "Fairer Wert (DCF)", "Was eine Aktie nach einem Cashflow-Modell wert ist: künftige Free Cashflows werden geschätzt und auf heute abgezinst. Drei Szenarien (vorsichtig, Basis, optimistisch) zeigen die Spanne. Bei Banken über Kurs-Buchwert und Eigenkapitalrendite, bei Immobilien über Kurs/FFO.", ["Fairer Wert", "Discounted-Cashflow", "DCF"]],
+  ["Owner Earnings", "Owner Earnings", "Operativer Cashflow minus Abschreibungen. Annäherung an den Cashflow ohne Wachstumsinvestitionen – sinnvoll, wenn eine Firma gerade stark investiert (z. B. in Rechenzentren).", ["Owner Earnings"]],
+  ["Prognose", "Analystenprognosen", "Durchschnittliche Erwartung der Analysten für Umsatz und Gewinn je Aktie im laufenden und nächsten Geschäftsjahr. Im Schnitt eher zu optimistisch – Änderungen der Prognosen sind aussagekräftiger.", ["Umsatzprognose", "Gewinnprognose"]],
   ["Reverse-DCF", "Reverse-DCF", "Rechnet rückwärts: Wie stark müsste der Free Cashflow 10 Jahre lang wachsen, damit der heutige Kurs gerechtfertigt ist? Liegt das deutlich über dem realistisch Erwartbaren, ist viel Optimismus eingepreist.", ["Reverse-DCF"]],
   ["Diskontsatz", "Diskontsatz", "Zins, mit dem künftige Zahlungen auf heute abgezinst werden – entspricht der Renditeerwartung der Anleger (hier: Zinsniveau plus Risikoaufschlag).", ["Diskontsatz", "Eigenkapitalkosten"]],
   ["CAGR", "CAGR", "Durchschnittliches jährliches Wachstum über mehrere Jahre (Compound Annual Growth Rate).", ["CAGR"]],
@@ -1361,7 +1392,7 @@ const GL_INDEX = (() => {
 })();
 function glossarize(root) {
   if (!root) return;
-  const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat");
+  const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat, .fv-ass li, .fc-row span:first-child, .fv-head .stamp");
   scopes.forEach(el => {
     const seen = new Set();
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -1434,6 +1465,58 @@ function showGlossary() {
     const q = e.target.value.trim().toLowerCase();
     document.querySelectorAll(".gl-item").forEach(it => it.style.display = !q || it.dataset.s.includes(q) ? "" : "none");
   };
+}
+
+/* Fairer Wert: Spanne aus drei Szenarien mit Kursmarke + Analystenprognosen */
+function fairCard(d) {
+  const f = d.fair, fc = d.forecast || {};
+  if (!f && !(fc.rev && (fc.rev["0y"] || fc.rev["+1y"]))) return "";
+  const cur = esc(d.currency), price = d.price;
+  const growthRow = (lab, e) => {
+    const cells = ["0y", "+1y"].map(p => e?.[p]?.growth != null ? `<span class="num" style="color:${e[p].growth >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(e[p].growth, 1, true)}</span>` : "<span class='stamp'>–</span>");
+    return `<div class="fc-row"><span>${lab}</span>${cells.join("")}</div>`;
+  };
+  let range = "";
+  if (f && f.base) {
+    const vals = [f.bear, f.base, f.bull, price].filter(v => v != null && v > 0);
+    const lo = Math.min(...vals) * 0.9, hi = Math.max(...vals) * 1.08;
+    const X = v => ((v - lo) / (hi - lo) * 100).toFixed(2);
+    const up = f.upside;
+    const verdict = up >= 0.15 ? ["unter dem fairen Wert", "var(--pos)"] : up <= -0.15 ? ["über dem fairen Wert", "var(--neg)"] : ["nahe am fairen Wert", "var(--neu)"];
+    const aboveBull = f.bull && price > f.bull, belowBear = f.bear && price < f.bear;
+    range = `
+      <div class="fv-head">
+        <div><div class="eyebrow">Fairer Wert je Aktie</div>
+          <div class="fv-val num">${nf(f.base)} <small>${cur}</small></div>
+          <div class="stamp">Basisszenario · ${esc(f.method)}</div></div>
+        <div class="fv-up"><span class="num" style="color:${verdict[1]}">${pc(up, 1, true)}</span><small>Kurs liegt ${verdict[0]}</small></div>
+      </div>
+      <div class="fv-bar" role="img" aria-label="Fairer Wert vorsichtig ${nf(f.bear)}, Basis ${nf(f.base)}, optimistisch ${nf(f.bull)}, Kurs ${nf(price)} ${cur}">
+        ${f.bear && f.bull ? `<span class="fv-span" style="left:${X(f.bear)}%;width:${X(f.bull) - X(f.bear)}%"></span>` : ""}
+        ${[["bear", "vorsichtig"], ["base", "Basis"], ["bull", "optimistisch"]].filter(([k]) => f[k]).map(([k, l]) =>
+          `<span class="fv-tick ${k}" style="left:${X(f[k])}%"><b class="num">${nf(f[k], f[k] < 10 ? 2 : 0)}</b><small>${l}</small></span>`).join("")}
+        <span class="fv-price" style="left:${X(price)}%"><b class="num">${nf(price, price < 10 ? 2 : 0)}</b><small>Kurs</small></span>
+      </div>
+      ${aboveBull ? `<div class="note" style="margin-top:12px">Der Kurs liegt sogar über dem optimistischen Szenario – der Markt erwartet mehr Wachstum oder einen niedrigeren Zins, als das Modell annimmt.</div>`
+        : belowBear ? `<div class="note" style="margin-top:12px;border-color:var(--pos-line);background:var(--pos-soft);color:var(--text)">Der Kurs liegt unter dem vorsichtigen Szenario – auffällig günstig, sofern die Annahmen halten.</div>` : ""}
+      <details class="fv-ass"><summary>Annahmen der Szenarien</summary><ul>${(f.assumptions || []).map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+        <p class="stamp">Ein Cashflow-Modell reagiert stark auf Wachstum und Zins: 1 Prozentpunkt mehr Diskontsatz senkt den Wert oft um 15–25 %. Deshalb zählt der faire Wert nur moderat in die Bewertung.</p></details>`;
+  } else if (f && f.na) {
+    range = `<div class="eyebrow">Fairer Wert je Aktie</div><p class="stamp" style="margin:6px 0 0">${esc(f.na)}</p>`;
+  }
+  const hasFc = fc.rev && (fc.rev["0y"] || fc.rev["+1y"]);
+  return `<section class="card fv-card" id="fairerwert" aria-label="Fairer Wert und Prognosen">
+    <div class="fv-grid">
+      <div>${range || `<div class="eyebrow">Fairer Wert je Aktie</div><p class="stamp" style="margin:6px 0 0">Für diesen Wert ist kein fairer Wert berechenbar.</p>`}</div>
+      ${hasFc ? `<div class="fc">
+        <div class="eyebrow">Prognosen der Analysten${fc.n ? ` · ${fc.n} Analysten` : ""}</div>
+        <div class="fc-row head"><span></span><span>dieses GJ</span><span>nächstes GJ</span></div>
+        ${growthRow("Umsatz", fc.rev)}${growthRow("Gewinn je Aktie", fc.eps)}
+        ${fc.fpe ? `<div class="fc-row"><span>Forward-KGV</span><span class="num" style="grid-column:span 2">${nf(fc.fpe, 1)}</span></div>` : ""}
+        <p class="stamp" style="margin:8px 0 0">Wachstum gegenüber dem Vorjahr. Analystenprognosen sind im Schnitt zu optimistisch – die App nutzt sie gemischt mit der eigenen Historie.</p>
+      </div>` : ""}
+    </div>
+  </section>`;
 }
 
 /* Trefferquote der eigenen Empfehlungen */
@@ -2188,6 +2271,8 @@ function render(d) {
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
   const nu = document.querySelector('#subnav a[href="#ueber"]');
   if (nu) nu.style.display = etf || crypto ? "none" : "";
+  const nf_ = document.querySelector('#subnav a[href="#fairerwert"]');
+  if (nf_) nf_.style.display = etf || crypto ? "none" : "";
   $("#subnav").style.display = "block";
 
   $("#out").innerHTML = `
@@ -2292,6 +2377,8 @@ function render(d) {
        ["52-Wochen-Spanne", F.lo52 ? `${nf(F.lo52, 0)}–${nf(F.hi52, 0)}` : "–"], ["Volatilität 1J", pc(F.vol, 0), F.beta ? `β ${nf(F.beta, 2)}` : ""]])
       .map(([k, v, s]) => `<div><dt>${k}</dt><dd class="num">${v}${s ? `<small>${s}</small>` : ""}</dd></div>`).join("")}
   </dl>
+
+  ${fairCard(d)}
 
   <h2 class="section">Auf einen Blick</h2>
   <p class="section-sub">Das zutreffendste Adjektiv je Kategorie. Der Balken zeigt die Einordnung von negativ (links) bis positiv (rechts).</p>

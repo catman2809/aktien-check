@@ -835,6 +835,25 @@ def reverse_dcf(fcf, ev, r, g_term=0.025, years=10):
     return (lo + hi) / 2
 
 
+def est_growth(m, key):
+    """Ø erwartetes Wachstum (dieses + nächstes Geschäftsjahr) laut Analysten; EPS nur bei positivem Vorjahreswert."""
+    e = m.get(key) or {}
+    vals = []
+    for per in ("0y", "+1y"):
+        x = e.get(per) or {}
+        if x.get("growth") is None:
+            continue
+        if key == "est_eps" and (x.get("ago") is None or x["ago"] <= 0):
+            continue  # Wachstum aus Verlust/Null ist nicht aussagekräftig
+        vals.append(clamp(x["growth"], -0.6, 1.0))
+    return sum(vals) / len(vals) if vals else None
+
+
+def est_analysts(m):
+    return int(max([(m.get("est_rev") or {}).get(p_, {}).get("n") or 0 for p_ in ("0y", "+1y")]
+                   + [(m.get("est_eps") or {}).get(p_, {}).get("n") or 0 for p_ in ("0y", "+1y")]))
+
+
 def balance_quality(m, inc, bs, cf):
     """Piotroski F-Score, Altman Z-Score, Zinsdeckung, Gewinnqualität (Accruals) und um Aktienvergütung
     bereinigter Free Cashflow – alles aus den Jahresabschlüssen."""
@@ -855,6 +874,9 @@ def balance_quality(m, inc, bs, cf):
     sh, sh1 = pair(bs, "Ordinary Shares Number", "Share Issued")
     ocf, _ = pair(cf, "Operating Cash Flow")
     sbc, _ = pair(cf, "Stock Based Compensation")
+    da, _ = pair(cf, "Depreciation And Amortization", "Depreciation Amortization Depletion")
+    # Owner Earnings: operativer Cashflow minus Abschreibungen (≈ Erhaltungsinvestitionen) – blendet Wachstumsinvestitionen aus
+    m["owner_earnings"] = ocf - da if ocf is not None and da is not None else None
 
     def div(a_, b_):
         return a_ / b_ if a_ is not None and b_ else None
@@ -903,6 +925,7 @@ def pd_ts(v):
 def expectations(m, t):
     """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
     m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = None
+    m["est_rev"], m["est_eps"] = {}, {}
     tr = safe(lambda: t.eps_trend)
     if tr is not None and not tr.empty and "current" in tr and "90daysAgo" in tr:
         ch = []
@@ -917,6 +940,19 @@ def expectations(m, t):
         sub = rv.loc[[p_ for p_ in ("0y", "+1y") if p_ in rv.index]]
         up, dn = int(sub["upLast30days"].fillna(0).sum()), int(sub["downLast30days"].fillna(0).sum())
         m["rev_breadth"] = (up, dn) if up + dn else None
+    def est(df, col_growth="growth"):
+        out = {}
+        if df is None or getattr(df, "empty", True):
+            return out
+        for per in ("0y", "+1y"):
+            if per in df.index:
+                r_ = df.loc[per]
+                out[per] = {"avg": num(r_.get("avg")), "low": num(r_.get("low")), "high": num(r_.get("high")),
+                            "growth": num(r_.get(col_growth)), "n": num(r_.get("numberOfAnalysts")),
+                            "ago": num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps"))}
+        return out
+    m["est_rev"] = est(safe(lambda: t.revenue_estimate))
+    m["est_eps"] = est(safe(lambda: t.earnings_estimate))
     eh = safe(lambda: t.earnings_history)
     if eh is not None and not eh.empty and "surprisePercent" in eh:
         vals = [num(v) for v in eh["surprisePercent"].tolist()]
@@ -980,7 +1016,10 @@ def gather(symbol, t, info):
     m["ev_ebitda"] = num(g("enterpriseToEbitda"))
     m["ev"] = num(g("enterpriseValue"))
     fcf_hist = row(cf, "Free Cash Flow")
-    m["fcf"] = num(g("freeCashflow")) or first(fcf_hist)
+    qcf = convert_df(safe(lambda: t.quarterly_cashflow), k)
+    m["fcf_hist"] = [v for v in fcf_hist if v is not None]
+    # TTM aus den letzten 4 Quartalen; Yahoos „freeCashflow“ ist teils fehlerhaft (z. B. NVIDIA 42 statt 127 Mrd.)
+    m["fcf"] = ttm(qcf, cf, "Free Cash Flow") or first(fcf_hist) or num(g("freeCashflow"))
     m["fcf_yield"] = m["fcf"] / m["mcap"] if m["fcf"] is not None and m["mcap"] else None
     m["target"] = num(g("targetMeanPrice"))
     m["upside"] = (m["target"] / m["price"] - 1) if m["target"] and m["price"] else None
@@ -1088,9 +1127,9 @@ def gather(symbol, t, info):
         d = divs.copy()
         d.index = d.index.tz_localize(None) if d.index.tz is not None else d.index
         last_year = datetime.now() - timedelta(days=365)
-        ttm = float(d[d.index >= last_year].sum())
-        if m["price"] and ttm > 0:
-            m["div_yield"] = ttm / m["price"]
+        div_12m = float(d[d.index >= last_year].sum())
+        if m["price"] and div_12m > 0:
+            m["div_yield"] = div_12m / m["price"]
         yearly = d.groupby(d.index.year).sum()
         this_year = datetime.now().year
         yearly = yearly[yearly.index < this_year]
@@ -1235,6 +1274,90 @@ def model_valuation(m, mac, ref_pe, why):
     return parts
 
 
+def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5):
+    """Abgezinste Free Cashflows: Jahre 1–5 mit g1, danach linear auf g_term, Endwert nach Gordon."""
+    pv, cf_ = 0.0, fcf
+    for y in range(1, years + 1):
+        g = g1 if y <= fade_from else g1 + (g_term - g1) * (y - fade_from) / (years - fade_from)
+        cf_ *= 1 + g
+        pv += cf_ / (1 + r) ** y
+    tv = cf_ * (1 + g_term) / (r - g_term)
+    pv += tv / (1 + r) ** years
+    equity = pv - (net_debt or 0)
+    return equity / shares if equity > 0 and shares else None
+
+
+def fair_value(m, mac):
+    """Fairer Wert je Aktie in drei Szenarien (vorsichtig / Basis / optimistisch)."""
+    biz, price = m.get("biz", "standard"), m["price"]
+    shares = m["mcap"] / price if m["mcap"] and price else None
+    if not shares:
+        return None
+    coe = cost_of_equity(m, mac)
+    out = {"method": "", "assumptions": [], "bear": None, "base": None, "bull": None}
+    if biz in ("bank", "insurance"):
+        if not (m["pb"] and m["pb"] > 0 and m["roe"] is not None and 0 < m["roe"] < 0.6):
+            return None
+        book, g = price / m["pb"], 0.025
+        val = lambda roe_, r_: book * max(0.2, (roe_ - g) / (r_ - g))
+        out.update(method="Kurs-Buchwert aus Eigenkapitalrendite",
+                   bear=val(m["roe"] - 0.02, coe + 0.01), base=val(m["roe"], coe), bull=val(m["roe"] + 0.02, coe - 0.01))
+        out["assumptions"] = [f"Buchwert je Aktie {fnum(book, 2)}", f"ROE {pct(m['roe'])} (±2 Prozentpunkte)",
+                              f"Eigenkapitalkosten {pct(coe)} (±1 Prozentpunkt)"]
+    elif biz == "real_estate":
+        if not (m["ocf"] and m["ocf"] > 0):
+            return None
+        ffo_ps = m["ocf"] / shares
+        out.update(method="Kurs/FFO-Vielfaches", bear=ffo_ps * 12, base=ffo_ps * 15, bull=ffo_ps * 18)
+        out["assumptions"] = [f"FFO je Aktie ≈ {fnum(ffo_ps, 2)} (operativer Cashflow)", "Vielfaches 12 / 15 / 18"]
+    elif biz in ("pre_revenue",):
+        return {"method": "", "na": "Ohne nennenswerten Umsatz ist kein fairer Wert berechenbar – der Wert hängt an Studien, "
+                "Zulassungen oder technologischen Durchbrüchen."}
+    else:
+        hist = [v for v in (m.get("fcf_hist") or []) if v is not None]
+        base_fcf = (sum(hist) / len(hist)) if biz == "cyclical" and len(hist) >= 3 else m["fcf"]
+        owner = m.get("owner_earnings")
+        used_owner = biz != "cyclical" and owner is not None and base_fcf is not None and owner > base_fcf
+        if used_owner:
+            base_fcf = owner  # hohe Wachstumsinvestitionen drücken den Free Cashflow nur vorübergehend
+        if base_fcf is not None and m.get("sbc"):
+            base_fcf -= m["sbc"]
+        if base_fcf is None or base_fcf <= 0:
+            return {"method": "", "na": "Der Free Cashflow ist (nach Aktienvergütung) negativ – ein Cashflow-Modell ist "
+                    "noch nicht sinnvoll. Maßgeblich sind EV/Umsatz, Rule of 40 und Cash-Reichweite."}
+        frg = est_growth(m, "est_rev")
+        hist_g = m["rev_cagr"]
+        parts_ = [(frg, 0.6), (hist_g, 0.4)] if frg is not None and hist_g is not None else [(frg if frg is not None else hist_g, 1)]
+        g_base = wavg([(clamp(x, -0.1, 0.5), w) for x, w in parts_ if x is not None])
+        if g_base is None:
+            g_base = 0.04
+        g_base = clamp(g_base, -0.05, 0.30)
+        if biz == "cyclical":
+            g_base = min(g_base, 0.10)  # Zykliker: Wachstum begrenzen, Basis ist der Durchschnitts-Cashflow
+        r1 = (m.get("est_rev") or {}).get("+1y") or {}
+        spread = ((r1["high"] - r1["low"]) / r1["avg"] / 2) if r1.get("avg") and r1.get("high") and r1.get("low") else 0
+        d = clamp(max(0.04, spread), 0.04, 0.12)
+        # Diskontsatz: angepasstes Beta (Blume: 2/3 Beta + 1/3) und 4,5 % Marktrisikoprämie
+        beta_adj = 0.67 * clamp(m["beta"] or 1.0, 0.3, 2.5) + 0.33
+        r = clamp((mac["rf"] or 4.0) / 100 + beta_adj * 0.045, 0.07, 0.12)
+        out.update(method="Discounted-Cashflow (10 Jahre)",
+                   bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, m["net_debt"], shares),
+                   base=dcf_value(base_fcf, g_base, r, 0.025, m["net_debt"], shares),
+                   bull=dcf_value(base_fcf, min(0.40, g_base + d), r - 0.01, 0.03, m["net_debt"], shares))
+        out["assumptions"] = [
+            ("Owner Earnings (operativer Cashflow minus Abschreibungen) " if used_owner else "Free Cashflow ")
+            + money(base_fcf, m['currency']) + (" (Ø der Geschäftsjahre, Zykliker)" if biz == "cyclical" else "" if used_owner else " (12 Monate)")
+            + (" nach Aktienvergütung" if m.get("sbc") else ""),
+            f"Wachstum Jahre 1–5: {pct(g_base - d)} / {pct(g_base)} / {pct(g_base + d)}"
+            + (" (aus Analystenprognose und Historie)" if frg is not None else " (aus der Historie)"),
+            "danach schrittweise auf 2–3 % Dauerwachstum",
+            f"Diskontsatz {pct(r + 0.01)} / {pct(r)} / {pct(r - 0.01)}"]
+    if out["base"] is None:
+        return None
+    out["upside"] = out["base"] / price - 1
+    return out
+
+
 def score_valuation(m, mac):
     ref_pe, ref_ev = SECTOR_REF.get(m["sector"], (20, 13))
     biz = m.get("biz", "standard")
@@ -1263,8 +1386,11 @@ def score_valuation(m, mac):
         s = clamp((1 - pe / m["pe_hist_med"]) * 1.5)
         parts.append((s, pe_w))
         why.append(f"KGV vs. eigener Historie (Median {fnum(m['pe_hist_med'])}, {len(m['pe_hist'])} Jahre)")
-    if m["fpe"] and m["fpe"] > 0 and pe and pe > 0:
-        why.append(f"Forward-KGV {fnum(m['fpe'])} ({'Gewinnanstieg erwartet' if m['fpe'] < pe else 'Gewinnrückgang erwartet'})")
+    if m["fpe"] and m["fpe"] > 0 and biz != "real_estate":
+        fw = 0.4 if biz == "cyclical" else 0.8  # bei Zyklikern beruht die Prognose oft auf Spitzengewinnen
+        parts.append((clamp((1 - m["fpe"] / ref_pe) * 1.5), fw))
+        why.append(f"Forward-KGV {fnum(m['fpe'])} auf den erwarteten Gewinn vs. Referenz {fnum(ref_pe)}"
+                   + ("" if not (pe and pe > 0) else f" ({'Gewinnanstieg erwartet' if m['fpe'] < pe else 'Gewinnrückgang erwartet'})"))
     if m["ev_ebitda"] and m["ev_ebitda"] > 0 and not m["is_financial"]:
         parts.append((clamp((1 - m["ev_ebitda"] / ref_ev) * 1.5), 1.0))
         why.append(f"EV/EBITDA {fnum(m['ev_ebitda'])} vs. Branche ~{ref_ev}")
@@ -1280,6 +1406,14 @@ def score_valuation(m, mac):
         parts.append((clamp((1.5 - m["peg"]) / 1.0), 0.7))
         why.append(f"PEG-Ratio {fnum(m['peg'], 2)} (unter 1 = günstig relativ zum Wachstum)")
     parts += model_valuation(m, mac, ref_pe, why)
+    fv = m.get("fair") if "fair" in m else None
+    if fv is None and m.get("price"):
+        fv = m["fair"] = safe(lambda: fair_value(m, mac))
+    if fv and fv.get("base"):
+        parts.append((clamp(fv["upside"] / 0.35), 0.5))
+        why.append(f"Fairer Wert ({fv['method']}, Basisszenario) {fnum(fv['base'], 2)} {m['currency']} → "
+                   f"{'+' if fv['upside'] >= 0 else ''}{fnum(fv['upside'] * 100, 1)} % · Spanne "
+                   f"{fnum(fv['bear'], 2) if fv.get('bear') else '–'} bis {fnum(fv['bull'], 2) if fv.get('bull') else '–'}")
     if m["upside"] is not None and (m["n_analysts"] >= 3 or m.get("target_n", 0) >= 2):
         w = 0.6 if not m.get("target_n") else 0.6 * min(1.0, m["target_n"] / 6)  # wenige Meldungen -> weniger Gewicht
         parts.append((clamp(m["upside"] / 0.3), w))
@@ -1295,7 +1429,8 @@ def score_valuation(m, mac):
     def med(xs):
         xs = sorted(x for x in xs if x is not None)
         return (xs[(len(xs) - 1) // 2] + xs[len(xs) // 2]) / 2 if xs else None
-    rev_e, eps_e = med([m["rev_cagr"], m["rev_g"]]), med([m["eps_g"], m["fwd_eps_g"]])
+    rev_e = med([m["rev_cagr"], m["rev_g"], est_growth(m, "est_rev")])
+    eps_e = med([m["eps_g"], m["fwd_eps_g"], est_growth(m, "est_eps")])
     expected = wavg([(None if rev_e is None else clamp(rev_e, -0.15, 0.3), 0.6),
                      (None if eps_e is None else clamp(eps_e, -0.2, 0.25), 0.4)])
     m["implied_g"], m["expected_g"], m["disc_rate"] = implied, expected, r
@@ -1531,7 +1666,18 @@ def score_growth(m):
     if m["eps_g"] is not None:
         vals.append((clamp(m["eps_g"], -0.5, 0.6), 0.6))
         why.append(f"Gewinnwachstum (Quartal ggü. Vorjahr) {pct(m['eps_g'])}")
-    if m["fwd_eps_g"] is not None:
+    frg, feg = est_growth(m, "est_rev"), est_growth(m, "est_eps")
+    na_ = est_analysts(m)
+    if frg is not None:
+        vals.append((clamp(frg, -0.5, 0.6), 1.3))
+        er = m["est_rev"]
+        why.append("Umsatzprognose der Analysten: " + " · ".join(
+            f"{'dieses' if p_ == '0y' else 'nächstes'} GJ {pct(er[p_]['growth'])}" for p_ in ("0y", "+1y")
+            if er.get(p_, {}).get("growth") is not None) + (f" ({na_} Analysten)" if na_ else ""))
+    if feg is not None:
+        vals.append((clamp(feg, -0.5, 0.6), 0.7))
+        why.append(f"Gewinnprognose (Gewinn je Aktie) Ø {pct(feg)} p. a. für dieses und nächstes Geschäftsjahr")
+    elif m["fwd_eps_g"] is not None:
         vals.append((clamp(m["fwd_eps_g"], -0.5, 0.6), 0.8))
         why.append(f"Erwartetes EPS-Wachstum (Forward vs. Trailing) {pct(m['fwd_eps_g'])}")
     if m["rd_ratio"] is not None:
@@ -1541,7 +1687,7 @@ def score_growth(m):
         return {"score": None, "adjective": "reif", "reasons": why + ["Keine Wachstumsdaten"]}
     s = clamp((gr - 0.04) / 0.12)
     # Adjektiv orientiert sich primär am Umsatz (Gewinnsprünge sind oft Basiseffekte)
-    rev_vals = [x for x in (m["rev_cagr"], m["rev_g"]) if x is not None]
+    rev_vals = [x for x in (m["rev_cagr"], m["rev_g"], est_growth(m, "est_rev")) if x is not None]
     rg = sum(rev_vals) / len(rev_vals) if rev_vals else gr
     acq_heavy = (m["acquisitions"] or 0) > 0.2 * (m["ocf_sum"] or 1e30)
     if rg >= 0.08 and gr >= 0.05:
@@ -1954,6 +2100,17 @@ def build_fundamentals(m, mac):
             ["FCF-Rendite", pct(m["fcf_yield"]), ""],
             ["KBV / KUV / PEG", f"{fnum(m['pb'], 2)} / {fnum(m['ps'], 2)} / {fnum(m['peg'], 2)}", ""],
         )},
+        {"title": "Prognosen & fairer Wert", "rows": [r for r in (
+            ["Umsatzprognose dieses / nächstes GJ",
+             " / ".join(pct(((m.get("est_rev") or {}).get(p_) or {}).get("growth")) for p_ in ("0y", "+1y")),
+             f"{est_analysts(m)} Analysten" if est_analysts(m) else "Analystenschätzungen"],
+            ["Gewinnprognose (EPS) dieses / nächstes GJ",
+             " / ".join(pct(((m.get("est_eps") or {}).get(p_) or {}).get("growth")) for p_ in ("0y", "+1y")), "Wachstum ggü. Vorjahr"],
+            ["Forward-KGV", fnum(m.get("fpe")), "Kurs / erwarteter Gewinn"],
+            ["Fairer Wert (vorsichtig / Basis / optimistisch)",
+             " / ".join(fnum((m.get("fair") or {}).get(k_), 2) for k_ in ("bear", "base", "bull")) if (m.get("fair") or {}).get("base") else "–",
+             (m.get("fair") or {}).get("method") or (m.get("fair") or {}).get("na", "")[:60]],
+        ) if r]},
         {"title": "Eingepreiste Erwartungen (Reverse-DCF)", "rows": rows_(
             ["Im Kurs eingepreistes FCF-Wachstum p.a.", pct(m.get("implied_g")),
              f"10 Jahre, danach 2,5 %, Diskontsatz {pct(m.get('disc_rate'))}"],
@@ -3682,6 +3839,9 @@ def analyze(query):
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
         "profile": profile,
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
+        "fair": m.get("fair"),
+        "forecast": {"rev": m.get("est_rev") or {}, "eps": m.get("est_eps") or {}, "n": est_analysts(m),
+                     "fpe": m.get("fpe"), "currency": m["currency"]},
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
