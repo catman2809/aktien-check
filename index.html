@@ -66,6 +66,14 @@ a{color:inherit}
 .topbar .container{display:flex;align-items:center;gap:20px;height:64px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;white-space:nowrap}
 .logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
+a.brand{color:inherit;text-decoration:none;border-radius:10px}
+a.brand:hover .logo{filter:brightness(1.12)}
+a.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.home-btn{display:inline-flex;align-items:center;gap:4px;flex:none;height:32px;padding:0 12px 0 8px;margin-right:6px;
+  border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:13.5px;
+  font-weight:600;cursor:pointer}
+.home-btn:hover{background:var(--surface-2);border-color:var(--border-strong)}
+@media (max-width:640px){.home-btn span{display:none}.home-btn{padding:0 8px}}
 .brand small{display:block;font-weight:500;font-size:11.5px;color:var(--text-3);letter-spacing:.02em;margin-top:-3px}
 .search{position:relative;flex:1;min-width:0;max-width:560px;margin-left:auto;display:flex}
 .search input{flex:1;min-width:0;width:100%;height:40px;padding:0 14px 0 38px;border:1px solid var(--border-strong);border-right:0;
@@ -697,10 +705,10 @@ table.peers .neg{color:var(--neg)}
 <body>
 <header class="topbar">
   <div class="container">
-    <div class="brand">
+    <a class="brand" href="./" id="brand" title="Zur Startseite" aria-label="Aktien-Check – zur Startseite">
       <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
       <div>Aktien-Check<small>Kaufen · Halten · Verkaufen</small></div>
-    </div>
+    </a>
     <form class="search" id="f" autocomplete="off">
       <svg class="s" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="q" placeholder="Aktie oder Krypto, z. B. Allianz, SAP.DE, Bitcoin">
@@ -722,6 +730,9 @@ table.peers .neg{color:var(--neg)}
 </header>
 <nav class="subnav" id="subnav">
   <div class="container">
+    <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span>Startseite</span></button>
     <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
@@ -911,7 +922,7 @@ function wlBind(root) {
 function showWatchlist() {
   runId++; wlView = true;
   $("#subnav").style.display = "none";
-  history.replaceState(null, "", "?view=watchlist");
+  navTo("?view=watchlist");
   renderWl(); window.scrollTo({top: 0});
   loadAlerts().then(() => renderWl());
 }
@@ -1480,7 +1491,7 @@ window.addEventListener("scroll", closeGl, {passive: true});
 function showGlossary() {
   runId++; wlView = false;
   $("#subnav").style.display = "none";
-  history.replaceState(null, "", "?view=glossar");
+  navTo("?view=glossar");
   window.scrollTo({top: 0});
   const items = [...GLOSSARY].sort((a, b) => a[1].localeCompare(b[1], "de"));
   $("#out").innerHTML = `<div class="wl-head"><div><div class="eyebrow">Nachschlagen</div><h1>Glossar <span class="stamp" style="font-size:15px">${items.length} Begriffe</span></h1></div>
@@ -1489,7 +1500,7 @@ function showGlossary() {
     <div class="card gl-list" id="gllist">${items.map(g => `<div class="gl-item" data-s="${esc((g[1] + " " + g[3].join(" ")).toLowerCase())}">
       <b>${esc(g[1])}</b><p>${esc(g[2])}</p></div>`).join("")}</div>
     <p class="stamp" style="margin-top:10px">In jeder Analyse sind diese Begriffe gepunktet unterstrichen – antippen zeigt die Erklärung direkt an.</p>`;
-  $("#glback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  $("#glback").onclick = () => goHome();
   $("#glq").oninput = e => {
     const q = e.target.value.trim().toLowerCase();
     document.querySelectorAll(".gl-item").forEach(it => it.style.display = !q || it.dataset.s.includes(q) ? "" : "none");
@@ -1583,7 +1594,7 @@ async function scrAction(path, body) {
 async function showScreener() {
   runId++; wlView = false;
   $("#subnav").style.display = "none";
-  history.replaceState(null, "", "?view=screener");
+  navTo("?view=screener");
   window.scrollTo({top: 0});
   $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Screener …</b></div>`;
   try { SCR.data = await api("/api/screener"); } catch (e) {
@@ -1665,7 +1676,7 @@ function renderScreener() {
     </table></div>
     <p class="stamp" style="margin-top:10px">${rows.length} Treffer · Fairer Wert = Abstand des Kurses zum Basisszenario · Zeile antippen für die vollständige Analyse.
       Indexzusammensetzung Stand 21.10.2026.</p>`;
-  $("#scrback").onclick = () => { clearTimeout(scrTimer); history.replaceState(null, "", location.pathname); welcome(); };
+  $("#scrback").onclick = () => goHome();
   const st_ = $("#scrstart"), sp_ = $("#scrstop");
   if (st_) st_.onclick = () => { SCR.panel = !SCR.panel; renderScreener(); };
   if (sp_) sp_.onclick = () => { sp_.disabled = true; scrAction("/api/screener/stop"); };
@@ -1698,7 +1709,7 @@ const GROUP_COL = {Kaufen: "var(--pos)", Halten: "var(--neu)", Verkaufen: "var(-
 async function showTrack() {
   runId++; wlView = false;
   $("#subnav").style.display = "none";
-  history.replaceState(null, "", "?view=trefferquote");
+  navTo("?view=trefferquote");
   window.scrollTo({top: 0});
   $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Werte Empfehlungen aus …</b>
     <div class="stamp">Kursverläufe aller bisher analysierten Werte werden geladen – beim ersten Mal bis zu 30 Sekunden.</div></div>`;
@@ -1770,10 +1781,41 @@ function renderTrack(d) {
         : `<tr><td colspan="8" class="stamp" style="padding:18px">Noch keine Signale – analysiere ein paar Aktien, dann füllt sich die Liste automatisch.</td></tr>`}</tbody>
     </table></div>
     <p class="stamp" style="margin-top:10px">Kurse in Handelswährung, ohne Dividenden und Gebühren. Vergangene Treffer sind keine Garantie für die Zukunft.</p>`;
-  $("#trkback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  $("#trkback").onclick = () => goHome();
   document.querySelectorAll("#trkscope button").forEach(b => b.onclick = () => { trkScope = b.dataset.s; showTrack(); });
   document.querySelectorAll(".trk-sym").forEach(a => a.onclick = e => { e.preventDefault(); $("#q").value = a.dataset.q; run(a.dataset.q); });
 }
+
+/* Navigation: Startseite, Browser-Verlauf und Zurück-Geste */
+function navTo(url) {
+  const target = new URL(url, location.href);
+  if (target.search === location.search) return;  // gleiche Seite (z. B. nach „Zurück“) -> kein doppelter Eintrag
+  history.pushState(null, "", target.search || location.pathname);
+}
+function goHome() {
+  runId++;
+  if (typeof scrTimer !== "undefined") clearTimeout(scrTimer);
+  if (typeof closeGl === "function") closeGl();
+  $("#q").value = "";
+  if (location.search) history.pushState(null, "", location.pathname);
+  welcome();
+  window.scrollTo({top: 0});
+}
+function route() {
+  const ps = new URLSearchParams(location.search);
+  const pre = ps.get("q");
+  if (ps.get("import")) wlImport(ps.get("import"));
+  else if (ps.get("view") === "watchlist") showWatchlist();
+  else if (ps.get("view") === "trefferquote") showTrack();
+  else if (ps.get("view") === "glossar") showGlossary();
+  else if (ps.get("view") === "screener") showScreener();
+  else if (pre) { $("#q").value = pre; run(pre); }
+  else { runId++; $("#q").value = ""; welcome(); }
+}
+window.addEventListener("popstate", () => route());
+document.addEventListener("click", e => {
+  if (e.target.closest("#homebtn") || (e.target.closest("#brand") && !e.ctrlKey && !e.metaKey)) { e.preventDefault(); goHome(); }
+});
 
 /* Run */
 let runId = 0;
@@ -1796,7 +1838,7 @@ async function run(q) {
     render(d);
     wlUpsert(d);
     window.scrollTo({top: 0});
-    history.replaceState(null, "", "?q=" + encodeURIComponent(d.symbol));
+    navTo("?q=" + encodeURIComponent(d.symbol));
   } catch (e) {
     if (id !== runId) return;
     $("#out").innerHTML = `<div class="card error"><b>Analyse nicht möglich</b><span class="stamp">${esc(e.message)}</span></div>`;
@@ -2698,14 +2740,7 @@ if (location.protocol === "file:") {
     die Datei „Aktien-Check starten.bat“ doppelklicken – danach öffnet sich http://localhost:8765. Das schwarze Fenster offen lassen.</span></div>`;
   $("#f").onsubmit = e => e.preventDefault();
 } else {
-  const ps = new URLSearchParams(location.search);
-  const pre = ps.get("q");
-  if (ps.get("import")) wlImport(ps.get("import"));
-  else if (ps.get("view") === "watchlist") showWatchlist();
-  else if (ps.get("view") === "trefferquote") showTrack();
-  else if (ps.get("view") === "glossar") showGlossary();
-  else if (ps.get("view") === "screener") showScreener();
-  else if (pre) { $("#q").value = pre; run(pre); } else welcome();
+  route();
 }
 </script>
 </body>
