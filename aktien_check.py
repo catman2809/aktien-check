@@ -4337,7 +4337,9 @@ SCREENER_UNIVERSES = {
 }
 SCREENER_MAX_AGE = 20 * 3600     # einen Wert höchstens einmal in 20 Stunden neu bewerten
 SCREENER_PAUSE = 30              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
-SCREENER_STATE = {"running": False, "current": None, "started": None}
+SCREENER_STATE = {"running": False, "current": None, "started": None, "by": None, "mode": "due", "stop": False,
+                  "done": 0, "target": 0, "finished": None, "seen": set()}
+SCREENER_LOCK = threading.Lock()
 
 
 def screener_symbols():
@@ -4368,14 +4370,26 @@ def screener_store():
         return data.setdefault("screener", {})
 
 
-def screener_next():
-    """Ältester bzw. noch nie bewerteter Wert, der fällig ist – oder None."""
+def screener_due(mode="due", since=None):
+    """Fällige Werte, älteste zuerst. mode="all": alles, was seit Beginn des Durchgangs noch nicht bewertet wurde."""
     store = screener_store()
     now = time.time()
-    due = [(store.get(sym, {}).get("updated", 0), sym) for sym in screener_symbols()
-           if now - store.get(sym, {}).get("updated", 0) > SCREENER_MAX_AGE
-           and now - store.get(sym, {}).get("failed", 0) > 6 * 3600]
-    return min(due)[1] if due else None
+    out = []
+    for sym in screener_symbols():
+        e = store.get(sym, {})
+        last = max(e.get("updated", 0), e.get("failed", 0))
+        if mode == "all":
+            if last < (since or now) and sym not in SCREENER_STATE["seen"]:
+                out.append((e.get("updated", 0), sym))
+        elif now - e.get("updated", 0) > SCREENER_MAX_AGE and now - e.get("failed", 0) > 6 * 3600:
+            out.append((e.get("updated", 0), sym))
+    return [s_ for _, s_ in sorted(out)]
+
+
+def screener_next():
+    """Nächster fälliger Wert im laufenden Durchgang – oder None."""
+    due = screener_due(SCREENER_STATE["mode"], SCREENER_STATE["started"])
+    return due[0] if due else None
 
 
 def screener_step():
@@ -4384,6 +4398,7 @@ def screener_step():
     if not sym:
         return False
     SCREENER_STATE["current"] = sym
+    SCREENER_STATE["seen"].add(sym)  # im laufenden Durchgang nicht noch einmal
     unis = screener_symbols()[sym]
     store = screener_store()
     try:
@@ -4402,20 +4417,45 @@ def screener_step():
     return True
 
 
-def screener_loop():
-    time.sleep(300)  # erst nach dem Start in Ruhe loslegen
-    while True:
-        try:
+def screener_run():
+    """Ein Durchgang: bewertet alle fälligen Werte nacheinander und endet dann (oder bei „Stopp“)."""
+    st = SCREENER_STATE
+    LOG.info("[Screener] Start durch %s · %d Werte (%s)", st["by"], st["target"], "alle" if st["mode"] == "all" else "veraltete")
+    try:
+        while not st["stop"]:
             if REPORT_LOCK.locked():       # Wochenbericht hat Vorrang
-                time.sleep(60)
+                time.sleep(30)
                 continue
-            SCREENER_STATE["running"] = True
-            busy = screener_step()
-            SCREENER_STATE["running"] = busy
-            time.sleep(SCREENER_PAUSE if busy else 600)
-        except Exception:
-            LOG.exception("[Screener] Fehler")
-            time.sleep(300)
+            if not screener_step():
+                break
+            st["done"] += 1
+            for _ in range(SCREENER_PAUSE):
+                if st["stop"]:
+                    break
+                time.sleep(1)
+    except Exception:
+        LOG.exception("[Screener] Fehler")
+    finally:
+        LOG.info("[Screener] %s nach %d Werten", "Gestoppt" if st["stop"] else "Fertig", st["done"])
+        st.update(running=False, current=None, finished=int(time.time()))
+        safe(STORE.save)
+        safe(prune_caches)
+
+
+def screener_start(user, mode="due"):
+    """Startet einen Durchgang, falls keiner läuft. Gibt (gestartet, Meldung) zurück."""
+    with SCREENER_LOCK:
+        st = SCREENER_STATE
+        if st["running"]:
+            return False, "Der Screener läuft bereits."
+        now = time.time()
+        st["seen"] = set()
+        due = screener_due(mode, now)
+        if not due:
+            return False, "Alle Werte sind aktuell (jünger als 20 Stunden) – „Alle neu bewerten“ erzwingt einen kompletten Durchgang."
+        st.update(running=True, stop=False, started=now, by=user, mode=mode, done=0, target=len(due), finished=None)
+        threading.Thread(target=screener_run, daemon=True).start()
+        return True, f"Gestartet: {len(due)} Werte werden bewertet."
 
 
 def screener_payload():
@@ -4428,8 +4468,11 @@ def screener_payload():
     unis = {k: {"name": n, "total": len(lst), "done": sum(1 for x in lst if (store.get(x) or {}).get("label"))}
             for k, (n, lst) in SCREENER_UNIVERSES.items()}
     fresh = sum(1 for sym in syms if time.time() - (store.get(sym) or {}).get("updated", 0) <= SCREENER_MAX_AGE)
+    st = SCREENER_STATE
     return {"rows": rows, "universes": unis, "total": len(syms), "fresh": fresh,
-            "current": SCREENER_STATE["current"], "pause": SCREENER_PAUSE}
+            "current": st["current"], "pause": SCREENER_PAUSE, "running": st["running"], "by": st["by"],
+            "done": st["done"], "target": st["target"], "mode": st["mode"], "stopping": st["running"] and st["stop"],
+            "finished": st["finished"], "due": len(screener_due("due"))}
 
 
 # ---------------------------------------------------------------------------
@@ -5014,6 +5057,16 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
                     self.admin_action(body, user)
                     return self.send_json(self.admin_list())
+                if u.path == "/api/screener/start":
+                    ok, msg = screener_start(user, "all" if body.get("mode") == "all" else "due")
+                    return self.send(200, json.dumps(json_safe({**screener_payload(), "message": msg, "started": ok}),
+                                                     ensure_ascii=False), "application/json; charset=utf-8")
+                if u.path == "/api/screener/stop":
+                    if SCREENER_STATE["running"]:
+                        SCREENER_STATE["stop"] = True
+                        LOG.info("[Screener] Stopp angefordert von %s", user)
+                    return self.send(200, json.dumps(json_safe(screener_payload()), ensure_ascii=False),
+                                     "application/json; charset=utf-8")
                 if u.path == "/api/report":
                     with STORE.lock:
                         report_settings(user_space(user))["enabled"] = bool(body.get("enabled"))
@@ -5292,8 +5345,6 @@ def main():
     try:
         threading.Thread(target=alert_loop, daemon=True).start()
         threading.Thread(target=history_flush_loop, daemon=True).start()
-        if os.environ.get("SCREENER", "1") != "0":
-            threading.Thread(target=screener_loop, daemon=True).start()
         srv.serve_forever()
     except KeyboardInterrupt:
         print("Beendet.")

@@ -609,6 +609,38 @@ class TestCachePruning(unittest.TestCase):
             a.CACHE.clear(); a.CACHE.update(saved[0]); a.PEER_CACHE.clear(); a.PEER_CACHE.update(saved[1])
 
 
+class TestScreenerStart(Isolated):
+    """Screener läuft nur nach „Start“, bewertet fällige Werte und lässt sich stoppen."""
+
+    def test_start_runs_only_due_and_stops(self):
+        calls = []
+        orig = (a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE)
+        a.SCREENER_UNIVERSES = {"t": ("Test", ["AAA", "BBB", "CCC"])}
+        a.SCREENER_PAUSE = 0
+        a.analyze = lambda s_: (calls.append(s_), {"symbol": s_, "name": s_, "price": 1, "rating": {"label": "Buy", "group": "Kaufen", "score": 40},
+                                                 "summary": {"adjective": "x"}, "categories": [], "facts": {}})[1]
+        try:
+            a.screener_store()["AAA"] = {"symbol": "AAA", "label": "Buy", "updated": int(time.time())}  # aktuell
+            ok, _ = a.screener_start("anna")
+            self.assertTrue(ok)
+            for _ in range(50):
+                if not a.SCREENER_STATE["running"]:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(sorted(calls), ["BBB", "CCC"])        # nur veraltete
+            self.assertFalse(a.screener_start("anna")[0])          # alles aktuell -> kein neuer Durchgang
+            calls.clear()
+            self.assertTrue(a.screener_start("anna", "all")[0])     # „Alle neu bewerten“
+            for _ in range(50):
+                if not a.SCREENER_STATE["running"]:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(sorted(calls), ["AAA", "BBB", "CCC"])
+        finally:
+            a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE = orig
+            a.SCREENER_STATE.update(running=False, stop=False)
+
+
 class TestForecastAndFairValue(unittest.TestCase):
     """Analystenprognosen, Forward-KGV und fairer Wert in drei Szenarien."""
     MAC = {"rf": 4.0}

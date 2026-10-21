@@ -329,6 +329,10 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .fc-row span:not(:first-child){text-align:right}
 @media (max-width:760px){.fv-grid{grid-template-columns:1fr;gap:18px}.fc{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
   .fv-card{padding:16px}}
+.scr-run{padding:14px 18px;margin:0 0 14px}
+.scr-run-top{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:14px}
+.scr-prog{height:8px;background:var(--track);border-radius:4px;overflow:hidden;margin-bottom:8px}
+.scr-prog i{display:block;height:100%;background:var(--accent);border-radius:4px;transition:width .4s}
 .scr-ctrl{display:flex;flex-direction:column;gap:10px;margin:4px 0 14px}
 .scr-row2{display:flex;gap:10px;flex-wrap:wrap}
 .scr-row2 input{flex:1;min-width:180px;height:38px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px;font:inherit;font-size:14px}
@@ -1311,7 +1315,7 @@ function welcome() {
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
     <div class="trk-teaser card">
       <div><b>Screener: DAX, Euro Stoxx 50 und Dow Jones</b>
-        <span>Alle Werte dieser Indizes automatisch bewertet – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
+        <span>Alle Werte dieser Indizes per Knopfdruck bewerten lassen – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
       <button class="btn primary" id="scropen">Screener öffnen</button>
     </div>
     <div class="trk-teaser card">
@@ -1548,6 +1552,23 @@ const SCR_SORT = {score: ["Score", (a, b) => b.score - a.score], fair: ["Potenzi
   div: ["Dividendenrendite", (a, b) => (b.div || 0) - (a.div || 0)], perf: ["Performance 1 Jahr", (a, b) => (b.perf_1y ?? -9) - (a.perf_1y ?? -9)],
   pe: ["KGV (niedrig zuerst)", (a, b) => (a.pe > 0 ? a.pe : 999) - (b.pe > 0 ? b.pe : 999)], name: ["Name", (a, b) => a.name.localeCompare(b.name, "de")]};
 function scrSave() { try { localStorage.setItem("ac-scr", JSON.stringify({uni: SCR.uni, filters: [...SCR.filters], sort: SCR.sort})); } catch (e) {} }
+let scrTimer = null;
+function scrPoll() {
+  clearTimeout(scrTimer);
+  if (!SCR.data?.running || !location.search.includes("view=screener")) return;
+  scrTimer = setTimeout(async () => {
+    try { SCR.data = await api("/api/screener"); } catch (e) { return; }
+    if (location.search.includes("view=screener")) { renderScreener(); scrPoll(); }
+  }, 10000);
+}
+async function scrAction(path, body) {
+  try {
+    const d = await api(path, body || {});
+    SCR.data = d;
+    if (d.message) toast(d.message);
+    renderScreener(); scrPoll();
+  } catch (e) { if (e.message !== "login") toast("Fehlgeschlagen: " + e.message); }
+}
 async function showScreener() {
   runId++; wlView = false;
   $("#subnav").style.display = "none";
@@ -1556,7 +1577,7 @@ async function showScreener() {
   $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Screener …</b></div>`;
   try { SCR.data = await api("/api/screener"); } catch (e) {
     if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Screener nicht verfügbar: ${esc(e.message)}</div>`; return; }
-  renderScreener();
+  renderScreener(); scrPoll();
 }
 function renderScreener() {
   const D = SCR.data; if (!D) return;
@@ -1570,11 +1591,25 @@ function renderScreener() {
   const col = x => x == null ? "" : `style="color:${x >= 0 ? "var(--pos)" : "var(--neg)"}"`;
   $("#out").innerHTML = `
     <div class="wl-head">
-      <div><div class="eyebrow">Automatisch bewertet</div><h1>Screener <span class="stamp" style="font-size:15px">${D.rows.length} von ${D.total} Werten bewertet</span></h1></div>
-      <div class="wl-actions"><button class="btn" id="scrback">Zur Startseite</button></div>
+      <div><div class="eyebrow">Per Knopfdruck bewertet</div><h1>Screener <span class="stamp" style="font-size:15px">${D.rows.length} von ${D.total} Werten bewertet</span></h1></div>
+      <div class="wl-actions">
+        ${D.running
+          ? `<button class="btn" id="scrstop" ${D.stopping ? "disabled" : ""}>${D.stopping ? "Wird gestoppt …" : "Stopp"}</button>`
+          : `<button class="btn primary" id="scrstart">${D.due ? `Start (${D.due} ${D.due === 1 ? "Wert" : "Werte"})` : "Start"}</button>
+             <button class="btn" id="scrall" title="Alle ${D.total} Werte neu bewerten, auch aktuelle">Alle neu bewerten</button>`}
+        <button class="btn" id="scrback">Zur Startseite</button>
+      </div>
     </div>
-    <p class="section-sub" style="margin-top:0">Die App bewertet die Werte im Hintergrund nacheinander und frischt jeden etwa einmal am Tag auf.
-      ${pending > 0 ? `Gerade in Arbeit: ${pending} ${pending === 1 ? "Wert" : "Werte"}${D.current ? ` (aktuell ${esc(D.current)})` : ""} – die Liste füllt sich nach und nach.` : "Alle Werte sind aktuell."}</p>
+    ${D.running ? `<div class="scr-run card">
+        <div class="scr-run-top"><b>Screener läuft${D.by ? ` <span class="stamp">gestartet von ${esc(D.by)}</span>` : ""}</b>
+          <span class="num">${D.done} von ${D.target}</span></div>
+        <div class="scr-prog"><i style="width:${D.target ? Math.min(100, D.done / D.target * 100) : 0}%"></i></div>
+        <div class="stamp">${D.current ? `Bewertet gerade ${esc(D.current)} · ` : ""}etwa ${Math.max(1, Math.round((D.target - D.done) * (D.pause + 25) / 60))} Min. verbleibend · die Liste aktualisiert sich alle 10 Sekunden.
+          Du kannst die Seite schließen – der Durchgang läuft auf dem Server weiter.</div>
+      </div>`
+      : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Start</b> drückst: Dann werden alle Werte, die älter als 20 Stunden sind,
+        nacheinander analysiert (etwa ${Math.max(1, Math.round((D.due || 0) * (D.pause + 25) / 60))} Min.). Danach stoppt er von selbst.
+        ${D.finished ? ` Letzter Durchgang beendet ${ago_(D.finished)}.` : ""} ${D.due ? "" : "Alle Werte sind aktuell."}</p>`}
     <div class="scr-ctrl">
       <div class="seg" id="scruni"><button data-u="all" class="${SCR.uni === "all" ? "on" : ""}">Alle</button>${Object.entries(U).map(([k, u]) =>
         `<button data-u="${k}" class="${SCR.uni === k ? "on" : ""}">${esc(u.name)}<em>${u.done}/${u.total}</em></button>`).join("")}</div>
@@ -1597,11 +1632,15 @@ function renderScreener() {
         <td class="num">${r.div ? pc(r.div, 1) : "–"}</td>
         <td class="num" ${col(r.perf_1y)}>${r.perf_1y != null ? pc(r.perf_1y, 0, true) : "–"}</td>
         <td class="stamp">${ago_(r.updated)}</td></tr>`).join("")
-        : `<tr><td colspan="9" class="stamp" style="padding:18px">${totalDone ? "Kein Wert erfüllt alle gewählten Filter." : "Noch keine Werte bewertet – der Screener startet einige Minuten nach dem Serverstart und arbeitet sich dann durch die Liste."}</td></tr>`}</tbody>
+        : `<tr><td colspan="9" class="stamp" style="padding:18px">${totalDone ? "Kein Wert erfüllt alle gewählten Filter." : "Noch keine Werte bewertet – drücke oben auf „Start“."}</td></tr>`}</tbody>
     </table></div>
     <p class="stamp" style="margin-top:10px">${rows.length} Treffer · Fairer Wert = Abstand des Kurses zum Basisszenario · Zeile antippen für die vollständige Analyse.
       Indexzusammensetzung nach bestem Wissen, Stand Herbst 2026.</p>`;
-  $("#scrback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  $("#scrback").onclick = () => { clearTimeout(scrTimer); history.replaceState(null, "", location.pathname); welcome(); };
+  const st_ = $("#scrstart"), sa_ = $("#scrall"), sp_ = $("#scrstop");
+  if (st_) st_.onclick = () => { st_.disabled = true; scrAction("/api/screener/start", {mode: "due"}); };
+  if (sa_) sa_.onclick = () => { if (confirm(`Alle ${D.total} Werte neu bewerten? Das dauert etwa ${Math.round(D.total * (D.pause + 25) / 60)} Minuten.`)) { sa_.disabled = true; scrAction("/api/screener/start", {mode: "all"}); } };
+  if (sp_) sp_.onclick = () => { sp_.disabled = true; scrAction("/api/screener/stop"); };
   document.querySelectorAll("#scruni button").forEach(b => b.onclick = () => { SCR.uni = b.dataset.u; scrSave(); renderScreener(); });
   document.querySelectorAll(".scr-chips [data-f]").forEach(b => b.onclick = () => {
     SCR.filters.has(b.dataset.f) ? SCR.filters.delete(b.dataset.f) : SCR.filters.add(b.dataset.f); scrSave(); renderScreener(); });
