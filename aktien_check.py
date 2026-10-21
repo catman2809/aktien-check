@@ -4395,7 +4395,7 @@ SCREENER_UNIVERSES = {
         "WYNN", "XEL", "XOM", "XYL", "XYZ", "YUM", "ZBH", "ZBRA", "ZTS"]),
 }
 SCREENER_MAX_AGE = 20 * 3600     # einen Wert höchstens einmal in 20 Stunden neu bewerten
-SCREENER_PAUSE = 30              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
+SCREENER_PAUSE = 10              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
 SCREENER_STATE = {"running": False, "current": None, "started": None, "by": None, "mode": "due", "stop": False,
                   "done": 0, "target": 0, "finished": None, "seen": set(), "unis": []}
 SCREENER_LOCK = threading.Lock()
