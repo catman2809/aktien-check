@@ -330,7 +330,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 @media (max-width:760px){.fv-grid{grid-template-columns:1fr;gap:18px}.fc{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
   .fv-card{padding:16px}}
 .scr-panel{padding:16px 18px;margin:0 0 14px}
-.scr-picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 12px}
+.scr-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin:10px 0 12px}
 .scr-pick{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:10px;cursor:pointer}
 .scr-pick:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .scr-pick input{margin-top:3px;accent-color:var(--accent)}
@@ -1325,7 +1325,7 @@ function welcome() {
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
     <div class="trk-teaser card">
-      <div><b>Screener: DAX, Euro Stoxx 50 und Dow Jones</b>
+      <div><b>Screener: DAX, MDAX, TecDAX, Euro Stoxx 50, Dow Jones, Nasdaq-100, S&amp;P 500</b>
         <span>Alle Werte dieser Indizes per Knopfdruck bewerten lassen – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
       <button class="btn primary" id="scropen">Screener öffnen</button>
     </div>
@@ -1664,7 +1664,7 @@ function renderScreener() {
         : `<tr><td colspan="9" class="stamp" style="padding:18px">${totalDone ? "Kein Wert erfüllt alle gewählten Filter." : "Noch keine Werte bewertet – drücke oben auf „Start“."}</td></tr>`}</tbody>
     </table></div>
     <p class="stamp" style="margin-top:10px">${rows.length} Treffer · Fairer Wert = Abstand des Kurses zum Basisszenario · Zeile antippen für die vollständige Analyse.
-      Indexzusammensetzung nach bestem Wissen, Stand Herbst 2026.</p>`;
+      Indexzusammensetzung Stand 21.10.2026.</p>`;
   $("#scrback").onclick = () => { clearTimeout(scrTimer); history.replaceState(null, "", location.pathname); welcome(); };
   const st_ = $("#scrstart"), sp_ = $("#scrstop");
   if (st_) st_.onclick = () => { SCR.panel = !SCR.panel; renderScreener(); };

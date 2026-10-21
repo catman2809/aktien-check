@@ -4316,14 +4316,27 @@ def clean_watchlist(items):
 # ---------------------------------------------------------------------------
 # Screener: Indizes im Hintergrund bewerten (langsam, ein Wert nach dem anderen), Rangliste mit Filtern
 # ---------------------------------------------------------------------------
-# Zusammensetzung nach bestem Wissen, Stand Herbst 2026 (u. a. Hochtief für Porsche SE ab 22.06.2026).
+# Zusammensetzung Stand 21.10.2026: S&P 500 (datasets/s-and-p-500-companies), Nasdaq-100 (Nasdaq), MDAX/TecDAX
+# (Wikipedia, Kürzel per Yahoo-Suche), DAX/Euro Stoxx 50/Dow nach bestem Wissen (Hochtief für Porsche SE ab 22.06.2026,
+# Sartorius in den MDAX).
 # Indexänderungen bei Bedarf hier nachtragen – die App bewertet einfach die hier gelisteten Kürzel.
 SCREENER_UNIVERSES = {
     "dax": ("DAX", ["ADS.DE", "AIR.DE", "ALV.DE", "BAS.DE", "BAYN.DE", "BEI.DE", "BMW.DE", "BNR.DE", "CBK.DE",
                        "CON.DE", "DTG.DE", "DBK.DE", "DB1.DE", "DHL.DE", "DTE.DE", "EOAN.DE", "FRE.DE", "FME.DE",
                        "G24.DE", "G1A.DE", "HNR1.DE", "HEI.DE", "HEN3.DE", "IFX.DE", "MBG.DE",
-                       "MRK.DE", "MTX.DE", "MUV2.DE", "HOT.DE", "QIA.DE", "RHM.DE", "RWE.DE", "SAP.DE", "SRT3.DE",
+                       "MRK.DE", "MTX.DE", "MUV2.DE", "HOT.DE", "QIA.DE", "RHM.DE", "RWE.DE", "SAP.DE",
                        "SIE.DE", "ENR.DE", "SHL.DE", "SY1.DE", "VOW3.DE", "VNA.DE", "ZAL.DE"]),
+    "mdax": ("MDAX", [
+        "8TRA.DE", "AG1.DE", "AIXA.DE", "AMV0.DE", "AT1.DE", "BC8.DE", "BOSS.DE", "DEZ.DE", "DHER.DE", "DWS.DE",
+        "ELG.DE", "EVD.DE", "EVK.DE", "FNTN.DE", "FPE3.DE", "FRA.DE", "FTK.DE", "GBF.DE", "HAG.DE", "HLE.DE",
+        "IOS.DE", "JEN.DE", "KBX.DE", "KGX.DE", "KRN.DE", "LEG.DE", "LHA.DE", "LXS.DE", "NDA.DE", "NDX1.DE",
+        "NEM.DE", "P911.DE", "PAH3.DE", "PUM.DE", "R3NK.DE", "RAA.DE", "RRTL.DE", "SDF.DE", "SHA0.DE",
+        "SMHN.DE", "SRT3.DE", "SZG.DE", "TEG.DE", "TKA.DE", "TKMS.DE", "TLX.DE", "TUI1.DE", "UTDI.DE", "WAF.DE",
+        "WCH.DE"]),
+    "tecdax": ("TecDAX", [
+        "AFX.DE", "AIXA.DE", "AOF.DE", "BC8.DE", "DRW3.DE", "DTE.DE", "ELG.DE", "EUZ.DE", "EVT.DE", "FNTN.DE",
+        "HAG.DE", "IFX.DE", "IOS.DE", "JEN.DE", "KTN.DE", "NDX1.DE", "NEM.DE", "OBCK.DE", "OHB.DE", "QIA.DE",
+        "S92.DE", "SAP.DE", "SHL.DE", "SMHN.DE", "SRT3.DE", "TMV.DE", "TPE.DE", "UTDI.DE", "VBK.DE", "WAF.DE"]),
     "es50": ("Euro Stoxx 50", ["ADS.DE", "ADYEN.AS", "AD.AS", "AI.PA", "AIR.DE", "ALV.DE", "ABI.BR", "ARGX.BR",
                                "ASML.AS", "CS.PA", "BAS.DE", "BAYN.DE", "BBVA.MC", "SAN.MC", "BMW.DE", "BNP.PA",
                                "BN.PA", "DB1.DE", "DHL.DE", "DTE.DE", "ENEL.MI", "ENI.MI", "EL.PA", "RACE.MI",
@@ -4334,6 +4347,52 @@ SCREENER_UNIVERSES = {
     "dow": ("Dow Jones 30", ["AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "GS", "HD",
                              "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "MSFT", "NKE", "NVDA", "PG",
                              "SHW", "TRV", "UNH", "V", "VZ", "WMT"]),
+    "ndx": ("Nasdaq-100", [
+        "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "ALAB", "ALNY", "AMAT", "AMD", "AMGN", "AMZN",
+        "APP", "ARM", "ASML", "AVGO", "AXON", "BKNG", "BKR", "CCEP", "CDNS", "CEG", "CMCSA", "COST", "CPRT",
+        "CRWD", "CRWV", "CSCO", "CSX", "CTAS", "DASH", "DDOG", "DXCM", "EXC", "FANG", "FAST", "FER", "FTNT",
+        "GEHC", "GILD", "GOOG", "GOOGL", "HON", "HONA", "IDXX", "INTC", "INTU", "ISRG", "KDP", "KLAC", "LIN",
+        "LITE", "LRCX", "MAR", "MCHP", "MDLZ", "MELI", "META", "MNST", "MPWR", "MRNA", "MRVL", "MSFT", "MSTR",
+        "MU", "NBIS", "NFLX", "NVDA", "NXPI", "ODFL", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP", "PLTR",
+        "PYPL", "QCOM", "REGN", "RKLB", "ROP", "ROST", "SBUX", "SHOP", "SNDK", "SNPS", "SPCX", "STX", "TER",
+        "TMUS", "TRI", "TSLA", "TTWO", "TXN", "VRTX", "WDAY", "WDC", "WMT", "XEL"]),
+    "sp500": ("S&P 500", [
+        "A", "AAPL", "ABBV", "ABNB", "ABT", "ACGL", "ACN", "ADBE", "ADI", "ADM", "ADP", "ADSK", "AEE", "AEP",
+        "AES", "AFL", "AIG", "AIZ", "AJG", "AKAM", "ALB", "ALGN", "ALL", "ALLE", "AMAT", "AMCR", "AMD", "AME",
+        "AMGN", "AMP", "AMT", "AMZN", "ANET", "AON", "AOS", "APA", "APD", "APH", "APO", "APP", "APTV", "ARE",
+        "ARES", "ATO", "AVGO", "AVY", "AWK", "AXON", "AXP", "AZO", "BA", "BAC", "BALL", "BAX", "BBY", "BDX",
+        "BE", "BEN", "BF-B", "BG", "BIIB", "BKNG", "BKR", "BLK", "BMY", "BNY", "BR", "BRK-B", "BRO", "BSX",
+        "BX", "BXP", "C", "CAH", "CARR", "CASY", "CAT", "CB", "CBOE", "CBRE", "CCI", "CCL", "CDNS", "CDW",
+        "CEG", "CF", "CFG", "CHD", "CHRW", "CHTR", "CI", "CIEN", "CINF", "CL", "CLX", "CMCSA", "CME", "CMG",
+        "CMI", "CMS", "CNC", "CNP", "COF", "COHR", "COIN", "COO", "COP", "COR", "COST", "CPAY", "CPRT", "CPT",
+        "CRH", "CRL", "CRM", "CRWD", "CSCO", "CSGP", "CSX", "CTAS", "CTSH", "CVNA", "CVS", "CVX", "D", "DAL",
+        "DASH", "DD", "DDOG", "DE", "DECK", "DELL", "DG", "DGX", "DHI", "DHR", "DIS", "DLR", "DLTR", "DOC",
+        "DOV", "DOW", "DPZ", "DRI", "DTE", "DUK", "DVA", "DVN", "DXCM", "EBAY", "ECHO", "ECL", "ED", "EFX",
+        "EG", "EIX", "EL", "ELV", "EME", "EMR", "EOG", "EQIX", "EQT", "ERIE", "ES", "ESS", "ETN", "ETR", "EVRG",
+        "EW", "EXC", "EXE", "EXPD", "EXPE", "EXR", "F", "FANG", "FAST", "FCX", "FDS", "FDX", "FDXF", "FE",
+        "FERG", "FFIV", "FICO", "FIS", "FISV", "FITB", "FIX", "FLEX", "FOX", "FOXA", "FRT", "FSLR", "FTNT",
+        "FTV", "GD", "GDDY", "GE", "GEHC", "GEN", "GEV", "GILD", "GIS", "GL", "GLW", "GM", "GNRC", "GOOG",
+        "GOOGL", "GPC", "GPN", "GRMN", "GS", "GWW", "HAL", "HAS", "HBAN", "HCA", "HD", "HIG", "HII", "HLT",
+        "HON", "HONA", "HOOD", "HPE", "HPQ", "HRL", "HSIC", "HST", "HSY", "HUBB", "HUM", "HWM", "IBKR", "IBM",
+        "ICE", "IDXX", "IEX", "IFF", "ILMN", "INCY", "INTC", "INTU", "INVH", "IP", "IQV", "IR", "IRM", "ISRG",
+        "IT", "ITW", "IVZ", "J", "JBHT", "JBL", "JCI", "JKHY", "JNJ", "JPM", "KDP", "KEY", "KEYS", "KHC", "KIM",
+        "KKR", "KLAC", "KMB", "KMI", "KO", "KR", "KVUE", "L", "LDOS", "LEN", "LH", "LHX", "LII", "LIN", "LITE",
+        "LLY", "LMT", "LNT", "LOW", "LRCX", "LULU", "LUV", "LVS", "LYB", "LYV", "MA", "MAA", "MAR", "MAS",
+        "MCD", "MCHP", "MCK", "MCO", "MDLZ", "MDT", "MET", "META", "MGM", "MKC", "MLM", "MMM", "MNST", "MO",
+        "MOS", "MPC", "MPWR", "MRK", "MRNA", "MRSH", "MRVL", "MS", "MSCI", "MSFT", "MSI", "MTB", "MTD", "MU",
+        "NCLH", "NDAQ", "NDSN", "NEE", "NEM", "NFLX", "NI", "NKE", "NOC", "NOW", "NRG", "NSC", "NTAP", "NTRS",
+        "NUE", "NVDA", "NVR", "NWS", "NWSA", "NXPI", "O", "ODFL", "OKE", "OMC", "ON", "ORCL", "ORLY", "OTIS",
+        "OXY", "P", "PANW", "PAYX", "PCAR", "PCG", "PEG", "PEP", "PFE", "PFG", "PG", "PGR", "PH", "PHM", "PKG",
+        "PLD", "PLTR", "PM", "PNC", "PNR", "PNW", "PODD", "PPG", "PPL", "PRU", "PSA", "PSX", "PTC", "PWR",
+        "PYPL", "Q", "QCOM", "RCL", "RDDT", "REG", "REGN", "RF", "RJF", "RL", "RMD", "ROK", "ROL", "ROP",
+        "ROST", "RSG", "RTX", "RVTY", "SBAC", "SBUX", "SCHW", "SHW", "SJM", "SKYD", "SLB", "SMCI", "SNA",
+        "SNDK", "SNPS", "SO", "SOLV", "SPG", "SPGI", "SRE", "STE", "STLD", "STT", "STX", "STZ", "SW", "SWK",
+        "SWKS", "SYF", "SYK", "SYY", "T", "TDG", "TDY", "TECH", "TEL", "TER", "TFC", "TGT", "TJX", "TKO", "TMO",
+        "TMUS", "TPL", "TPR", "TRGP", "TRMB", "TROW", "TRV", "TSCO", "TSLA", "TSN", "TT", "TTWO", "TWLO", "TXN",
+        "TXT", "TYL", "UAL", "UBER", "UDR", "UHS", "ULTA", "UNH", "UNP", "UPS", "URI", "USB", "V", "VEEV",
+        "VICI", "VLO", "VLTO", "VMC", "VMRK", "VRSK", "VRSN", "VRT", "VRTX", "VST", "VTR", "VTRS", "VYLR", "VZ",
+        "WAB", "WAT", "WDAY", "WDC", "WEC", "WELL", "WFC", "WM", "WMB", "WMT", "WRB", "WSM", "WST", "WTW", "WY",
+        "WYNN", "XEL", "XOM", "XYL", "XYZ", "YUM", "ZBH", "ZBRA", "ZTS"]),
 }
 SCREENER_MAX_AGE = 20 * 3600     # einen Wert höchstens einmal in 20 Stunden neu bewerten
 SCREENER_PAUSE = 30              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
