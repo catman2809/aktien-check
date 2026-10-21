@@ -329,6 +329,14 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .fc-row span:not(:first-child){text-align:right}
 @media (max-width:760px){.fv-grid{grid-template-columns:1fr;gap:18px}.fc{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
   .fv-card{padding:16px}}
+.scr-ctrl{display:flex;flex-direction:column;gap:10px;margin:4px 0 14px}
+.scr-row2{display:flex;gap:10px;flex-wrap:wrap}
+.scr-row2 input{flex:1;min-width:180px;height:38px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 12px;font:inherit;font-size:14px}
+.scr-row2 select{height:38px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 10px;font:inherit;font-size:14px}
+.scr-chips{justify-content:flex-start}
+table.scr tr.scr-r{cursor:pointer}
+table.scr tr.scr-r:hover td{background:var(--surface-2)}
+table.scr td b{font-weight:600}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -1302,6 +1310,11 @@ function welcome() {
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
     <div class="trk-teaser card">
+      <div><b>Screener: DAX, Euro Stoxx 50 und Dow Jones</b>
+        <span>Alle Werte dieser Indizes automatisch bewertet – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
+      <button class="btn primary" id="scropen">Screener öffnen</button>
+    </div>
+    <div class="trk-teaser card">
       <div><b>Wie gut sind die Empfehlungen?</b>
         <span>Die App merkt sich jede Empfehlung mit Kurs und Datum und vergleicht die spätere Entwicklung mit dem Heimatindex.</span></div>
       <button class="btn" id="trkopen">Trefferquote ansehen</button>
@@ -1313,6 +1326,7 @@ function welcome() {
     ${pushGuide()}
     </section>`;
   $("#trkopen").onclick = () => showTrack();
+  $("#scropen").onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
   wlBind($("#out"));
   bindPushGuide();
@@ -1517,6 +1531,84 @@ function fairCard(d) {
       </div>` : ""}
     </div>
   </section>`;
+}
+
+/* Screener: Rangliste aller bewerteten Indexwerte */
+const SCR = {data: null, uni: "all", filters: new Set(), sort: "score", q: ""};
+try { Object.assign(SCR, JSON.parse(localStorage.getItem("ac-scr") || "{}"), {data: null}); SCR.filters = new Set(SCR.filters || []); } catch (e) { SCR.filters = new Set(); }
+const SCR_FILTERS = [
+  ["buy", "Nur Kaufen", r => r.group === "Kaufen"],
+  ["fair", "Unter fairem Wert", r => r.fair_up != null && r.fair_up >= 0.1],
+  ["div", "Dividende ab 3 %", r => (r.div || 0) >= 0.03],
+  ["qv", "Qualität stark & günstig", r => (r.c.quality ?? -1) >= 0.3 && (r.c.valuation ?? -1) >= 0.1],
+  ["trend", "Starker Trend", r => (r.c.chart ?? -1) >= 0.4],
+  ["sell", "Verkaufskandidaten", r => r.group === "Verkaufen"],
+];
+const SCR_SORT = {score: ["Score", (a, b) => b.score - a.score], fair: ["Potenzial zum fairen Wert", (a, b) => (b.fair_up ?? -9) - (a.fair_up ?? -9)],
+  div: ["Dividendenrendite", (a, b) => (b.div || 0) - (a.div || 0)], perf: ["Performance 1 Jahr", (a, b) => (b.perf_1y ?? -9) - (a.perf_1y ?? -9)],
+  pe: ["KGV (niedrig zuerst)", (a, b) => (a.pe > 0 ? a.pe : 999) - (b.pe > 0 ? b.pe : 999)], name: ["Name", (a, b) => a.name.localeCompare(b.name, "de")]};
+function scrSave() { try { localStorage.setItem("ac-scr", JSON.stringify({uni: SCR.uni, filters: [...SCR.filters], sort: SCR.sort})); } catch (e) {} }
+async function showScreener() {
+  runId++; wlView = false;
+  $("#subnav").style.display = "none";
+  history.replaceState(null, "", "?view=screener");
+  window.scrollTo({top: 0});
+  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Screener …</b></div>`;
+  try { SCR.data = await api("/api/screener"); } catch (e) {
+    if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Screener nicht verfügbar: ${esc(e.message)}</div>`; return; }
+  renderScreener();
+}
+function renderScreener() {
+  const D = SCR.data; if (!D) return;
+  const ago_ = ts => { const h = (Date.now() / 1000 - ts) / 3600; return h < 1 ? "gerade eben" : h < 24 ? `vor ${Math.round(h)} Std.` : `vor ${Math.round(h / 24)} T.`; };
+  let rows = D.rows.filter(r => SCR.uni === "all" || r.u.includes(SCR.uni));
+  SCR_FILTERS.forEach(([k, , fn]) => { if (SCR.filters.has(k)) rows = rows.filter(fn); });
+  if (SCR.q) { const q = SCR.q.toLowerCase(); rows = rows.filter(r => r.name.toLowerCase().includes(q) || r.symbol.toLowerCase().includes(q)); }
+  rows.sort(SCR_SORT[SCR.sort][1]);
+  const U = D.universes, totalDone = Object.values(U).reduce((a, u) => a + u.done, 0);
+  const pending = D.total - D.fresh;
+  const col = x => x == null ? "" : `style="color:${x >= 0 ? "var(--pos)" : "var(--neg)"}"`;
+  $("#out").innerHTML = `
+    <div class="wl-head">
+      <div><div class="eyebrow">Automatisch bewertet</div><h1>Screener <span class="stamp" style="font-size:15px">${D.rows.length} von ${D.total} Werten bewertet</span></h1></div>
+      <div class="wl-actions"><button class="btn" id="scrback">Zur Startseite</button></div>
+    </div>
+    <p class="section-sub" style="margin-top:0">Die App bewertet die Werte im Hintergrund nacheinander und frischt jeden etwa einmal am Tag auf.
+      ${pending > 0 ? `Gerade in Arbeit: ${pending} ${pending === 1 ? "Wert" : "Werte"}${D.current ? ` (aktuell ${esc(D.current)})` : ""} – die Liste füllt sich nach und nach.` : "Alle Werte sind aktuell."}</p>
+    <div class="scr-ctrl">
+      <div class="seg" id="scruni"><button data-u="all" class="${SCR.uni === "all" ? "on" : ""}">Alle</button>${Object.entries(U).map(([k, u]) =>
+        `<button data-u="${k}" class="${SCR.uni === k ? "on" : ""}">${esc(u.name)}<em>${u.done}/${u.total}</em></button>`).join("")}</div>
+      <div class="scr-row2">
+        <input id="scrq" type="search" placeholder="Name oder Kürzel filtern" value="${esc(SCR.q)}" aria-label="Screener durchsuchen">
+        <select id="scrsort" aria-label="Sortierung">${Object.entries(SCR_SORT).map(([k, [l]]) => `<option value="${k}" ${k === SCR.sort ? "selected" : ""}>Sortiert nach ${l}</option>`).join("")}</select>
+      </div>
+      <div class="ind-row scr-chips" role="group" aria-label="Filter">${SCR_FILTERS.map(([k, l]) =>
+        `<button class="chip-btn" data-f="${k}" aria-pressed="${SCR.filters.has(k)}">${esc(l)}</button>`).join("")}</div>
+    </div>
+    <div class="card peer-scroll"><table class="trk scr">
+      <thead><tr><th>#</th><th>Aktie</th><th>Empfehlung</th><th>Score</th><th>Fairer Wert</th><th>KGV</th><th>Dividende</th><th>1 Jahr</th><th>Stand</th></tr></thead>
+      <tbody>${rows.length ? rows.map((r, i) => `<tr class="scr-r" data-s="${esc(r.symbol)}">
+        <td class="stamp">${i + 1}</td>
+        <td><b>${esc(r.name)}</b><div class="stamp">${esc(r.symbol)}${r.model && r.model !== "Standardmodell" ? " · " + esc(r.model.replace("-Modell", "")) : ""}</div></td>
+        <td><span style="color:${GROUP_COL[r.group] || "inherit"};font-weight:600">${esc(r.label)}</span></td>
+        <td class="num"><b>${r.score > 0 ? "+" : ""}${nf(r.score, 1)}</b></td>
+        <td class="num" ${col(r.fair_up)}>${r.fair_up != null ? pc(r.fair_up, 0, true) : "–"}</td>
+        <td class="num">${r.pe > 0 ? nf(r.pe, 1) : "–"}</td>
+        <td class="num">${r.div ? pc(r.div, 1) : "–"}</td>
+        <td class="num" ${col(r.perf_1y)}>${r.perf_1y != null ? pc(r.perf_1y, 0, true) : "–"}</td>
+        <td class="stamp">${ago_(r.updated)}</td></tr>`).join("")
+        : `<tr><td colspan="9" class="stamp" style="padding:18px">${totalDone ? "Kein Wert erfüllt alle gewählten Filter." : "Noch keine Werte bewertet – der Screener startet einige Minuten nach dem Serverstart und arbeitet sich dann durch die Liste."}</td></tr>`}</tbody>
+    </table></div>
+    <p class="stamp" style="margin-top:10px">${rows.length} Treffer · Fairer Wert = Abstand des Kurses zum Basisszenario · Zeile antippen für die vollständige Analyse.
+      Indexzusammensetzung nach bestem Wissen, Stand Herbst 2026.</p>`;
+  $("#scrback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  document.querySelectorAll("#scruni button").forEach(b => b.onclick = () => { SCR.uni = b.dataset.u; scrSave(); renderScreener(); });
+  document.querySelectorAll(".scr-chips [data-f]").forEach(b => b.onclick = () => {
+    SCR.filters.has(b.dataset.f) ? SCR.filters.delete(b.dataset.f) : SCR.filters.add(b.dataset.f); scrSave(); renderScreener(); });
+  $("#scrsort").onchange = e => { SCR.sort = e.target.value; scrSave(); renderScreener(); };
+  $("#scrq").oninput = e => { SCR.q = e.target.value; const pos = e.target.selectionStart; renderScreener();
+    const q = $("#scrq"); q.focus(); q.setSelectionRange(pos, pos); };
+  document.querySelectorAll(".scr-r").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
 }
 
 /* Trefferquote der eigenen Empfehlungen */
@@ -2531,6 +2623,7 @@ if (location.protocol === "file:") {
   else if (ps.get("view") === "watchlist") showWatchlist();
   else if (ps.get("view") === "trefferquote") showTrack();
   else if (ps.get("view") === "glossar") showGlossary();
+  else if (ps.get("view") === "screener") showScreener();
   else if (pre) { $("#q").value = pre; run(pre); } else welcome();
 }
 </script>

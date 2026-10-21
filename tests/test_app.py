@@ -615,7 +615,7 @@ class TestForecastAndFairValue(unittest.TestCase):
 
     def m(self, **kw):
         from collections import defaultdict
-        base = {"price": 100.0, "mcap": 100e9, "beta": 1.0, "currency": "USD", "biz": "standard", "net_debt": 0,
+        base = {"symbol": "TEST", "price": 100.0, "mcap": 100e9, "beta": 1.0, "currency": "USD", "biz": "standard", "net_debt": 0,
                 "fcf": 5e9, "fcf_hist": [5e9, 4.5e9, 4e9], "sbc": None, "owner_earnings": None, "rev_cagr": 0.06,
                 "est_rev": {"0y": {"growth": 0.08, "avg": 100, "low": 95, "high": 105, "n": 20, "ago": 92},
                             "+1y": {"growth": 0.10, "avg": 110, "low": 100, "high": 120, "n": 18, "ago": 100}},
@@ -649,6 +649,13 @@ class TestForecastAndFairValue(unittest.TestCase):
         self.assertEqual(bank["method"], "Kurs-Buchwert aus Eigenkapitalrendite")
         reit = a.fair_value(self.m(biz="real_estate", ocf=7e9), self.MAC)
         self.assertAlmostEqual(reit["base"], 7e9 / 1e9 * 15)                    # FFO je Aktie × 15
+
+    def test_lease_and_minority_adjustment(self):
+        us = a.fair_value(self.m(lease_obl=12e9), self.MAC)["base"]                      # US-GAAP: Leasing schon im Cashflow
+        ifrs = a.fair_value(self.m(symbol="TEST.DE", currency="EUR", lease_obl=12e9, net_debt=12e9), self.MAC)
+        self.assertLess(ifrs["base"], a.fair_value(self.m(symbol="TEST.DE", currency="EUR", net_debt=12e9), self.MAC)["base"] + 0.01)
+        self.assertTrue(any("Leasing" in x for x in ifrs["assumptions"]))
+        self.assertLess(a.fair_value(self.m(minority=20e9), self.MAC)["base"], us)          # Minderheitsanteile abgezogen
 
     def test_forecast_growth(self):
         self.assertAlmostEqual(a.est_growth(self.m(), "est_rev"), 0.09)

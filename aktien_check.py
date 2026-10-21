@@ -877,6 +877,8 @@ def balance_quality(m, inc, bs, cf):
     da, _ = pair(cf, "Depreciation And Amortization", "Depreciation Amortization Depletion")
     # Owner Earnings: operativer Cashflow minus Abschreibungen (≈ Erhaltungsinvestitionen) – blendet Wachstumsinvestitionen aus
     m["owner_earnings"] = ocf - da if ocf is not None and da is not None else None
+    m["lease_obl"], _ = pair(bs, "Capital Lease Obligations")   # Leasingverbindlichkeiten (IFRS 16)
+    m["minority"], _ = pair(bs, "Minority Interest")             # Anteile anderer Aktionäre an Töchtern
 
     def div(a_, b_):
         return a_ / b_ if a_ is not None and b_ else None
@@ -1019,7 +1021,11 @@ def gather(symbol, t, info):
     qcf = convert_df(safe(lambda: t.quarterly_cashflow), k)
     m["fcf_hist"] = [v for v in fcf_hist if v is not None]
     # TTM aus den letzten 4 Quartalen; Yahoos „freeCashflow“ ist teils fehlerhaft (z. B. NVIDIA 42 statt 127 Mrd.)
-    m["fcf"] = ttm(qcf, cf, "Free Cash Flow") or first(fcf_hist) or num(g("freeCashflow"))
+    q_ocf = [v for v in row(qcf, "Operating Cash Flow")[:4] if v is not None]
+    q_cap = [v for v in row(qcf, "Capital Expenditure")[:4] if v is not None]
+    # 12-Monats-FCF nur, wenn Cashflow UND Investitionen aller 4 Quartale vorliegen (Yahoo lässt Capex teils weg)
+    fcf_ttm = sum(q_ocf) + sum(q_cap) if len(q_ocf) == 4 and len(q_cap) == 4 else None
+    m["fcf"] = fcf_ttm if fcf_ttm is not None else (first(fcf_hist) or num(g("freeCashflow")))
     m["fcf_yield"] = m["fcf"] / m["mcap"] if m["fcf"] is not None and m["mcap"] else None
     m["target"] = num(g("targetMeanPrice"))
     m["upside"] = (m["target"] / m["price"] - 1) if m["target"] and m["price"] else None
@@ -1318,6 +1324,14 @@ def fair_value(m, mac):
         base_fcf = (sum(hist) / len(hist)) if biz == "cyclical" and len(hist) >= 3 else m["fcf"]
         owner = m.get("owner_earnings")
         used_owner = biz != "cyclical" and owner is not None and base_fcf is not None and owner > base_fcf
+        # IFRS (fast alle Nicht-US-Firmen): Leasingzahlungen stehen nicht im Free Cashflow, die Leasingschulden aber
+        # in den Finanzschulden -> Zahlung (≈ Verbindlichkeit / 6 Jahre) abziehen und Schulden ohne Leasing rechnen
+        ifrs = "." in m["symbol"] or (m.get("fin_currency") or m["currency"]) != "USD"
+        lease = (m.get("lease_obl") or 0) if ifrs else 0
+        lease_pay = lease / 6 if lease and not used_owner else 0
+        if base_fcf is not None:
+            base_fcf -= lease_pay
+        nd = (m["net_debt"] or 0) - lease + (m.get("minority") or 0)
         if used_owner:
             base_fcf = owner  # hohe Wachstumsinvestitionen drücken den Free Cashflow nur vorübergehend
         if base_fcf is not None and m.get("sbc"):
@@ -1339,11 +1353,11 @@ def fair_value(m, mac):
         d = clamp(max(0.04, spread), 0.04, 0.12)
         # Diskontsatz: angepasstes Beta (Blume: 2/3 Beta + 1/3) und 4,5 % Marktrisikoprämie
         beta_adj = 0.67 * clamp(m["beta"] or 1.0, 0.3, 2.5) + 0.33
-        r = clamp((mac["rf"] or 4.0) / 100 + beta_adj * 0.045, 0.07, 0.12)
+        r = clamp((mac["rf"] or 4.0) / 100 + beta_adj * 0.045, 0.075, 0.12)  # Untergrenze: auch „sichere“ Aktien sind keine Anleihe
         out.update(method="Discounted-Cashflow (10 Jahre)",
-                   bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, m["net_debt"], shares),
-                   base=dcf_value(base_fcf, g_base, r, 0.025, m["net_debt"], shares),
-                   bull=dcf_value(base_fcf, min(0.40, g_base + d), r - 0.01, 0.03, m["net_debt"], shares))
+                   bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, nd, shares),
+                   base=dcf_value(base_fcf, g_base, r, 0.025, nd, shares),
+                   bull=dcf_value(base_fcf, min(0.40, g_base + d), max(0.07, r - 0.01), 0.03, nd, shares))
         out["assumptions"] = [
             ("Owner Earnings (operativer Cashflow minus Abschreibungen) " if used_owner else "Free Cashflow ")
             + money(base_fcf, m['currency']) + (" (Ø der Geschäftsjahre, Zykliker)" if biz == "cyclical" else "" if used_owner else " (12 Monate)")
@@ -1351,7 +1365,10 @@ def fair_value(m, mac):
             f"Wachstum Jahre 1–5: {pct(g_base - d)} / {pct(g_base)} / {pct(g_base + d)}"
             + (" (aus Analystenprognose und Historie)" if frg is not None else " (aus der Historie)"),
             "danach schrittweise auf 2–3 % Dauerwachstum",
-            f"Diskontsatz {pct(r + 0.01)} / {pct(r)} / {pct(r - 0.01)}"]
+            *([f"Leasing: Zahlungen ≈ {money(lease_pay, m['currency'])} p. a. abgezogen, Leasingschulden nicht doppelt gezählt"]
+              if lease_pay else []),
+            *([f"Minderheitsanteile {money(m['minority'], m['currency'])} abgezogen"] if (m.get("minority") or 0) > 0.02 * (m["mcap"] or 1) else []),
+            f"Diskontsatz {pct(r + 0.01)} / {pct(r)} / {pct(max(0.07, r - 0.01))}"]
     if out["base"] is None:
         return None
     out["upside"] = out["base"] / price - 1
@@ -4297,6 +4314,125 @@ def clean_watchlist(items):
 
 
 # ---------------------------------------------------------------------------
+# Screener: Indizes im Hintergrund bewerten (langsam, ein Wert nach dem anderen), Rangliste mit Filtern
+# ---------------------------------------------------------------------------
+# Zusammensetzung nach bestem Wissen, Stand Herbst 2026 (u. a. Hochtief für Porsche SE ab 22.06.2026).
+# Indexänderungen bei Bedarf hier nachtragen – die App bewertet einfach die hier gelisteten Kürzel.
+SCREENER_UNIVERSES = {
+    "dax": ("DAX", ["ADS.DE", "AIR.DE", "ALV.DE", "BAS.DE", "BAYN.DE", "BEI.DE", "BMW.DE", "BNR.DE", "CBK.DE",
+                       "CON.DE", "DTG.DE", "DBK.DE", "DB1.DE", "DHL.DE", "DTE.DE", "EOAN.DE", "FRE.DE", "FME.DE",
+                       "G24.DE", "G1A.DE", "HNR1.DE", "HEI.DE", "HEN3.DE", "IFX.DE", "MBG.DE",
+                       "MRK.DE", "MTX.DE", "MUV2.DE", "HOT.DE", "QIA.DE", "RHM.DE", "RWE.DE", "SAP.DE", "SRT3.DE",
+                       "SIE.DE", "ENR.DE", "SHL.DE", "SY1.DE", "VOW3.DE", "VNA.DE", "ZAL.DE"]),
+    "es50": ("Euro Stoxx 50", ["ADS.DE", "ADYEN.AS", "AD.AS", "AI.PA", "AIR.DE", "ALV.DE", "ABI.BR", "ARGX.BR",
+                               "ASML.AS", "CS.PA", "BAS.DE", "BAYN.DE", "BBVA.MC", "SAN.MC", "BMW.DE", "BNP.PA",
+                               "BN.PA", "DB1.DE", "DHL.DE", "DTE.DE", "ENEL.MI", "ENI.MI", "EL.PA", "RACE.MI",
+                               "IBE.MC", "ITX.MC", "IFX.DE", "INGA.AS", "ISP.MI", "OR.PA", "MC.PA", "MBG.DE",
+                               "MUV2.DE", "NOKIA.HE", "NDA-FI.HE", "PRX.AS", "RMS.PA", "SAF.PA", "SAN.PA", "SAP.DE",
+                               "SU.PA", "SIE.DE", "STLAM.MI", "TTE.PA", "UCG.MI", "DG.PA", "VOW3.DE", "WKL.AS",
+                               "RHM.DE", "ENR.DE"]),
+    "dow": ("Dow Jones 30", ["AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "GS", "HD",
+                             "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "MSFT", "NKE", "NVDA", "PG",
+                             "SHW", "TRV", "UNH", "V", "VZ", "WMT"]),
+}
+SCREENER_MAX_AGE = 20 * 3600     # einen Wert höchstens einmal in 20 Stunden neu bewerten
+SCREENER_PAUSE = 30              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
+SCREENER_STATE = {"running": False, "current": None, "started": None}
+
+
+def screener_symbols():
+    out = {}
+    for key, (_name, syms) in SCREENER_UNIVERSES.items():
+        for sym in syms:
+            out.setdefault(sym, []).append(key)
+    return out
+
+
+def screener_row(res, universes):
+    cats = {c["key"]: c.get("score") for c in res.get("categories") or []}
+    f = res.get("facts") or {}
+    fair = res.get("fair") or {}
+    return {"symbol": res["symbol"], "name": res["name"], "u": universes, "price": res.get("price"),
+            "currency": res.get("currency", ""), "label": res["rating"]["label"], "group": res["rating"]["group"],
+            "score": res["rating"]["score"], "summary": (res.get("summary") or {}).get("adjective"),
+            "sector": res.get("sector") or "", "model": (res.get("model") or {}).get("label", ""),
+            "fair": fair.get("base"), "fair_up": fair.get("upside"), "pe": f.get("pe"), "fpe": f.get("fpe"),
+            "div": f.get("div_yield"), "perf_1y": f.get("perf_1y"), "mcap": f.get("mcap"), "upside": f.get("upside"),
+            "c": {k: (round(v, 2) if v is not None else None) for k, v in cats.items()},
+            "updated": int(time.time())}
+
+
+def screener_store():
+    data = STORE.load()
+    with STORE.lock:
+        return data.setdefault("screener", {})
+
+
+def screener_next():
+    """Ältester bzw. noch nie bewerteter Wert, der fällig ist – oder None."""
+    store = screener_store()
+    now = time.time()
+    due = [(store.get(sym, {}).get("updated", 0), sym) for sym in screener_symbols()
+           if now - store.get(sym, {}).get("updated", 0) > SCREENER_MAX_AGE
+           and now - store.get(sym, {}).get("failed", 0) > 6 * 3600]
+    return min(due)[1] if due else None
+
+
+def screener_step():
+    """Bewertet genau einen fälligen Wert. True, wenn etwas zu tun war."""
+    sym = screener_next()
+    if not sym:
+        return False
+    SCREENER_STATE["current"] = sym
+    unis = screener_symbols()[sym]
+    store = screener_store()
+    try:
+        res = analyze(sym)
+        row = screener_row(res, unis)
+        with STORE.lock:
+            store[sym] = row
+            STORE.dirty = True
+    except Exception as e:
+        with STORE.lock:
+            store.setdefault(sym, {"symbol": sym, "u": unis})["failed"] = int(time.time())
+            STORE.dirty = True
+        LOG.warning("[Screener] %s nicht bewertbar: %s", sym, str(e)[:120])
+    finally:
+        SCREENER_STATE["current"] = None
+    return True
+
+
+def screener_loop():
+    time.sleep(300)  # erst nach dem Start in Ruhe loslegen
+    while True:
+        try:
+            if REPORT_LOCK.locked():       # Wochenbericht hat Vorrang
+                time.sleep(60)
+                continue
+            SCREENER_STATE["running"] = True
+            busy = screener_step()
+            SCREENER_STATE["running"] = busy
+            time.sleep(SCREENER_PAUSE if busy else 600)
+        except Exception:
+            LOG.exception("[Screener] Fehler")
+            time.sleep(300)
+
+
+def screener_payload():
+    store = screener_store()
+    syms = screener_symbols()
+    with STORE.lock:
+        rows = [dict(r) for sym, r in store.items() if sym in syms and r.get("label")]
+    for r in rows:
+        r["u"] = syms[r["symbol"]]  # aktuelle Indexzuordnung
+    unis = {k: {"name": n, "total": len(lst), "done": sum(1 for x in lst if (store.get(x) or {}).get("label"))}
+            for k, (n, lst) in SCREENER_UNIVERSES.items()}
+    fresh = sum(1 for sym in syms if time.time() - (store.get(sym) or {}).get("updated", 0) <= SCREENER_MAX_AGE)
+    return {"rows": rows, "universes": unis, "total": len(syms), "fresh": fresh,
+            "current": SCREENER_STATE["current"], "pause": SCREENER_PAUSE}
+
+
+# ---------------------------------------------------------------------------
 # Zwischenspeicher begrenzen: abgelaufene Einträge löschen, Höchstzahl je Speicher (älteste zuerst raus)
 # ---------------------------------------------------------------------------
 def cache_rules():
@@ -5047,6 +5183,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
+        if u.path == "/api/screener":
+            return self.send(200, json.dumps(json_safe(screener_payload()), ensure_ascii=False),
+                             "application/json; charset=utf-8")
         if u.path == "/api/track":
             everyone = (qs.get("scope") or [""])[0] == "all" and self.is_admin()
             t0 = time.time()
@@ -5153,6 +5292,8 @@ def main():
     try:
         threading.Thread(target=alert_loop, daemon=True).start()
         threading.Thread(target=history_flush_loop, daemon=True).start()
+        if os.environ.get("SCREENER", "1") != "0":
+            threading.Thread(target=screener_loop, daemon=True).start()
         srv.serve_forever()
     except KeyboardInterrupt:
         print("Beendet.")
