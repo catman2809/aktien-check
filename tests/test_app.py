@@ -636,6 +636,16 @@ class TestScreenerStart(Isolated):
                     break
                 time.sleep(0.05)
             self.assertEqual(sorted(calls), ["AAA", "BBB", "CCC"])
+            # nur ein gewählter Index
+            a.SCREENER_UNIVERSES = {"t": ("Test", ["AAA"]), "u": ("Zwei", ["DDD", "EEE"])}
+            calls.clear()
+            self.assertTrue(a.screener_start("anna", "all", ["u"])[0])
+            for _ in range(50):
+                if not a.SCREENER_STATE["running"]:
+                    break
+                time.sleep(0.05)
+            self.assertEqual(sorted(calls), ["DDD", "EEE"])
+            self.assertEqual(a.SCREENER_STATE["unis"], ["u"])
         finally:
             a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE = orig
             a.SCREENER_STATE.update(running=False, stop=False)

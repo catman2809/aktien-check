@@ -329,6 +329,17 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .fc-row span:not(:first-child){text-align:right}
 @media (max-width:760px){.fv-grid{grid-template-columns:1fr;gap:18px}.fc{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
   .fv-card{padding:16px}}
+.scr-panel{padding:16px 18px;margin:0 0 14px}
+.scr-picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0 12px}
+.scr-pick{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:10px;cursor:pointer}
+.scr-pick:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.scr-pick input{margin-top:3px;accent-color:var(--accent)}
+.scr-pick small{display:block;color:var(--text-3);font-size:12px}
+.scr-modes{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--text-2)}
+.scr-modes input{accent-color:var(--accent);margin-right:6px}
+.scr-err{color:var(--neg);font-size:13px;min-height:4px;margin-top:6px}
+.scr-go{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px}
+@media (max-width:640px){.scr-picks{grid-template-columns:1fr}}
 .scr-run{padding:14px 18px;margin:0 0 14px}
 .scr-run-top{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:14px}
 .scr-prog{height:8px;background:var(--track);border-radius:4px;overflow:hidden;margin-bottom:8px}
@@ -1538,7 +1549,7 @@ function fairCard(d) {
 }
 
 /* Screener: Rangliste aller bewerteten Indexwerte */
-const SCR = {data: null, uni: "all", filters: new Set(), sort: "score", q: ""};
+const SCR = {data: null, uni: "all", filters: new Set(), sort: "score", q: "", panel: false, pick: null, mode: "due"};
 try { Object.assign(SCR, JSON.parse(localStorage.getItem("ac-scr") || "{}"), {data: null}); SCR.filters = new Set(SCR.filters || []); } catch (e) { SCR.filters = new Set(); }
 const SCR_FILTERS = [
   ["buy", "Nur Kaufen", r => r.group === "Kaufen"],
@@ -1551,7 +1562,7 @@ const SCR_FILTERS = [
 const SCR_SORT = {score: ["Score", (a, b) => b.score - a.score], fair: ["Potenzial zum fairen Wert", (a, b) => (b.fair_up ?? -9) - (a.fair_up ?? -9)],
   div: ["Dividendenrendite", (a, b) => (b.div || 0) - (a.div || 0)], perf: ["Performance 1 Jahr", (a, b) => (b.perf_1y ?? -9) - (a.perf_1y ?? -9)],
   pe: ["KGV (niedrig zuerst)", (a, b) => (a.pe > 0 ? a.pe : 999) - (b.pe > 0 ? b.pe : 999)], name: ["Name", (a, b) => a.name.localeCompare(b.name, "de")]};
-function scrSave() { try { localStorage.setItem("ac-scr", JSON.stringify({uni: SCR.uni, filters: [...SCR.filters], sort: SCR.sort})); } catch (e) {} }
+function scrSave() { try { localStorage.setItem("ac-scr", JSON.stringify({uni: SCR.uni, filters: [...SCR.filters], sort: SCR.sort, pick: SCR.pick})); } catch (e) {} }
 let scrTimer = null;
 function scrPoll() {
   clearTimeout(scrTimer);
@@ -1595,20 +1606,38 @@ function renderScreener() {
       <div class="wl-actions">
         ${D.running
           ? `<button class="btn" id="scrstop" ${D.stopping ? "disabled" : ""}>${D.stopping ? "Wird gestoppt …" : "Stopp"}</button>`
-          : `<button class="btn primary" id="scrstart">${D.due ? `Start (${D.due} ${D.due === 1 ? "Wert" : "Werte"})` : "Start"}</button>
-             <button class="btn" id="scrall" title="Alle ${D.total} Werte neu bewerten, auch aktuelle">Alle neu bewerten</button>`}
+          : `<button class="btn primary" id="scrstart" aria-expanded="${SCR.panel}">Screening starten …</button>`}
         <button class="btn" id="scrback">Zur Startseite</button>
       </div>
     </div>
+    ${!D.running && SCR.panel ? (() => {
+      const pick = SCR.pick || (SCR.uni !== "all" ? [SCR.uni] : Object.keys(U));
+      const n = SCR.mode === "all" ? pick.reduce((a, k) => a + U[k].total, 0) : pick.reduce((a, k) => a + (D.due_by?.[k] || 0), 0);
+      return `<div class="scr-panel card" id="scrpanel">
+        <b>Welche Indizes sollen bewertet werden?</b>
+        <div class="scr-picks">${Object.entries(U).map(([k, u]) => `<label class="scr-pick">
+          <input type="checkbox" value="${k}" ${pick.includes(k) ? "checked" : ""}>
+          <span><b>${esc(u.name)}</b><small>${u.total} Werte · ${D.due_by?.[k] || 0} veraltet</small></span></label>`).join("")}</div>
+        <div class="scr-modes">
+          <label><input type="radio" name="scrmode" value="due" ${SCR.mode !== "all" ? "checked" : ""}> Nur veraltete Werte (älter als 20 Stunden)</label>
+          <label><input type="radio" name="scrmode" value="all" ${SCR.mode === "all" ? "checked" : ""}> Alle Werte neu bewerten</label>
+        </div>
+        <div class="scr-err" id="screrr" role="alert"></div>
+        <div class="scr-go">
+          <span class="stamp">${pick.length ? `${pick.length > 1 ? "bis zu " : ""}${n} ${n === 1 ? "Wert" : "Werte"} · etwa ${Math.max(1, Math.round(n * (D.pause + 25) / 60))} Min.${n === 0 ? " – nichts zu tun, ggf. „Alle Werte neu bewerten“ wählen" : ""}` : ""}
+            ${pick.length > 1 ? " · Werte in mehreren Indizes zählen nur einmal" : ""}</span>
+          <span><button class="btn" id="scrcancel">Abbrechen</button> <button class="btn primary" id="scrgo">Starten</button></span>
+        </div>
+      </div>`; })() : ""}
     ${D.running ? `<div class="scr-run card">
-        <div class="scr-run-top"><b>Screener läuft${D.by ? ` <span class="stamp">gestartet von ${esc(D.by)}</span>` : ""}</b>
+        <div class="scr-run-top"><b>Screener läuft: ${esc((D.run_unis || []).map(k => U[k]?.name || k).join(", "))}${D.by ? ` <span class="stamp">gestartet von ${esc(D.by)}</span>` : ""}</b>
           <span class="num">${D.done} von ${D.target}</span></div>
         <div class="scr-prog"><i style="width:${D.target ? Math.min(100, D.done / D.target * 100) : 0}%"></i></div>
         <div class="stamp">${D.current ? `Bewertet gerade ${esc(D.current)} · ` : ""}etwa ${Math.max(1, Math.round((D.target - D.done) * (D.pause + 25) / 60))} Min. verbleibend · die Liste aktualisiert sich alle 10 Sekunden.
           Du kannst die Seite schließen – der Durchgang läuft auf dem Server weiter.</div>
       </div>`
-      : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Start</b> drückst: Dann werden alle Werte, die älter als 20 Stunden sind,
-        nacheinander analysiert (etwa ${Math.max(1, Math.round((D.due || 0) * (D.pause + 25) / 60))} Min.). Danach stoppt er von selbst.
+      : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Screening starten</b> drückst und die gewünschten Indizes auswählst.
+        Die Werte werden nacheinander analysiert, danach stoppt er von selbst.
         ${D.finished ? ` Letzter Durchgang beendet ${ago_(D.finished)}.` : ""} ${D.due ? "" : "Alle Werte sind aktuell."}</p>`}
     <div class="scr-ctrl">
       <div class="seg" id="scruni"><button data-u="all" class="${SCR.uni === "all" ? "on" : ""}">Alle</button>${Object.entries(U).map(([k, u]) =>
@@ -1637,10 +1666,23 @@ function renderScreener() {
     <p class="stamp" style="margin-top:10px">${rows.length} Treffer · Fairer Wert = Abstand des Kurses zum Basisszenario · Zeile antippen für die vollständige Analyse.
       Indexzusammensetzung nach bestem Wissen, Stand Herbst 2026.</p>`;
   $("#scrback").onclick = () => { clearTimeout(scrTimer); history.replaceState(null, "", location.pathname); welcome(); };
-  const st_ = $("#scrstart"), sa_ = $("#scrall"), sp_ = $("#scrstop");
-  if (st_) st_.onclick = () => { st_.disabled = true; scrAction("/api/screener/start", {mode: "due"}); };
-  if (sa_) sa_.onclick = () => { if (confirm(`Alle ${D.total} Werte neu bewerten? Das dauert etwa ${Math.round(D.total * (D.pause + 25) / 60)} Minuten.`)) { sa_.disabled = true; scrAction("/api/screener/start", {mode: "all"}); } };
+  const st_ = $("#scrstart"), sp_ = $("#scrstop");
+  if (st_) st_.onclick = () => { SCR.panel = !SCR.panel; renderScreener(); };
   if (sp_) sp_.onclick = () => { sp_.disabled = true; scrAction("/api/screener/stop"); };
+  const pn = $("#scrpanel");
+  if (pn) {
+    const picked = () => [...pn.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
+    pn.querySelectorAll("input[type=checkbox]").forEach(i => i.onchange = () => { SCR.pick = picked(); scrSave(); renderScreener(); });
+    pn.querySelectorAll("input[name=scrmode]").forEach(i => i.onchange = () => { SCR.mode = i.value; renderScreener(); });
+    $("#scrcancel").onclick = () => { SCR.panel = false; renderScreener(); };
+    $("#scrgo").onclick = () => {
+      const unis = picked();
+      if (!unis.length) { $("#screrr").textContent = "Bitte mindestens einen Index auswählen."; return; }
+      SCR.pick = unis; SCR.panel = false; scrSave();
+      $("#scrgo").disabled = true;
+      scrAction("/api/screener/start", {mode: SCR.mode, unis});
+    };
+  }
   document.querySelectorAll("#scruni button").forEach(b => b.onclick = () => { SCR.uni = b.dataset.u; scrSave(); renderScreener(); });
   document.querySelectorAll(".scr-chips [data-f]").forEach(b => b.onclick = () => {
     SCR.filters.has(b.dataset.f) ? SCR.filters.delete(b.dataset.f) : SCR.filters.add(b.dataset.f); scrSave(); renderScreener(); });

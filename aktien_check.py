@@ -4338,7 +4338,7 @@ SCREENER_UNIVERSES = {
 SCREENER_MAX_AGE = 20 * 3600     # einen Wert höchstens einmal in 20 Stunden neu bewerten
 SCREENER_PAUSE = 30              # Sekunden Pause nach jeder Bewertung (Prozessor schonen)
 SCREENER_STATE = {"running": False, "current": None, "started": None, "by": None, "mode": "due", "stop": False,
-                  "done": 0, "target": 0, "finished": None, "seen": set()}
+                  "done": 0, "target": 0, "finished": None, "seen": set(), "unis": []}
 SCREENER_LOCK = threading.Lock()
 
 
@@ -4370,12 +4370,15 @@ def screener_store():
         return data.setdefault("screener", {})
 
 
-def screener_due(mode="due", since=None):
-    """Fällige Werte, älteste zuerst. mode="all": alles, was seit Beginn des Durchgangs noch nicht bewertet wurde."""
+def screener_due(mode="due", since=None, unis=None):
+    """Fällige Werte der gewählten Indizes, älteste zuerst.
+    mode="all": alles, was im laufenden Durchgang noch nicht bewertet wurde."""
     store = screener_store()
     now = time.time()
     out = []
-    for sym in screener_symbols():
+    for sym, member in screener_symbols().items():
+        if unis and not set(member) & set(unis):
+            continue
         e = store.get(sym, {})
         last = max(e.get("updated", 0), e.get("failed", 0))
         if mode == "all":
@@ -4388,7 +4391,7 @@ def screener_due(mode="due", since=None):
 
 def screener_next():
     """Nächster fälliger Wert im laufenden Durchgang – oder None."""
-    due = screener_due(SCREENER_STATE["mode"], SCREENER_STATE["started"])
+    due = screener_due(SCREENER_STATE["mode"], SCREENER_STATE["started"], SCREENER_STATE["unis"])
     return due[0] if due else None
 
 
@@ -4420,7 +4423,8 @@ def screener_step():
 def screener_run():
     """Ein Durchgang: bewertet alle fälligen Werte nacheinander und endet dann (oder bei „Stopp“)."""
     st = SCREENER_STATE
-    LOG.info("[Screener] Start durch %s · %d Werte (%s)", st["by"], st["target"], "alle" if st["mode"] == "all" else "veraltete")
+    LOG.info("[Screener] Start durch %s · %s · %d Werte (%s)", st["by"],
+             ", ".join(SCREENER_UNIVERSES[k][0] for k in st["unis"]), st["target"], "alle" if st["mode"] == "all" else "veraltete")
     try:
         while not st["stop"]:
             if REPORT_LOCK.locked():       # Wochenbericht hat Vorrang
@@ -4442,20 +4446,22 @@ def screener_run():
         safe(prune_caches)
 
 
-def screener_start(user, mode="due"):
-    """Startet einen Durchgang, falls keiner läuft. Gibt (gestartet, Meldung) zurück."""
+def screener_start(user, mode="due", unis=None):
+    """Startet einen Durchgang für die gewählten Indizes, falls keiner läuft. Gibt (gestartet, Meldung) zurück."""
+    unis = [k for k in (unis or []) if k in SCREENER_UNIVERSES] or list(SCREENER_UNIVERSES)
     with SCREENER_LOCK:
         st = SCREENER_STATE
         if st["running"]:
             return False, "Der Screener läuft bereits."
         now = time.time()
         st["seen"] = set()
-        due = screener_due(mode, now)
+        due = screener_due(mode, now, unis)
+        names = ", ".join(SCREENER_UNIVERSES[k][0] for k in unis)
         if not due:
-            return False, "Alle Werte sind aktuell (jünger als 20 Stunden) – „Alle neu bewerten“ erzwingt einen kompletten Durchgang."
-        st.update(running=True, stop=False, started=now, by=user, mode=mode, done=0, target=len(due), finished=None)
+            return False, f"{names}: alle Werte sind aktuell (jünger als 20 Stunden) – „Alle neu bewerten“ erzwingt einen Durchgang."
+        st.update(running=True, stop=False, started=now, by=user, mode=mode, done=0, target=len(due), finished=None, unis=unis)
         threading.Thread(target=screener_run, daemon=True).start()
-        return True, f"Gestartet: {len(due)} Werte werden bewertet."
+        return True, f"Gestartet: {names} – {len(due)} Werte werden bewertet."
 
 
 def screener_payload():
@@ -4472,7 +4478,8 @@ def screener_payload():
     return {"rows": rows, "universes": unis, "total": len(syms), "fresh": fresh,
             "current": st["current"], "pause": SCREENER_PAUSE, "running": st["running"], "by": st["by"],
             "done": st["done"], "target": st["target"], "mode": st["mode"], "stopping": st["running"] and st["stop"],
-            "finished": st["finished"], "due": len(screener_due("due"))}
+            "finished": st["finished"], "due": len(screener_due("due")), "run_unis": st["unis"],
+            "due_by": {k: len(screener_due("due", None, [k])) for k in SCREENER_UNIVERSES}}
 
 
 # ---------------------------------------------------------------------------
@@ -5058,7 +5065,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.admin_action(body, user)
                     return self.send_json(self.admin_list())
                 if u.path == "/api/screener/start":
-                    ok, msg = screener_start(user, "all" if body.get("mode") == "all" else "due")
+                    unis_ = body.get("unis") if isinstance(body.get("unis"), list) else None
+                    ok, msg = screener_start(user, "all" if body.get("mode") == "all" else "due", unis_)
                     return self.send(200, json.dumps(json_safe({**screener_payload(), "message": msg, "started": ok}),
                                                      ensure_ascii=False), "application/json; charset=utf-8")
                 if u.path == "/api/screener/stop":
