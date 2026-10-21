@@ -274,6 +274,22 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-empty{padding:40px 24px;text-align:center;color:var(--text-2)}
 .wl-empty b{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
 .wl-preview{margin-top:36px;text-align:left}
+.trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
+.trk-teaser b{display:block;margin-bottom:2px}
+.trk-teaser span{color:var(--text-2);font-size:14px}
+.trk-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+.trk-g{padding:16px 18px;border-top-left-radius:0;border-top-right-radius:0}
+.trk-n{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:2px 0 8px}
+.trk-n small{font-size:13px;color:var(--text-3);font-weight:500}
+.trk-g dl{margin:0}
+.trk-g dl div{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid var(--border);font-size:13.5px}
+.trk-g dt{color:var(--text-2)} .trk-g dd{margin:0;font-weight:600}
+table.trk{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+table.trk th{text-align:left;font-size:12px;color:var(--text-3);font-weight:600;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+table.trk td{padding:9px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+table.trk tr:last-child td{border-bottom:0}
+.trk-sym{color:var(--accent);text-decoration:none;font-weight:600}
+@media (max-width:640px){.trk-groups{grid-template-columns:1fr}}
 .wl-preview .wl-head{margin:0 0 10px}
 .wl-preview h2{font-size:16px;margin:0}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;
@@ -1212,13 +1228,102 @@ function welcome() {
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
+    <div class="trk-teaser card">
+      <div><b>Wie gut sind die Empfehlungen?</b>
+        <span>Die App merkt sich jede Empfehlung mit Kurs und Datum und vergleicht die spätere Entwicklung mit dem Heimatindex.</span></div>
+      <button class="btn" id="trkopen">Trefferquote ansehen</button>
+    </div>
     ${pushGuide()}
     </section>`;
+  $("#trkopen").onclick = () => showTrack();
   wlBind($("#out"));
   bindPushGuide();
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
   bindA2hs();
+}
+
+/* Trefferquote der eigenen Empfehlungen */
+let trkScope = "me";
+const GROUP_COL = {Kaufen: "var(--pos)", Halten: "var(--neu)", Verkaufen: "var(--neg)"};
+async function showTrack() {
+  runId++; wlView = false;
+  $("#subnav").style.display = "none";
+  history.replaceState(null, "", "?view=trefferquote");
+  window.scrollTo({top: 0});
+  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Werte Empfehlungen aus …</b>
+    <div class="stamp">Kursverläufe aller bisher analysierten Werte werden geladen – beim ersten Mal bis zu 30 Sekunden.</div></div>`;
+  try {
+    const r = await fetch("/api/track" + (trkScope === "all" ? "?scope=all" : ""));
+    if (r.status === 401) return toLogin();
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    renderTrack(d);
+  } catch (e) {
+    $("#out").innerHTML = `<div class="card pad">Auswertung nicht möglich: ${esc(e.message || "")}</div>`;
+  }
+}
+function renderTrack(d) {
+  const S = d.signals || [];
+  const sgn = x => x == null ? "–" : pc(x, 1, true);
+  const col = x => x == null ? "" : `style="color:${x >= 0 ? "var(--pos)" : "var(--neg)"}"`;
+  const hit = (g, st) => st.beat == null ? null : g === "Kaufen" ? st.beat : g === "Verkaufen" ? 1 - st.beat : null;
+  const groups = ["Kaufen", "Halten", "Verkaufen"];
+  const H = d.horizons || {};
+  const matured = Object.values(H["3M"] || {}).reduce((a, x) => a + (x.n_ex || 0), 0);
+  const few = S.length < 30 || matured < 15;
+  const spread = k => { const b = H[k]?.Kaufen?.excess, v = H[k]?.Verkaufen?.excess; return b != null && v != null ? b - v : null; };
+  $("#out").innerHTML = `
+    <div class="wl-head">
+      <div><div class="eyebrow">${trkScope === "all" ? "Alle Benutzer" : ME?.multi ? "Konto " + esc(ME.user) : "Deine Analysen"}</div>
+        <h1>Trefferquote <span class="stamp" style="font-size:15px">${S.length} Signale${d.since ? " seit " + new Date(d.since).toLocaleDateString("de-DE") : ""}</span></h1></div>
+      <div class="wl-actions">
+        ${ME?.admin ? `<div class="seg" id="trkscope"><button data-s="me" class="${trkScope === "me" ? "on" : ""}">Meine</button><button data-s="all" class="${trkScope === "all" ? "on" : ""}">Alle Benutzer</button></div>` : ""}
+        <button class="btn" id="trkback">Zur Startseite</button>
+      </div>
+    </div>
+    <p class="section-sub" style="margin-top:0">Ein <b>Signal</b> entsteht bei der ersten Analyse einer Aktie und bei jedem Wechsel zwischen Kaufen, Halten und Verkaufen.
+      Gemessen wird die Kursentwicklung ab dem Signal (ohne Dividenden) im Vergleich zum Heimatindex (DAX, S&amp;P 500 …). Gute Empfehlungen:
+      <b>Kaufen</b> schlägt den Index, <b>Verkaufen</b> läuft schlechter als der Index.</p>
+    ${few ? `<div class="note">Noch wenig Daten: Aussagekräftig wird die Auswertung erst ab etwa 30 Signalen, von denen viele älter als 3 Monate sind.
+      Einzelne Ausreißer verzerren die Durchschnitte bis dahin stark.</div>` : ""}
+    <div class="trk-groups">${groups.map(g => { const st = d.groups?.[g] || {}; const h = hit(g, st); return `
+      <div class="card trk-g" style="border-top:3px solid ${GROUP_COL[g]}">
+        <div class="eyebrow" style="color:${GROUP_COL[g]}">${g}</div>
+        <div class="trk-n">${st.n || 0} <small>Signale</small></div>
+        <dl>
+          <div><dt>Ø Rendite seit Signal</dt><dd class="num" ${col(st.ret)}>${sgn(st.ret)}</dd></div>
+          <div><dt>Ø gegenüber Index</dt><dd class="num" ${col(st.excess)}>${sgn(st.excess)}</dd></div>
+          <div><dt>Trefferquote</dt><dd class="num">${h == null ? (g === "Halten" ? "<span class='stamp'>nicht bewertet</span>" : "–") : pc(h, 0)}${h != null ? ` <span class="stamp">(${st.n_ex})</span>` : ""}</dd></div>
+        </dl>
+      </div>`; }).join("")}</div>
+    <h2 class="section">Nach Haltedauer</h2>
+    <p class="section-sub">Durchschnittliche Über- oder Unterrendite gegenüber dem Index, gemessen eine feste Zeit nach dem Signal. Entscheidend ist die letzte Spalte:
+      Ist sie positiv, haben Kauf-Empfehlungen besser abgeschnitten als Verkaufs-Empfehlungen.</p>
+    <div class="card peer-scroll"><table class="trk">
+      <thead><tr><th>Haltedauer</th>${groups.map(g => `<th>${g}</th>`).join("")}<th>Kaufen − Verkaufen</th></tr></thead>
+      <tbody>${["1M", "3M", "6M", "12M"].map(k => `<tr><td>${{"1M": "1 Monat", "3M": "3 Monate", "6M": "6 Monate", "12M": "12 Monate"}[k]}</td>
+        ${groups.map(g => { const st = H[k]?.[g] || {}; return `<td class="num" ${col(st.excess)}>${sgn(st.excess)} <span class="stamp">(${st.n_ex || 0})</span></td>`; }).join("")}
+        <td class="num" ${col(spread(k))}><b>${sgn(spread(k))}</b></td></tr>`).join("")}</tbody>
+    </table></div>
+    <h2 class="section">Alle Signale</h2>
+    <div class="card peer-scroll"><table class="trk">
+      <thead><tr><th>Datum</th><th>Aktie</th><th>Empfehlung</th><th>Kurs damals</th><th>Rendite</th><th>Index</th><th>vs. Index</th><th>Status</th></tr></thead>
+      <tbody>${S.length ? S.slice(0, 200).map(x => `<tr>
+        <td class="num">${new Date(x.date).toLocaleDateString("de-DE")}</td>
+        <td><a href="?q=${encodeURIComponent(x.symbol)}" data-q="${esc(x.symbol)}" class="trk-sym">${esc(x.symbol)}</a></td>
+        <td><span style="color:${GROUP_COL[x.group] || "inherit"};font-weight:600">${esc(x.label)}</span></td>
+        <td class="num">${nf(x.price)}</td>
+        <td class="num" ${col(x.ret)}>${sgn(x.ret)}</td>
+        <td class="num">${x.bench ? `${sgn(x.bench_ret)} <span class="stamp">${esc(x.bench)}</span>` : "<span class='stamp'>kein Index</span>"}</td>
+        <td class="num" ${col(x.excess)}><b>${sgn(x.excess)}</b></td>
+        <td class="stamp">${x.active ? `aktiv · ${x.days} T.` : `beendet nach ${x.days} T.`}</td></tr>`).join("")
+        : `<tr><td colspan="8" class="stamp" style="padding:18px">Noch keine Signale – analysiere ein paar Aktien, dann füllt sich die Liste automatisch.</td></tr>`}</tbody>
+    </table></div>
+    <p class="stamp" style="margin-top:10px">Kurse in Handelswährung, ohne Dividenden und Gebühren. Vergangene Treffer sind keine Garantie für die Zukunft.</p>`;
+  $("#trkback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  document.querySelectorAll("#trkscope button").forEach(b => b.onclick = () => { trkScope = b.dataset.s; showTrack(); });
+  document.querySelectorAll(".trk-sym").forEach(a => a.onclick = e => { e.preventDefault(); $("#q").value = a.dataset.q; run(a.dataset.q); });
 }
 
 /* Run */
@@ -2106,6 +2211,7 @@ if (location.protocol === "file:") {
   const pre = ps.get("q");
   if (ps.get("import")) wlImport(ps.get("import"));
   else if (ps.get("view") === "watchlist") showWatchlist();
+  else if (ps.get("view") === "trefferquote") showTrack();
   else if (pre) { $("#q").value = pre; run(pre); } else welcome();
 }
 </script>

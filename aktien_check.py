@@ -829,6 +829,113 @@ def reverse_dcf(fcf, ev, r, g_term=0.025, years=10):
     return (lo + hi) / 2
 
 
+def balance_quality(m, inc, bs, cf):
+    """Piotroski F-Score, Altman Z-Score, Zinsdeckung, Gewinnqualität (Accruals) und um Aktienvergütung
+    bereinigter Free Cashflow – alles aus den Jahresabschlüssen."""
+    def pair(df, *names):  # (aktuelles, vorheriges Geschäftsjahr), fehlende Spalten übersprungen
+        vals = [v for v in row(df, *names) if v is not None]
+        return (vals[0] if vals else None, vals[1] if len(vals) > 1 else None)
+    ni, ni1 = pair(inc, "Net Income")
+    rev, rev1 = pair(inc, "Total Revenue")
+    gp, gp1 = pair(inc, "Gross Profit")
+    ebit, _ = pair(inc, "EBIT", "Operating Income")
+    intexp, _ = pair(inc, "Interest Expense", "Interest Expense Non Operating")
+    ta, ta1 = pair(bs, "Total Assets")
+    ca, ca1 = pair(bs, "Current Assets")
+    cl, cl1 = pair(bs, "Current Liabilities")
+    ltd, ltd1 = pair(bs, "Long Term Debt")
+    re_, _ = pair(bs, "Retained Earnings")
+    tl, _ = pair(bs, "Total Liabilities Net Minority Interest")
+    sh, sh1 = pair(bs, "Ordinary Shares Number", "Share Issued")
+    ocf, _ = pair(cf, "Operating Cash Flow")
+    sbc, _ = pair(cf, "Stock Based Compensation")
+
+    def div(a_, b_):
+        return a_ / b_ if a_ is not None and b_ else None
+
+    # Piotroski: 9 Ja/Nein-Prüfungen zu Profitabilität, Finanzierung und Effizienz
+    tests = [
+        ("Gewinn positiv", None if ni is None else ni > 0),
+        ("Operativer Cashflow positiv", None if ocf is None else ocf > 0),
+        ("Gesamtkapitalrendite gestiegen", None if None in (ni, ni1) or not ta or not ta1 else ni / ta > ni1 / ta1),
+        ("Cashflow über Gewinn", None if None in (ocf, ni) else ocf > ni),
+        ("Langfristige Schuldenquote nicht gestiegen",
+         None if None in (ltd, ltd1) or not ta or not ta1 else ltd / ta <= ltd1 / ta1),
+        ("Liquidität (Current Ratio) gestiegen",
+         None if None in (ca, ca1) or not cl or not cl1 else ca / cl > ca1 / cl1),
+        ("Keine Verwässerung", None if None in (sh, sh1) else sh <= sh1 * 1.005),
+        ("Bruttomarge gestiegen", None if None in (gp, gp1) or not rev or not rev1 else gp / rev > gp1 / rev1),
+        ("Kapitalumschlag gestiegen", None if None in (rev, rev1) or not ta or not ta1 else rev / ta > rev1 / ta1),
+    ]
+    done = [(n, ok) for n, ok in tests if ok is not None]
+    m["piotroski"] = round(sum(ok for _, ok in done) / len(done) * 9, 1) if len(done) >= 7 else None
+    m["piotroski_n"] = len(done)
+    m["piotroski_fail"] = [n for n, ok in done if not ok]
+    # Altman Z (klassisch für Industrie-/Handelsunternehmen)
+    if None not in (ca, cl, re_, ebit, rev) and ta and tl and m["mcap"]:
+        m["altman_z"] = (1.2 * (ca - cl) / ta + 1.4 * re_ / ta + 3.3 * ebit / ta
+                         + 0.6 * m["mcap"] / tl + 1.0 * rev / ta)
+    else:
+        m["altman_z"] = None
+    m["int_cov"] = div(ebit, abs(intexp)) if intexp and ebit is not None else None
+    m["accruals"] = div(ni - ocf, ta) if None not in (ni, ocf) else None
+    m["sbc"] = sbc
+    m["sbc_ratio"] = div(sbc, rev)
+    fcf = m["fcf"]
+    m["fcf_adj"] = fcf - sbc if fcf is not None and sbc else fcf
+    m["fcf_yield_adj"] = m["fcf_adj"] / m["mcap"] if m["fcf_adj"] is not None and m["mcap"] else None
+    m["fcf_m_adj"] = m["fcf_adj"] / m["revenue"] if m["fcf_adj"] is not None and m["revenue"] else None
+
+
+def pd_ts(v):
+    """Datum aus pandas/str -> naive datetime."""
+    import pandas as pd
+    ts = pd.Timestamp(v)
+    return ts.tz_localize(None).to_pydatetime() if ts.tzinfo else ts.to_pydatetime()
+
+
+def expectations(m, t):
+    """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
+    m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = None
+    tr = safe(lambda: t.eps_trend)
+    if tr is not None and not tr.empty and "current" in tr and "90daysAgo" in tr:
+        ch = []
+        for per in ("0y", "+1y"):
+            if per in tr.index:
+                cur, old = num(tr.loc[per, "current"]), num(tr.loc[per, "90daysAgo"])
+                if cur is not None and old and old > 0:
+                    ch.append(cur / old - 1)
+        m["eps_rev"] = sum(ch) / len(ch) if ch else None
+    rv = safe(lambda: t.eps_revisions)
+    if rv is not None and not rv.empty and "upLast30days" in rv:
+        sub = rv.loc[[p_ for p_ in ("0y", "+1y") if p_ in rv.index]]
+        up, dn = int(sub["upLast30days"].fillna(0).sum()), int(sub["downLast30days"].fillna(0).sum())
+        m["rev_breadth"] = (up, dn) if up + dn else None
+    eh = safe(lambda: t.earnings_history)
+    if eh is not None and not eh.empty and "surprisePercent" in eh:
+        vals = [num(v) for v in eh["surprisePercent"].tolist()]
+        vals = [v for v in vals if v is not None][-4:]
+        m["surprises"] = vals or None
+    it = safe(lambda: t.insider_transactions)
+    if it is not None and not it.empty and "Text" in it:
+        since = datetime.now() - timedelta(days=183)
+        buys = sells = 0.0
+        buyers = set()
+        for _, r in it.iterrows():
+            d = safe(lambda: pd_ts(r.get("Start Date")))
+            if d is None or d < since:
+                continue
+            txt, val = str(r.get("Text") or ""), num(r.get("Value")) or 0
+            if txt.startswith("Purchase at price"):
+                buys += val
+                buyers.add(r.get("Insider"))
+            elif txt.startswith("Sale at price"):
+                sells += val
+        m["insider"] = {"buys": buys, "sells": sells, "buyers": len(buyers), "src": "Yahoo", "cur": m["currency"]}
+    elif it is not None and getattr(it, "empty", False):
+        m["insider"] = None  # keine Meldungen (z. B. außerhalb der USA) -> Finnhub probieren
+
+
 def gather(symbol, t, info):
     m = {"symbol": symbol}
     g = info.get
@@ -959,6 +1066,7 @@ def gather(symbol, t, info):
     last_bb = first(row(cf, "Repurchase Of Capital Stock", "Common Stock Payments"))
     last_dv = first(row(cf, "Cash Dividends Paid", "Common Stock Dividend Paid"))
     m["shareholder_yield"] = ((abs(last_bb or 0) + abs(last_dv or 0)) / m["mcap"]) if m["mcap"] else None
+    balance_quality(m, inc, bs, cf)
     m["ocf"] = first(row(cf, "Operating Cash Flow")) or num(g("operatingCashflow"))
     m["p_ffo"] = m["mcap"] / m["ocf"] if m["mcap"] and m["ocf"] and m["ocf"] > 0 else None
     m["ev_sales"] = (m["ev"] or ((m["mcap"] or 0) + (m["net_debt"] or 0))) / m["revenue"]         if m["revenue"] and m["revenue"] > 0 and m["mcap"] else None
@@ -1040,6 +1148,7 @@ def gather(symbol, t, info):
         dist = {k: int(r0.get(k, 0) or 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell")}
         if sum(dist.values()):
             m["rec_dist"] = dist
+    expectations(m, t)
     return m
 
 
@@ -1154,8 +1263,13 @@ def score_valuation(m, mac):
         parts.append((clamp((1 - m["ev_ebitda"] / ref_ev) * 1.5), 1.0))
         why.append(f"EV/EBITDA {fnum(m['ev_ebitda'])} vs. Branche ~{ref_ev}")
     if m["fcf_yield"] is not None and not m["is_financial"] and biz not in ("real_estate", "loss_growth", "pre_revenue"):
-        parts.append((clamp((m["fcf_yield"] - 0.04) / 0.04), 1.0))
-        why.append(f"Free-Cashflow-Rendite {pct(m['fcf_yield'])} (4 % ≈ neutral)")
+        fy = m["fcf_yield"]
+        if m.get("fcf_yield_adj") is not None and (m.get("sbc_ratio") or 0) >= 0.02:
+            fy = m["fcf_yield_adj"]  # Aktienvergütung ist echter Aufwand -> vom Free Cashflow abziehen
+            why.append(f"Free-Cashflow-Rendite {pct(m['fcf_yield'])}, nach Aktienvergütung {pct(fy)} (4 % ≈ neutral)")
+        else:
+            why.append(f"Free-Cashflow-Rendite {pct(fy)} (4 % ≈ neutral)")
+        parts.append((clamp((fy - 0.04) / 0.04), 1.0))
     if m["peg"] and m["peg"] > 0:
         parts.append((clamp((1.5 - m["peg"]) / 1.0), 0.7))
         why.append(f"PEG-Ratio {fnum(m['peg'], 2)} (unter 1 = günstig relativ zum Wachstum)")
@@ -1171,7 +1285,7 @@ def score_valuation(m, mac):
     # Eingepreiste Erwartungen (Reverse-DCF)
     r = cost_of_equity(m, mac)
     ev = m["ev"] or ((m["mcap"] or 0) + (m["net_debt"] or 0))
-    implied = None if m["is_financial"] or biz in ("real_estate", "pre_revenue") else reverse_dcf(m["fcf"], ev, r)
+    implied = None if m["is_financial"] or biz in ("real_estate", "pre_revenue") else reverse_dcf(m.get("fcf_adj", m["fcf"]), ev, r)
     def med(xs):
         xs = sorted(x for x in xs if x is not None)
         return (xs[(len(xs) - 1) // 2] + xs[len(xs) // 2]) / 2 if xs else None
@@ -1259,10 +1373,15 @@ def model_quality(m):
                 parts.append((clamp((m["gross_m"] - 0.45) / 0.25), 1.0))
                 why.append(f"Bruttomarge {pct(m['gross_m'])} (hoch = späteres Gewinnpotenzial)")
             g = growth_estimate(m)
-            if g is not None and m["fcf_m"] is not None:
-                r40 = g + m["fcf_m"]
+            fm = m.get("fcf_m_adj") if m.get("fcf_m_adj") is not None else m["fcf_m"]
+            if g is not None and fm is not None:
+                r40 = g + fm
                 parts.append((clamp((r40 - 0.25) / 0.25), 1.2))
-                why.append(f"„Rule of 40“: Wachstum {pct(g)} + FCF-Marge {pct(m['fcf_m'])} = {pct(r40)} (≥ 40 % stark)")
+                why.append(f"„Rule of 40“: Wachstum {pct(g)} + FCF-Marge nach Aktienvergütung {pct(fm)} = {pct(r40)} "
+                           "(≥ 40 % stark)")
+            if m.get("piotroski") is not None:
+                parts.append((clamp((m["piotroski"] - 5) / 3), 0.6))
+                why.append(f"Piotroski F-Score {fnum(m['piotroski'], 0)}/9 (Richtung der Fundamentaldaten)")
             if m["op_m_trend"] is not None:
                 parts.append((clamp(m["op_m_trend"] / 0.10), 0.8))
                 why.append(f"Margentrend über {len(m['revenues'])} Jahre: {'+' if m['op_m_trend'] >= 0 else ''}"
@@ -1271,8 +1390,12 @@ def model_quality(m):
             parts.append((clamp((m["runway"] - 1.5) / 1.5), 1.5 if biz == "pre_revenue" else 1.0))
             why.append(f"Cash-Reichweite ≈ {fnum(m['runway'], 1)} Jahre beim aktuellen Mittelabfluss")
         elif m["fcf"] is not None and m["fcf"] >= 0:
-            parts.append((0.5, 1.0))
-            why.append("Free Cashflow bereits positiv – keine Finanzierungslücke")
+            if (m.get("fcf_adj") or 0) >= 0:
+                parts.append((0.5, 1.0))
+                why.append("Free Cashflow bereits positiv – keine Finanzierungslücke")
+            else:
+                parts.append((0.0, 1.0))
+                why.append("Free Cashflow nur dank Aktienvergütung positiv – bereinigt noch negativ")
     return parts, why
 
 
@@ -1286,6 +1409,20 @@ def score_quality(m):
     if q is None:
         return {"score": None, "adjective": "solide", "reasons": why + ["Zu wenige Qualitätsdaten"]}
     return {"score": q, "adjective": quality_adj(m, q), "reasons": why}
+
+
+def quality_extras(m, parts, why):
+    """Piotroski F-Score und Gewinnqualität – für Industrie-, Handels- und Wachstumsfirmen (nicht Banken/Immobilien)."""
+    if m.get("piotroski") is not None:
+        parts.append((clamp((m["piotroski"] - 5) / 3), 0.8))
+        fails = m.get("piotroski_fail") or []
+        why.append(f"Piotroski F-Score {fnum(m['piotroski'], 0)}/9 (≥ 7 stark, ≤ 3 schwach)"
+                   + (f" – nicht erfüllt: {', '.join(fails[:3])}" if fails and m["piotroski"] < 7 else ""))
+    if m.get("accruals") is not None:
+        parts.append((clamp((0.02 - m["accruals"]) / 0.08), 0.5))
+        why.append(f"Gewinnqualität: Gewinn minus operativer Cashflow = {pct(m['accruals'])} der Bilanzsumme "
+                   + ("(Gewinn durch Cash gedeckt)" if m["accruals"] <= 0 else "(Gewinn höher als Cashzufluss)"
+                      if m["accruals"] < 0.08 else "(Warnsignal: Gewinn kaum durch Cash gedeckt)"))
 
 
 def standard_quality(m):
@@ -1305,8 +1442,15 @@ def standard_quality(m):
         parts.append((clamp((m["roic"] - 0.08) / 0.12), 1.0))
         why.append(f"Kapitalrendite (ROIC, approx.) {pct(m['roic'])}")
     if m["fcf_m"] is not None and not m["is_financial"]:
-        parts.append((clamp((m["fcf_m"] - 0.03) / 0.12), 1.0))
-        why.append(f"Free-Cashflow-Marge {pct(m['fcf_m'])}")
+        fm = m["fcf_m"]
+        if m.get("fcf_m_adj") is not None and (m.get("sbc_ratio") or 0) >= 0.02:
+            fm = m["fcf_m_adj"]
+            why.append(f"Free-Cashflow-Marge {pct(m['fcf_m'])}, nach Aktienvergütung ({pct(m['sbc_ratio'])} vom Umsatz) "
+                       f"{pct(fm)}")
+        else:
+            why.append(f"Free-Cashflow-Marge {pct(fm)}")
+        parts.append((clamp((fm - 0.03) / 0.12), 1.0))
+    quality_extras(m, parts, why)
     if not m["is_financial"]:
         if m["nd_ebitda"] is not None:
             parts.append((clamp((2.0 - m["nd_ebitda"]) / 2.0), 1.0))
@@ -1438,6 +1582,16 @@ def score_risk(m):
             parts.append((clamp((8.0 - m["nd_ebitda"]) / 4.0), 0.8))
     elif m["nd_ebitda"] is not None and not m["is_financial"]:
         parts.append((clamp((2.5 - m["nd_ebitda"]) / 2.5), 0.8))
+    if biz not in ("bank", "insurance", "real_estate"):
+        z = m.get("altman_z")
+        if z is not None:
+            parts.append((-1.0 if z < 1.8 else clamp((z - 2.4) / 1.2) if z < 3 else 0.5, 0.9))
+            why.append(f"Altman Z-Score {fnum(z, 1)} (" + ("Warnzone: erhöhtes Insolvenzrisiko" if z < 1.8 else
+                       "Grauzone" if z < 3 else "sicher") + ")")
+        cov = m.get("int_cov")
+        if cov is not None and (m["debt"] or 0) > 0:
+            parts.append((clamp((cov - 4) / 4), 0.7))
+            why.append(f"Zinsdeckung: operativer Gewinn = {fnum(cov, 1)}-fache Zinskosten (unter 2 kritisch, über 8 komfortabel)")
     if biz == "bank" and m["equity_ratio"] is not None:
         parts.append((clamp((m["equity_ratio"] - 0.05) / 0.03), 0.6))
         why.append(f"Eigenkapitalquote {pct(m['equity_ratio'])} (Puffer gegen Kreditausfälle)")
@@ -1570,6 +1724,37 @@ def score_sentiment(m, news, val_score):
         parts.append((clamp(ns * 2.5), 1.0))
         why.append(f"News-Tonalität (30 Tage, tier-gewichtet) {'+' if ns >= 0 else ''}{fnum(ns, 2)} "
                    f"aus {news['count']} Meldungen ({news['pos']} positiv / {news['neg']} negativ)")
+    if m.get("eps_rev") is not None:
+        parts.append((clamp(m["eps_rev"] / 0.05), 1.0))
+        why.append(f"Gewinnrevisionen 90 Tage: Schätzungen für dieses/nächstes Jahr {'+' if m['eps_rev'] >= 0 else ''}"
+                   f"{fnum(m['eps_rev'] * 100, 1)} % " + ("(Analysten heben an)" if m["eps_rev"] > 0.01 else
+                                                       "(Analysten senken)" if m["eps_rev"] < -0.01 else "(stabil)"))
+    if m.get("rev_breadth"):
+        up, dn = m["rev_breadth"]
+        if up + dn >= 2:
+            parts.append((clamp((up - dn) / (up + dn)), 0.5))
+        why.append(f"Letzte 30 Tage: {up} Anhebungen, {dn} Senkungen der Gewinnschätzungen")
+    if m.get("surprises"):
+        sp = m["surprises"]
+        beats, avg = sum(1 for x in sp if x > 0), sum(sp) / len(sp)
+        parts.append((0.5 * clamp((beats - len(sp) / 2) / (len(sp) / 2)) + 0.5 * clamp(avg / 0.05), 0.7))
+        why.append(f"Gewinnüberraschungen: {beats} von {len(sp)} Quartalen über den Erwartungen, Ø {'+' if avg >= 0 else ''}"
+                   f"{fnum(avg * 100, 1)} %")
+    ins = m.get("insider")
+    if ins:
+        mcap = m["mcap"] or 0
+        if ins["buyers"] >= 2 or (ins["buys"] >= 1e6 and ins["buyers"] >= 1):
+            parts.append((clamp(0.4 + 0.2 * min(ins["buyers"], 3)), 0.7))
+            why.append(f"Insiderkäufe (6 Monate): {ins['buyers']} Insider kauften für {money(ins['buys'], ins['cur'])} "
+                       "eigene Aktien – starkes Vertrauenssignal")
+        elif mcap and ins["sells"] / mcap > 0.005:
+            parts.append((-0.4, 0.5))
+            why.append(f"Insiderverkäufe (6 Monate) {money(ins['sells'], ins['cur'])} = {pct(ins['sells'] / mcap, 2)} "
+                       "des Börsenwerts – auffällig hoch")
+        else:
+            why.append("Insidergeschäfte (6 Monate): " + (f"Verkäufe {money(ins['sells'], ins['cur'])}, keine nennenswerten "
+                       "Käufe – Verkäufe sind oft planmäßig und wenig aussagekräftig" if ins["sells"] else
+                       "keine nennenswerten Käufe oder Verkäufe"))
     if m["short_float"] is not None:
         why.append(f"Leerverkaufsquote {pct(m['short_float'])} des Streubesitzes")
         if m["short_float"] > 0.1:
@@ -1737,6 +1922,23 @@ def build_fundamentals(m, mac):
             ["Veränderung Aktienanzahl", pct(m["share_change"]),
              "negativ = Rückkäufe reduzieren Aktien, positiv = Verwässerung"],
         )},
+        {"title": "Bilanzqualität & Erwartungen", "rows": [r for r in (
+            ["Piotroski F-Score", "–" if m.get("piotroski") is None else f"{fnum(m['piotroski'], 0)} / 9",
+             "≥ 7 stark, ≤ 3 schwach – Richtung der Fundamentaldaten"] if biz not in ("bank", "insurance") else None,
+            ["Altman Z-Score", fnum(m.get("altman_z"), 1), "< 1,8 Insolvenzgefahr, > 3 sicher"]
+            if biz not in ("bank", "insurance", "real_estate") else None,
+            ["Zinsdeckung", "–" if m.get("int_cov") is None else fnum(m["int_cov"], 1) + "x",
+             "operativer Gewinn / Zinskosten"] if not m["is_financial"] else None,
+            ["Aktienvergütung", pct(m.get("sbc_ratio")), "vom Umsatz; FCF nach Abzug: " + money(m.get("fcf_adj"), c)]
+            if m.get("sbc") else None,
+            ["Gewinnrevisionen 90 Tage", "–" if m.get("eps_rev") is None else
+             f"{'+' if m['eps_rev'] >= 0 else ''}{fnum(m['eps_rev'] * 100, 1)} %", "Änderung der Gewinnschätzungen"],
+            ["Gewinnüberraschungen", "–" if not m.get("surprises") else
+             f"{sum(1 for x in m['surprises'] if x > 0)} von {len(m['surprises'])} übertroffen", "letzte Quartale"],
+            ["Insider (6 Monate)", "–" if not m.get("insider") else
+             f"Käufe {money(m['insider']['buys'], m['insider']['cur'])} · Verkäufe {money(m['insider']['sells'], m['insider']['cur'])}",
+             (m.get("insider") or {}).get("src", "")],
+        ) if r]},
         {"title": "Bewertung – historisch & im Branchenvergleich", "rows": rows_(
             ["KGV (trailing / forward)", f"{fnum(m['pe'])} / {fnum(m['fpe'])}",
              f"Branche ~{SECTOR_REF.get(m['sector'], (20, 13))[0]}"],
@@ -1943,6 +2145,33 @@ def finnhub_enrich(m, symbol, alternatives):
         if filled:
             m["finnhub"].append("Kennzahlen")
         break
+    for sym in dict.fromkeys(candidates):  # Gewinnüberraschungen / Insider, falls Yahoo sie nicht liefert
+        if m.get("surprises") is None:
+            ea = finnhub("stock/earnings", symbol=sym)
+            if isinstance(ea, list) and ea:
+                vals = [num(x.get("surprisePercent")) for x in ea[:4]]
+                vals = [v / 100 for v in vals if v is not None][::-1]
+                if vals:
+                    m["surprises"] = vals
+                    m["finnhub"].append(f"Gewinnüberraschungen ({sym})")
+        if m.get("insider") is None:
+            frm = (datetime.now() - timedelta(days=183)).strftime("%Y-%m-%d")
+            data = (finnhub("stock/insider-transactions", symbol=sym, **{"from": frm}) or {}).get("data")
+            if isinstance(data, list) and data:
+                buys = sells = 0.0
+                buyers = set()
+                for x in data:
+                    val = abs(num(x.get("change")) or 0) * (num(x.get("transactionPrice")) or 0)
+                    if x.get("transactionCode") == "P":
+                        buys += val
+                        buyers.add(x.get("name"))
+                    elif x.get("transactionCode") == "S":
+                        sells += val
+                m["insider"] = {"buys": buys, "sells": sells, "buyers": len(buyers), "src": f"Finnhub ({sym})",
+                                "cur": "USD" if "." not in sym else m["currency"]}
+                m["finnhub"].append(f"Insidergeschäfte ({sym})")
+        if m.get("surprises") is not None and m.get("insider") is not None:
+            break
 
 
 # ---------------------------------------------------------------------------
@@ -3432,12 +3661,159 @@ def record_history(res, user):
         else:
             pts.append(entry)
         del pts[:-HISTORY_MAX_POINTS]
+        sig = signals_of(sp)
+        last = next((x for x in reversed(sig) if x[0] == sym), None)
+        group = res["rating"].get("group") or label_group(entry[2])
+        if entry[3] and (last is None or last[3] != group):
+            sig.append([sym, today, entry[2], group, entry[3]])  # neues Signal: erste Analyse oder Gruppenwechsel
+            del sig[:-SIGNALS_MAX]
         if len(hist) > HISTORY_MAX_SYMBOLS:  # am längsten nicht analysierte Aktien zuerst verwerfen
             for old in sorted(hist, key=lambda k: hist[k][-1][0] if hist[k] else "")[: len(hist) - HISTORY_MAX_SYMBOLS]:
                 if old != sym:
                     hist.pop(old, None)
         STORE.dirty = True
         return [list(x) for x in pts]
+
+
+# ---------------------------------------------------------------------------
+# Trefferquote: Wie haben sich die Empfehlungen seitdem entwickelt (vs. Heimatindex)?
+# ---------------------------------------------------------------------------
+SIGNALS_MAX = 600
+TRACK_CACHE = {}
+BENCH_BY_SUFFIX = {"": ("^GSPC", "S&P 500"), "DE": ("^GDAXI", "DAX"), "F": ("^GDAXI", "DAX"), "BE": ("^GDAXI", "DAX"),
+                   "MU": ("^GDAXI", "DAX"), "SG": ("^GDAXI", "DAX"), "HM": ("^GDAXI", "DAX"), "DU": ("^GDAXI", "DAX"),
+                   "HA": ("^GDAXI", "DAX"), "L": ("^FTSE", "FTSE 100"), "PA": ("^FCHI", "CAC 40"),
+                   "SW": ("^SSMI", "SMI"), "AS": ("^AEX", "AEX"), "MI": ("FTSEMIB.MI", "FTSE MIB"),
+                   "T": ("^N225", "Nikkei 225"), "HK": ("^HSI", "Hang Seng"), "TO": ("^GSPTSE", "TSX"),
+                   "AX": ("^AXJO", "ASX 200")}
+TRACK_HORIZONS = (("1M", 30), ("3M", 91), ("6M", 182), ("12M", 365))
+
+
+def label_group(label):
+    return next((g for _, l_, g in RATING_SCALE if l_ == label), "")
+
+
+def is_crypto_symbol(sym):
+    return bool(re.fullmatch(r"[A-Z0-9]+-(USD|EUR)", sym))
+
+
+def benchmark_for(sym):
+    if is_crypto_symbol(sym):
+        return None, ""
+    suf = sym.partition(".")[2]
+    return BENCH_BY_SUFFIX.get(suf, ("^STOXX", "STOXX Europe 600"))
+
+
+def signals_of(sp):
+    """Signal-Liste [Symbol, Datum, Stufe, Gruppe, Kurs]; beim ersten Mal aus dem bisherigen Verlauf aufgebaut."""
+    if "signals" not in sp:
+        sig = []
+        for sym, pts in (sp.get("history") or {}).items():
+            last = None
+            for d, _score, label, price in pts:
+                g = label_group(label)
+                if price and g and g != last:
+                    sig.append([sym, d, label, g, price])
+                    last = g
+        sp["signals"] = sorted(sig, key=lambda x: x[1])[-SIGNALS_MAX:]
+    return sp["signals"]
+
+
+def price_table(symbols, start):
+    """Tagesschlusskurse ab start für mehrere Werte: {Symbol: pandas.Series}."""
+    out = {}
+    for sym in symbols:
+        h = safe(lambda: yf.Ticker(sym).history(start=start, interval="1d", auto_adjust=False))
+        if h is not None and not h.empty:
+            c = h["Close"].dropna()
+            c.index = [ts.tz_localize(None) if ts.tzinfo else ts for ts in c.index]
+            out[sym] = c
+    return out
+
+
+def asof(series, day):
+    import pandas as pd
+    if series is None or series.empty:
+        return None
+    sub = series[series.index <= pd.Timestamp(day) + pd.Timedelta(hours=23)]
+    return float(sub.iloc[-1]) if len(sub) else None
+
+
+def track_record(signals):
+    """Wertet Signale aus: Rendite seit Signal, je Horizont, und Überrendite gegenüber dem Heimatindex."""
+    if not signals:
+        return {"signals": [], "groups": {}, "horizons": {}, "since": None}
+    start = (datetime.strptime(min(x[1] for x in signals), "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+    syms = sorted({x[0] for x in signals})
+    benches = sorted({benchmark_for(x)[0] for x in syms if benchmark_for(x)[0]})
+    px = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for part in ex.map(lambda sym: price_table([sym], start), syms + benches):
+            px.update(part)
+    today = datetime.now().strftime("%Y-%m-%d")
+    rows = []
+    by_sym = {}
+    for x in sorted(signals, key=lambda x: x[1]):
+        by_sym.setdefault(x[0], []).append(x)
+    for sym, sigs in by_sym.items():
+        b_sym, b_name = benchmark_for(sym)
+        ser, bser = px.get(sym), px.get(b_sym) if b_sym else None
+        for i, (_, d, label, group, p0) in enumerate(sigs):
+            end = sigs[i + 1][1] if i + 1 < len(sigs) else today
+            p_end = asof(ser, end)
+            b0, b_end = asof(bser, d), asof(bser, end)
+            ret = p_end / p0 - 1 if p_end and p0 else None
+            bret = b_end / b0 - 1 if b_end and b0 else None
+            hz = {}
+            age = (datetime.now() - datetime.strptime(d, "%Y-%m-%d")).days
+            for key, days in TRACK_HORIZONS:
+                if age >= days:
+                    t_ = (datetime.strptime(d, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+                    pr, br = asof(ser, t_), asof(bser, t_)
+                    r_ = pr / p0 - 1 if pr and p0 else None
+                    b_ = br / b0 - 1 if br and b0 else None
+                    hz[key] = {"ret": r_, "excess": (r_ - b_) if r_ is not None and b_ is not None else None}
+            rows.append({"symbol": sym, "date": d, "label": label, "group": group, "price": p0, "end": end,
+                         "active": i + 1 == len(sigs), "days": (datetime.strptime(end, "%Y-%m-%d")
+                                                                 - datetime.strptime(d, "%Y-%m-%d")).days,
+                         "ret": ret, "bench": b_name, "bench_ret": bret,
+                         "excess": (ret - bret) if ret is not None and bret is not None else None, "h": hz})
+
+    def stats(items, key=None):
+        ex_ = [r["excess"] if key is None else r["h"][key]["excess"] for r in items
+               if (r["excess"] if key is None else r["h"].get(key, {}).get("excess")) is not None]
+        rt = [r["ret"] if key is None else r["h"][key]["ret"] for r in items
+              if (r["ret"] if key is None else r["h"].get(key, {}).get("ret")) is not None]
+        return {"n": len(rt), "ret": sum(rt) / len(rt) if rt else None,
+                "excess": sum(ex_) / len(ex_) if ex_ else None, "n_ex": len(ex_),
+                "beat": sum(1 for e in ex_ if e > 0) / len(ex_) if ex_ else None}
+    groups = {g: stats([r for r in rows if r["group"] == g]) for g in ("Kaufen", "Halten", "Verkaufen")}
+    horizons = {k: {g: stats([r for r in rows if r["group"] == g and k in r["h"]], k) for g in ("Kaufen", "Halten", "Verkaufen")}
+                for k, _ in TRACK_HORIZONS}
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return {"signals": rows, "groups": groups, "horizons": horizons, "since": min(x[1] for x in signals)}
+
+
+def track_payload(user, everyone=False):
+    key = "*" if everyone else user
+    hit = TRACK_CACHE.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    data = STORE.load()
+    with STORE.lock:
+        if everyone:
+            spaces = list(data["u"].values())
+        else:
+            spaces = [user_space(user)]
+        sig = []
+        for sp in spaces:
+            sig += [list(x) for x in signals_of(sp)]
+    if everyone:  # gleiche Aktie am selben Tag von mehreren Benutzern nur einmal zählen
+        sig = list({(x[0], x[1]): x for x in sig}.values())
+    out = track_record(sig)
+    out["scope"] = "all" if everyone else "me"
+    TRACK_CACHE[key] = (time.time(), out)
+    return out
 
 
 def clean_watchlist(items):
@@ -4015,6 +4391,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
+        if u.path == "/api/track":
+            everyone = (qs.get("scope") or [""])[0] == "all" and self.is_admin()
+            t0 = time.time()
+            res = track_payload(user, everyone)
+            LOG.info("[Trefferquote] %s · %d Signale · %.1f s", "alle" if everyone else user, len(res["signals"]),
+                     time.time() - t0)
+            return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/api/admin/users":
             return self.send_json(self.admin_list()) if self.is_admin() else self.send_json({"error": "Nur für Administratoren"}, 403)
         if u.path == "/api/alerts":

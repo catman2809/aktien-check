@@ -456,5 +456,70 @@ class TestBusinessModels(unittest.TestCase):
         self.assertTrue(any("Zyklushoch" in r for r in peak["reasons"]))
 
 
+class TestQualityAndTrack(unittest.TestCase):
+    """Bilanzqualität (Piotroski, Altman, Zinsdeckung, Aktienvergütung), Erwartungen und Trefferquote."""
+
+    @staticmethod
+    def frame(rows):
+        cols = [pd.Timestamp("2025-12-31"), pd.Timestamp("2024-12-31")]
+        return pd.DataFrame({c: {k: v[i] for k, v in rows.items()} for i, c in enumerate(cols)})
+
+    def test_balance_quality(self):
+        inc = self.frame({"Net Income": [120, 100], "Total Revenue": [1000, 900], "Gross Profit": [500, 430],
+                          "EBIT": [200, 170], "Interest Expense": [10, 10]})
+        bs = self.frame({"Total Assets": [2000, 1900], "Current Assets": [800, 700], "Current Liabilities": [400, 400],
+                         "Long Term Debt": [300, 320], "Retained Earnings": [900, 800],
+                         "Total Liabilities Net Minority Interest": [1000, 1000], "Ordinary Shares Number": [100, 101]})
+        cf = self.frame({"Operating Cash Flow": [160, 130], "Stock Based Compensation": [50, 40]})
+        m = {"mcap": 3000, "fcf": 150, "revenue": 1000}
+        a.balance_quality(m, inc, bs, cf)
+        self.assertEqual(m["piotroski"], 9)               # alle neun Prüfungen erfüllt
+        self.assertGreater(m["altman_z"], 3)
+        self.assertAlmostEqual(m["int_cov"], 20)
+        self.assertLess(m["accruals"], 0)                 # Cashflow über Gewinn
+        self.assertEqual(m["fcf_adj"], 100)               # Free Cashflow minus Aktienvergütung
+        self.assertAlmostEqual(m["sbc_ratio"], 0.05)
+
+    def test_revisions_and_insider_move_sentiment(self):
+        news = {"sentiment": 0, "count": 10, "pos": 3, "neg": 3, "count_trusted": 5}
+        base = {"rec_mean": None, "n_analysts": 0, "rec_dist": None, "short_float": None, "mcap": 1e10, "currency": "USD"}
+        neutral = a.score_sentiment(dict(base), news, 0)["score"]
+        good = a.score_sentiment({**base, "eps_rev": 0.08, "rev_breadth": (6, 0), "surprises": [0.05, 0.04, 0.06, 0.03],
+                                  "insider": {"buys": 3e6, "sells": 0, "buyers": 3, "cur": "USD"}}, news, 0)
+        bad = a.score_sentiment({**base, "eps_rev": -0.08, "rev_breadth": (0, 6), "surprises": [-0.05, -0.04, 0.01, -0.06]},
+                                news, 0)["score"]
+        self.assertGreater(good["score"], neutral + 0.3)
+        self.assertLess(bad, neutral - 0.3)
+        self.assertTrue(any("Insiderkäufe" in r for r in good["reasons"]))
+
+    def test_signals_backfill_and_group_change(self):
+        sp = {"history": {"SAP.DE": [["2026-01-02", 30, "Outperform", 200], ["2026-01-05", 33, "Outperform", 205],
+                                     ["2026-02-01", 5, "Equal-weight", 190]]}}
+        sig = a.signals_of(sp)
+        self.assertEqual([x[3] for x in sig], ["Kaufen", "Halten"])  # nur Gruppenwechsel zählt als neues Signal
+
+    def test_track_record_vs_index(self):
+        days = pd.date_range("2026-01-01", "2027-01-10", freq="D")
+        stock = pd.Series([100 * (1 + 0.002 * i) for i in range(len(days))], index=days)  # steigt stärker
+        index = pd.Series([100 * (1 + 0.001 * i) for i in range(len(days))], index=days)
+        orig, orig_now = a.price_table, a.datetime
+
+        class FixedNow(a.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2027, 1, 5)
+        a.price_table = lambda syms, start: {s_: (index if s_.startswith("^") else stock) for s_ in syms}
+        a.datetime = FixedNow
+        try:
+            res = a.track_record([["SAP.DE", "2026-01-01", "Buy", "Kaufen", 100.0]])
+        finally:
+            a.price_table, a.datetime = orig, orig_now
+        row_ = res["signals"][0]
+        self.assertEqual(row_["bench"], "DAX")
+        self.assertGreater(row_["excess"], 0.3)
+        self.assertEqual(res["groups"]["Kaufen"]["beat"], 1.0)
+        self.assertIn("12M", row_["h"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
