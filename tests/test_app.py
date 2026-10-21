@@ -403,5 +403,58 @@ class TestHTTP(Isolated):
         self.assertEqual(self.call(anna, "/api/me")[0], 401)
 
 
+class TestBusinessModels(unittest.TestCase):
+    """Branchenspezifische Bewertung (Banken, Versicherer, Immobilien, Verlust-/Vorumsatzfirmen, Zykliker)."""
+    MAC = {"rf": 4.0, "rf_chg": 0, "fx_chg": None, "fx_pair": None}
+
+    def m(self, **kw):
+        from collections import defaultdict
+        base = {"sector": "", "industry": "", "currency": "USD", "pe_hist": [], "revenues": [1, 1], "net_incomes": [],
+                "op_m_hist": [], "loss_years": 0, "n_analysts": 0, "div_streak": 0, "div_years": 0, "div_cut": False,
+                "peer_n": 0, "is_financial": False, "beta": 1.0, "mcap": 50e9}
+        d = defaultdict(lambda: None, {**base, **kw})
+        d["biz"] = kw.get("biz") or a.classify_business(d)
+        d["is_financial"] = d["biz"] in ("bank", "insurance")
+        return d
+
+    def test_classification(self):
+        self.assertEqual(self.m(sector="Financial Services", industry="Banks - Regional")["biz"], "bank")
+        self.assertEqual(self.m(sector="Financial Services", industry="Insurance - Diversified")["biz"], "insurance")
+        self.assertEqual(self.m(sector="Financial Services", industry="Credit Services")["biz"], "standard")  # Visa
+        self.assertEqual(self.m(sector="Real Estate", industry="REIT - Retail")["biz"], "real_estate")
+        self.assertEqual(self.m(sector="Basic Materials", industry="Copper")["biz"], "cyclical")
+        self.assertEqual(self.m(net_m=-0.2, revenue=2e9, rev_cagr=0.4, rev_g=0.25)["biz"], "loss_growth")
+        self.assertEqual(self.m(net_m=-5.0, revenue=1e7, rev_cagr=0.1)["biz"], "pre_revenue")
+        # winziger Anfangsumsatz bläht die CAGR auf – entscheidend ist der kleinere Wert
+        self.assertEqual(self.m(net_m=-0.3, revenue=5e9, rev_cagr=1.5, rev_g=0.05)["biz"], "standard")
+
+    def test_bank_pb_vs_roe(self):
+        cheap = a.score_valuation(self.m(biz="bank", pb=0.6, roe=0.10), self.MAC)["score"]
+        dear = a.score_valuation(self.m(biz="bank", pb=2.5, roe=0.10), self.MAC)["score"]
+        self.assertGreater(cheap, 0.3)
+        self.assertLess(dear, -0.3)
+        reasons = " ".join(a.score_valuation(self.m(biz="bank", pb=1, roe=0.1, ev_ebitda=3, fcf_yield=-0.5), self.MAC)["reasons"])
+        self.assertNotIn("EV/EBITDA", reasons)      # bei Banken nicht aussagekräftig
+        self.assertNotIn("Free-Cashflow", reasons)
+
+    def test_real_estate_ignores_pe(self):
+        v = a.score_valuation(self.m(biz="real_estate", pe=3.5, p_ffo=25, pb=1.4), self.MAC)
+        self.assertLess(v["score"], 0)  # KGV 3,5 durch Neubewertung darf nicht „billig“ machen
+        self.assertTrue(any("verzerrt" in r for r in v["reasons"]))
+        q = a.score_quality(self.m(biz="real_estate", op_m=0.5, ocf=3, revenue=5, ltv=0.7))
+        self.assertTrue(any("Beleihungsquote" in r for r in q["reasons"]))
+
+    def test_loss_makers_not_market_leaders(self):
+        q = a.score_quality(self.m(biz="loss_growth", net_m=-0.1, gross_m=0.8, rev_cagr=0.4, rev_g=0.35, fcf_m=0.2,
+                                   fcf=1e9, op_m_trend=0.1, mcap=500e9))
+        self.assertNotIn(q["adjective"], ("marktführend", "dominant"))
+        pre = a.score_quality(self.m(biz="pre_revenue", runway=8, cash=5e9, fcf=-6e8))
+        self.assertEqual(pre["adjective"], "defizitär")  # viel Kasse ist noch keine Profitabilität
+
+    def test_cyclical_peak_margin(self):
+        peak = a.score_valuation(self.m(biz="cyclical", pe=6, op_m=0.40, op_m_hist=[0.40, 0.15, 0.12, 0.10]), self.MAC)
+        self.assertTrue(any("Zyklushoch" in r for r in peak["reasons"]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

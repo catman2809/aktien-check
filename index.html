@@ -2040,7 +2040,11 @@ function render(d) {
       <li>Risiko ist bei Kryptowährungen grundsätzlich höchstens „neutral“. Coins außerhalb der Top 50: höchstens „Halten“. Stablecoins: immer „Neutral“.</li>
       <li>Stimmung: Crypto Fear &amp; Greed Index und News-Tonalität. Dividende: nicht anwendbar (0 % Gewicht).</li>`
       : `<li>Bewertung: KGV und EV/EBITDA gegen Branche und eigene Historie, FCF-Rendite, PEG, Kursziel und Reverse-DCF.</li>
-      <li>Deckel: Bei sehr hoher Bewertung oder schwacher Qualität ist höchstens „Halten“ möglich.</li>`}
+      <li>Deckel: Bei sehr hoher Bewertung oder schwacher Qualität ist höchstens „Halten“ möglich.</li>
+      <li>Branchenmodelle: Banken und Versicherer (Kurs-Buchwert vs. ROE), Immobilien/REITs (Kurs/FFO, Beleihungsquote),
+        Wachstum mit Verlusten (EV/Umsatz, Rule of 40, Cash-Reichweite), Vorumsatz-Firmen (höchstens „Market Perform“)
+        und Zykliker (normalisiertes KGV, Marge vs. Zyklusmittel).
+        Hier angewendet: <b>${esc(d.model?.label || "Standardmodell")}</b>.</li>`}
       <li>News: Tier 1 = 100 %, Tier 2 = 90 %, Tier 3 = 50 % (unbestätigt 25 %), Sonstige = 30 %.</li>
     </ul></div>
     <div class="card pad"><h3>Skala</h3><div class="scale-list num">

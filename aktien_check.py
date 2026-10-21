@@ -97,6 +97,55 @@ DEFENSIVE = {"Consumer Defensive", "Utilities", "Healthcare"}
 CYCLICAL = {"Consumer Cyclical", "Industrials", "Basic Materials", "Energy", "Financial Services", "Real Estate"}
 RATE_SENSITIVE = {"Real Estate", "Utilities"}
 
+# Branchenspezifische Bewertungsmodelle: klassische Kennzahlen (KGV, EV/EBITDA, FCF) passen nicht für jedes Geschäft
+BIZ_MODELS = {
+    "standard": ("Standardmodell", ""),
+    "bank": ("Bank-Modell",
+             "Banken werden über Kurs-Buchwert im Verhältnis zur Eigenkapitalrendite, ROE, ROA und Eigenkapitalquote "
+             "bewertet – EV/EBITDA, Free Cashflow und Nettoverschuldung sind bei Banken nicht aussagekräftig."),
+    "insurance": ("Versicherer-Modell",
+                  "Versicherer werden über Kurs-Buchwert im Verhältnis zur Eigenkapitalrendite, ROE und Eigenkapital-"
+                  "quote bewertet – EV/EBITDA, Free Cashflow und Nettoverschuldung sind hier nicht aussagekräftig."),
+    "real_estate": ("Immobilien-Modell",
+                    "Immobilienwerte/REITs werden über Kurs/FFO (Näherung: operativer Cashflow), Kurs-Buchwert (≈ NAV) "
+                    "und Beleihungsquote bewertet – das KGV ist durch Abschreibungen und Neubewertungen verzerrt."),
+    "loss_growth": ("Wachstum-mit-Verlust-Modell",
+                    "Statt KGV (bei Verlusten nicht vorhanden) zählen EV/Umsatz im Verhältnis zum Wachstum, "
+                    "die „Rule of 40“, Bruttomarge, Margentrend und die Cash-Reichweite."),
+    "pre_revenue": ("Vorumsatz-Modell",
+                    "Das Unternehmen erzielt (noch) kaum Umsatz – klassische Bewertung ist nicht möglich. Bewertet "
+                    "werden Cash-Reichweite, Börsenwert im Verhältnis zur Kasse und Analystenziele; Empfehlung "
+                    "höchstens im Halten-Bereich, da der Wert an Studien/Zulassungen/Durchbrüchen hängt."),
+    "cyclical": ("Zykliker-Modell",
+                 "Bei Rohstoff- und Zyklikerwerten täuscht das aktuelle KGV: am Gewinnhoch wirken sie billig. Zusätzlich "
+                 "zählen das KGV auf Durchschnittsgewinne (normalisiert) und der Abstand der Marge zum Zyklusmittel."),
+}
+CYCLICAL_INDUSTRIES = {"Auto Manufacturers", "Auto Parts", "Marine Shipping", "Building Materials", "Airlines",
+                       "Semiconductor Equipment & Materials", "Trucking", "Farm & Heavy Construction Machinery",
+                       "Residential Construction", "Paper & Paper Products", "Lumber & Wood Production"}
+NON_CYCLICAL_MATERIALS = {"Specialty Chemicals", "Packaging & Containers"}
+
+
+def classify_business(m):
+    ind, sec = re.sub(r"\s*[—–]\s*", " - ", m["industry"] or ""), m["sector"] or ""
+    if ind.startswith("Banks") or ind in ("Capital Markets", "Mortgage Finance"):
+        return "bank"
+    if ind.startswith("Insurance") and ind != "Insurance Brokers":
+        return "insurance"
+    if sec == "Real Estate" or ind.startswith("REIT"):
+        return "real_estate"
+    rev = m["revenue"]
+    losing = (m["net_m"] is not None and m["net_m"] < 0) or (m["pe"] is None and (m["net_incomes"] or [0])[0] is not None
+                                                             and (m["net_incomes"] or [0])[0] < 0)
+    if losing and (rev is None or (m["mcap"] and rev < m["mcap"] * 0.01) or rev < 5e7):
+        return "pre_revenue"
+    g = growth_estimate(m)
+    if losing and g is not None and g >= 0.15:
+        return "loss_growth"
+    if (sec in ("Energy", "Basic Materials") and ind not in NON_CYCLICAL_MATERIALS) or ind in CYCLICAL_INDUSTRIES:
+        return "cyclical"
+    return "standard"
+
 # Quellen-Tiers
 TIER_DOMAINS = {
     1: ["reuters.com", "apnews.com", "cnbc.com", "marketwatch.com", "finance.yahoo.com", "yahoo.com",
@@ -791,7 +840,6 @@ def gather(symbol, t, info):
     m["summary_text"] = g("longBusinessSummary") or ""
     m["exchange"] = g("fullExchangeName") or g("exchange") or ""
     m["mcap"] = num(g("marketCap"))
-    m["is_financial"] = m["sector"] == "Financial Services" or "Bank" in m["industry"] or "Insurance" in m["industry"]
 
     # Bilanzwerte in die Kurswährung umrechnen (z. B. DKK-Bilanz bei USD-Notierung)
     m["fin_currency"] = financial_currency(symbol, info) or m["currency"]
@@ -877,6 +925,14 @@ def gather(symbol, t, info):
     m["loss_years"] = sum(1 for n in nis if n is not None and n < 0)
     rd = first(row(inc, "Research And Development"))
     m["rd_ratio"] = rd / m["revenue"] if rd and m["revenue"] else None
+    m["op_m_hist"] = om_hist
+    m["equity"] = equity
+    m["assets"] = first(row(bs, "Total Assets"))
+    m["equity_ratio"] = equity / m["assets"] if equity and m["assets"] else None
+    m["ltv"] = m["net_debt"] / m["assets"] if m["net_debt"] is not None and m["assets"] else None
+    ni_ok = [n for n in nis if n is not None]
+    m["avg_ni"] = sum(ni_ok) / len(ni_ok) if len(ni_ok) >= 3 else None
+    m["norm_pe"] = m["mcap"] / m["avg_ni"] if m["mcap"] and m["avg_ni"] and m["avg_ni"] > 0 else None
 
     # --- Wachstum
     m["rev_g"] = num(g("revenueGrowth"))
@@ -903,6 +959,12 @@ def gather(symbol, t, info):
     last_bb = first(row(cf, "Repurchase Of Capital Stock", "Common Stock Payments"))
     last_dv = first(row(cf, "Cash Dividends Paid", "Common Stock Dividend Paid"))
     m["shareholder_yield"] = ((abs(last_bb or 0) + abs(last_dv or 0)) / m["mcap"]) if m["mcap"] else None
+    m["ocf"] = first(row(cf, "Operating Cash Flow")) or num(g("operatingCashflow"))
+    m["p_ffo"] = m["mcap"] / m["ocf"] if m["mcap"] and m["ocf"] and m["ocf"] > 0 else None
+    m["ev_sales"] = (m["ev"] or ((m["mcap"] or 0) + (m["net_debt"] or 0))) / m["revenue"]         if m["revenue"] and m["revenue"] > 0 and m["mcap"] else None
+    m["runway"] = (m["cash"] / -m["fcf"]) if m["cash"] is not None and m["fcf"] is not None and m["fcf"] < 0 else None
+    m["biz"] = classify_business(m)
+    m["is_financial"] = m["biz"] in ("bank", "insurance")
 
     # --- Dividende
     m["div_yield"] = num(g("trailingAnnualDividendYield"))
@@ -935,6 +997,9 @@ def gather(symbol, t, info):
         m["div_streak"] = streak
     if not m["div_yield"]:
         m["div_yield"] = 0.0 if divs is not None else None
+    m["payout_eps"] = None
+    if m["biz"] == "real_estate" and last_dv and m["ocf"] and m["ocf"] > 0:
+        m["payout_eps"], m["payout"] = m["payout"], abs(last_dv) / m["ocf"]  # REIT-Ausschüttung gemessen an FFO
 
     # --- Kurs / Charttechnik
     m["beta"] = num(g("beta"))
@@ -998,36 +1063,103 @@ def gather_macro(currency):
 # ---------------------------------------------------------------------------
 # Bewertungslogik: jede Kategorie -> Score (-1..+1), Adjektiv, Begründungen
 # ---------------------------------------------------------------------------
+def cost_of_equity(m, mac):
+    return clamp((mac["rf"] or 4.0) / 100 + (m["beta"] or 1.0) * 0.05, 0.07, 0.13)
+
+
+def growth_estimate(m):
+    """Vorsichtige Wachstumsschätzung: der kleinere Wert aus mehrjähriger CAGR und letztem Quartal
+    (die CAGR ist bei jungen Firmen durch winzige Anfangsumsätze stark überzeichnet)."""
+    g = [x for x in (m["rev_cagr"], m["rev_g"]) if x is not None]
+    return clamp(min(g), -0.5, 0.6) if g else None
+
+
+def model_valuation(m, mac, ref_pe, why):
+    """Zusätzliche Bewertungsbausteine je Geschäftsmodell -> Liste (Score, Gewicht)."""
+    biz, parts = m["biz"], []
+    if biz in ("bank", "insurance") and m["pb"] and m["pb"] > 0 and m["roe"] is not None and -0.5 < m["roe"] < 0.6:
+        coe, g = cost_of_equity(m, mac), 0.025
+        fair_pb = max(0.2, (m["roe"] - g) / (coe - g))
+        parts.append((clamp((fair_pb / m["pb"] - 1) * 1.5), 1.3))
+        why.append(f"Kurs-Buchwert {fnum(m['pb'], 2)} vs. fairer Wert {fnum(fair_pb, 2)} "
+                   f"(aus ROE {pct(m['roe'])} und Eigenkapitalkosten {pct(coe)})")
+    elif biz == "real_estate":
+        if m["p_ffo"]:
+            parts.append((clamp((1 - m["p_ffo"] / 15) * 1.5), 1.3))
+            why.append(f"Kurs/FFO {fnum(m['p_ffo'])} (Näherung: operativer Cashflow; ~15 ≈ neutral)")
+        if m["pb"] and m["pb"] > 0:
+            parts.append((clamp((1.0 - m["pb"]) / 0.8), 0.6))
+            why.append(f"Kurs-Buchwert {fnum(m['pb'], 2)} (≈ Abschlag/Aufschlag auf den Immobilienwert, 1,0 = neutral)")
+    elif biz == "loss_growth" and m["ev_sales"]:
+        g = growth_estimate(m) or 0
+        gm = m["gross_m"] if m["gross_m"] is not None else 0.4
+        # Umsatz ist umso mehr wert, je höher die Bruttomarge (Software ~75 %, Autos/Hardware ~10–20 %)
+        fair = clamp(g * 30, 1.0, 20.0) * clamp(gm / 0.6, 0.15, 1.25)
+        parts.append((clamp((fair / m["ev_sales"] - 1) * 1.0), 1.3))
+        why.append(f"EV/Umsatz {fnum(m['ev_sales'], 1)} vs. ~{fnum(fair, 1)} angemessen bei {pct(g)} Umsatzwachstum "
+                   f"und {pct(gm)} Bruttomarge")
+    elif biz == "pre_revenue" and m["mcap"] and m["cash"]:
+        ratio = m["mcap"] / m["cash"]
+        parts.append((clamp((3 - ratio) / 3), 0.6))
+        why.append(f"Börsenwert = {fnum(ratio, 1)}-fache der Kasse (unter 1 = Markt bewertet die Pipeline mit null)")
+    elif biz == "cyclical":
+        if m["norm_pe"]:
+            parts.append((clamp((1 - m["norm_pe"] / ref_pe) * 1.5), 1.2))
+            why.append(f"KGV auf Durchschnittsgewinn der letzten {len([n for n in m['net_incomes'] if n is not None])} "
+                       f"Jahre: {fnum(m['norm_pe'])} (normalisiert, glättet Zyklusspitzen)")
+        hist = [x for x in m["op_m_hist"] if x is not None]
+        if m["op_m"] is not None and len(hist) >= 3:
+            avg = sum(hist) / len(hist)
+            if avg > 0 and m["op_m"] > avg * 1.35:
+                parts.append((-0.5, 0.8))
+                why.append(f"Marge {pct(m['op_m'])} deutlich über dem Mittel {pct(avg)} – Gewinne nahe Zyklushoch, "
+                           "niedriges KGV kann trügen")
+            elif avg > 0 and m["op_m"] < avg * 0.65:
+                parts.append((0.3, 0.6))
+                why.append(f"Marge {pct(m['op_m'])} unter dem Mittel {pct(avg)} – möglicherweise Zyklustief")
+    return parts
+
+
 def score_valuation(m, mac):
     ref_pe, ref_ev = SECTOR_REF.get(m["sector"], (20, 13))
+    biz = m.get("biz", "standard")
+    ref_pe = {"bank": 11, "insurance": 13}.get(biz, ref_pe)
     peer_ref = m.get("peer_pe_med")
     if peer_ref:
         ref_pe = round(peer_ref, 1)
     parts, why = [], []
     pe = m["pe"]
-    if pe and pe > 0:
+    pe_w = 0.5 if biz == "cyclical" else 1.0  # bei Zyklikern zählt das normalisierte KGV stärker
+    if biz == "real_estate":
+        if pe and pe > 0:
+            why.append(f"KGV {fnum(pe)} – bei Immobilienwerten durch Abschreibungen und Neubewertungen verzerrt, nicht gewertet")
+    elif pe and pe > 0:
         s = clamp((1 - pe / ref_pe) * 1.5)
-        parts.append((s, 1.0))
+        parts.append((s, pe_w))
         why.append(f"KGV {fnum(pe)} vs. Median von {m['peer_n']} Wettbewerbern {fnum(ref_pe)}" if peer_ref
                    else f"KGV {fnum(pe)} vs. Branchen-Referenz ~{ref_pe} ({m['sector'] or 'Markt'})")
     elif m["net_m"] is not None and m["net_m"] < 0:
-        parts.append((-0.4, 1.0))
-        why.append("Kein positives KGV – Unternehmen schreibt Verluste")
-    if pe and pe > 0 and m["pe_hist_med"]:
+        if biz in ("loss_growth", "pre_revenue"):
+            why.append("Kein KGV (Verluste) – Bewertung stattdessen über Umsatz bzw. Kasse")
+        else:
+            parts.append((-0.4, 1.0))
+            why.append("Kein positives KGV – Unternehmen schreibt Verluste")
+    if pe and pe > 0 and m["pe_hist_med"] and biz != "real_estate":
         s = clamp((1 - pe / m["pe_hist_med"]) * 1.5)
-        parts.append((s, 1.0))
+        parts.append((s, pe_w))
         why.append(f"KGV vs. eigener Historie (Median {fnum(m['pe_hist_med'])}, {len(m['pe_hist'])} Jahre)")
     if m["fpe"] and m["fpe"] > 0 and pe and pe > 0:
         why.append(f"Forward-KGV {fnum(m['fpe'])} ({'Gewinnanstieg erwartet' if m['fpe'] < pe else 'Gewinnrückgang erwartet'})")
     if m["ev_ebitda"] and m["ev_ebitda"] > 0 and not m["is_financial"]:
         parts.append((clamp((1 - m["ev_ebitda"] / ref_ev) * 1.5), 1.0))
         why.append(f"EV/EBITDA {fnum(m['ev_ebitda'])} vs. Branche ~{ref_ev}")
-    if m["fcf_yield"] is not None and not m["is_financial"]:
+    if m["fcf_yield"] is not None and not m["is_financial"] and biz not in ("real_estate", "loss_growth", "pre_revenue"):
         parts.append((clamp((m["fcf_yield"] - 0.04) / 0.04), 1.0))
         why.append(f"Free-Cashflow-Rendite {pct(m['fcf_yield'])} (4 % ≈ neutral)")
     if m["peg"] and m["peg"] > 0:
         parts.append((clamp((1.5 - m["peg"]) / 1.0), 0.7))
         why.append(f"PEG-Ratio {fnum(m['peg'], 2)} (unter 1 = günstig relativ zum Wachstum)")
+    parts += model_valuation(m, mac, ref_pe, why)
     if m["upside"] is not None and (m["n_analysts"] >= 3 or m.get("target_n", 0) >= 2):
         w = 0.6 if not m.get("target_n") else 0.6 * min(1.0, m["target_n"] / 6)  # wenige Meldungen -> weniger Gewicht
         parts.append((clamp(m["upside"] / 0.3), w))
@@ -1037,9 +1169,9 @@ def score_valuation(m, mac):
             why.append("Einzelziele: " + " · ".join(f"{t['firm']} {fnum(t['value'], 0)}" for t in m["target_items"][:8]))
 
     # Eingepreiste Erwartungen (Reverse-DCF)
-    r = clamp((mac["rf"] or 4.0) / 100 + (m["beta"] or 1.0) * 0.05, 0.07, 0.13)
+    r = cost_of_equity(m, mac)
     ev = m["ev"] or ((m["mcap"] or 0) + (m["net_debt"] or 0))
-    implied = None if m["is_financial"] else reverse_dcf(m["fcf"], ev, r)
+    implied = None if m["is_financial"] or biz in ("real_estate", "pre_revenue") else reverse_dcf(m["fcf"], ev, r)
     def med(xs):
         xs = sorted(x for x in xs if x is not None)
         return (xs[(len(xs) - 1) // 2] + xs[len(xs) // 2]) / 2 if xs else None
@@ -1086,7 +1218,77 @@ def score_valuation(m, mac):
     return {"score": v, "adjective": adj, "reasons": why}
 
 
+def model_quality(m):
+    """Qualitätsbausteine für Banken, Versicherer, Immobilien und Verlust-/Vorumsatzfirmen."""
+    biz, parts, why = m["biz"], [], []
+    if biz in ("bank", "insurance"):
+        if m["roe"] is not None and -1 < m["roe"] < 1:
+            parts.append((clamp((m["roe"] - 0.10) / 0.08), 1.3))
+            why.append(f"Eigenkapitalrendite (ROE) {pct(m['roe'])} (10 % ≈ Kapitalkosten)")
+        if biz == "bank" and m["roa"] is not None:
+            parts.append((clamp((m["roa"] - 0.006) / 0.005), 0.8))
+            why.append(f"Gesamtkapitalrendite (ROA) {pct(m['roa'], 2)} (Banken: ~0,6 % ≈ neutral)")
+        if m["equity_ratio"] is not None:
+            base_, span = (0.05, 0.03) if biz == "bank" else (0.07, 0.04)
+            parts.append((clamp((m["equity_ratio"] - base_) / span), 0.8))
+            why.append(f"Eigenkapitalquote {pct(m['equity_ratio'])} (Bilanz-Eigenkapital / Bilanzsumme)")
+        if m["net_m"] is not None:
+            base_, span = (0.20, 0.15) if biz == "bank" else (0.05, 0.07)
+            parts.append((clamp((m["net_m"] - base_) / span), 0.6))
+            why.append(f"Nettomarge {pct(m['net_m'])}")
+    elif biz == "real_estate":
+        if m["op_m"] is not None:
+            parts.append((clamp((m["op_m"] - 0.35) / 0.25), 0.8))
+            why.append(f"Operative Marge {pct(m['op_m'])} (Immobilien: ~35 % ≈ neutral)")
+        if m["ocf"] and m["revenue"]:
+            fm = m["ocf"] / m["revenue"]
+            parts.append((clamp((fm - 0.30) / 0.25), 1.0))
+            why.append(f"FFO-Marge (operativer Cashflow / Umsatz) {pct(fm)}")
+        if m["ltv"] is not None:
+            parts.append((clamp((0.45 - m["ltv"]) / 0.15), 1.0))
+            why.append(f"Beleihungsquote (Nettoschulden / Bilanzsumme) {pct(m['ltv'])} (unter 45 % solide)")
+    else:  # loss_growth / pre_revenue
+        if biz == "loss_growth" and m["net_m"] is not None:
+            parts.append((clamp(m["net_m"] / 0.25), 0.8))  # -25 % Nettomarge = -1
+            why.append(f"Nettomarge {pct(m['net_m'])} (Verlustphase)")
+        if biz == "pre_revenue":
+            parts.append((-0.8, 1.5))
+            why.append("Noch kein nennenswerter Umsatz – tragfähiges Geschäftsmodell nicht nachgewiesen")
+        if biz == "loss_growth":
+            if m["gross_m"] is not None:
+                parts.append((clamp((m["gross_m"] - 0.45) / 0.25), 1.0))
+                why.append(f"Bruttomarge {pct(m['gross_m'])} (hoch = späteres Gewinnpotenzial)")
+            g = growth_estimate(m)
+            if g is not None and m["fcf_m"] is not None:
+                r40 = g + m["fcf_m"]
+                parts.append((clamp((r40 - 0.25) / 0.25), 1.2))
+                why.append(f"„Rule of 40“: Wachstum {pct(g)} + FCF-Marge {pct(m['fcf_m'])} = {pct(r40)} (≥ 40 % stark)")
+            if m["op_m_trend"] is not None:
+                parts.append((clamp(m["op_m_trend"] / 0.10), 0.8))
+                why.append(f"Margentrend über {len(m['revenues'])} Jahre: {'+' if m['op_m_trend'] >= 0 else ''}"
+                           f"{fnum(m['op_m_trend'] * 100)} Prozentpunkte (Weg Richtung Gewinnschwelle)")
+        if m["runway"] is not None:
+            parts.append((clamp((m["runway"] - 1.5) / 1.5), 1.5 if biz == "pre_revenue" else 1.0))
+            why.append(f"Cash-Reichweite ≈ {fnum(m['runway'], 1)} Jahre beim aktuellen Mittelabfluss")
+        elif m["fcf"] is not None and m["fcf"] >= 0:
+            parts.append((0.5, 1.0))
+            why.append("Free Cashflow bereits positiv – keine Finanzierungslücke")
+    return parts, why
+
+
 def score_quality(m):
+    biz = m.get("biz", "standard")
+    if biz in ("bank", "insurance", "real_estate", "loss_growth", "pre_revenue"):
+        parts, why = model_quality(m)
+    else:
+        parts, why = standard_quality(m)
+    q = wavg(parts)
+    if q is None:
+        return {"score": None, "adjective": "solide", "reasons": why + ["Zu wenige Qualitätsdaten"]}
+    return {"score": q, "adjective": quality_adj(m, q), "reasons": why}
+
+
+def standard_quality(m):
     parts, why = [], []
     if m["op_m"] is not None:
         parts.append((clamp((m["op_m"] - 0.10) / 0.15), 1.0))
@@ -1117,13 +1319,25 @@ def score_quality(m):
         parts.append((clamp(m["op_m_trend"] / 0.05) * 0.6, 0.6))
         why.append(f"Margentrend über {len(m['revenues'])} Jahre: {'+' if m['op_m_trend'] >= 0 else ''}"
                    f"{fnum(m['op_m_trend'] * 100)} Prozentpunkte")
-    q = wavg(parts)
-    if q is None:
-        return {"score": None, "adjective": "solide", "reasons": why + ["Zu wenige Qualitätsdaten"]}
+    return parts, why
+
+
+def quality_adj(m, q):
+    if m.get("biz") == "pre_revenue":
+        return "defizitär"
+    if m.get("biz") == "loss_growth":  # Verlustfirmen nie „marktführend/dominant“
+        return "solide" if q >= 0.25 else "defizitär"
     rev_down = m["rev_cagr"] is not None and m["rev_cagr"] < -0.02
     margin_down = m["op_m_trend"] is not None and m["op_m_trend"] < -0.03
     mcap, om, roe = m["mcap"] or 0, m["op_m"] or 0, m["roe"] or 0
-    if q >= 0.25:
+    if q >= 0.25 and m.get("biz") in ("bank", "insurance", "real_estate"):
+        if mcap >= 100e9 and q >= 0.4:
+            adj = "marktführend"
+        elif m.get("biz") != "real_estate" and (m["equity_ratio"] or 0) >= 0.09:
+            adj = "robust"
+        else:
+            adj = "profitabel"
+    elif q >= 0.25:
         if mcap >= 300e9 and om >= 0.25 and roe >= 0.2:
             adj = "dominant"
         elif (m["gross_m"] or 0) >= 0.5 and (m["roic"] or 0) >= 0.15 and om >= 0.2 and not margin_down:
@@ -1153,7 +1367,7 @@ def score_quality(m):
             adj = "angeschlagen"
         else:
             adj = "schwach"
-    return {"score": q, "adjective": adj, "reasons": why}
+    return adj
 
 
 def score_growth(m):
@@ -1215,8 +1429,21 @@ def score_risk(m):
     if m["max_dd"] is not None:
         parts.append((clamp((0.25 + m["max_dd"]) / 0.2), 0.6))
         why.append(f"Maximaler Rückgang im letzten Jahr {pct(m['max_dd'])}")
-    if m["nd_ebitda"] is not None and not m["is_financial"]:
+    biz = m.get("biz", "standard")
+    if biz == "real_estate":
+        if m["ltv"] is not None:
+            parts.append((clamp((0.50 - m["ltv"]) / 0.15), 1.0))
+            why.append(f"Beleihungsquote {pct(m['ltv'])} (über 55 % riskant)")
+        elif m["nd_ebitda"] is not None:
+            parts.append((clamp((8.0 - m["nd_ebitda"]) / 4.0), 0.8))
+    elif m["nd_ebitda"] is not None and not m["is_financial"]:
         parts.append((clamp((2.5 - m["nd_ebitda"]) / 2.5), 0.8))
+    if biz == "bank" and m["equity_ratio"] is not None:
+        parts.append((clamp((m["equity_ratio"] - 0.05) / 0.03), 0.6))
+        why.append(f"Eigenkapitalquote {pct(m['equity_ratio'])} (Puffer gegen Kreditausfälle)")
+    if biz in ("loss_growth", "pre_revenue") and m["runway"] is not None:
+        parts.append((clamp((m["runway"] - 1.5) / 1.5), 1.0))
+        why.append(f"Cash-Reichweite ≈ {fnum(m['runway'], 1)} Jahre – darunter drohen Kapitalerhöhungen/Verwässerung")
     if m["loss_years"]:
         parts.append((-0.6, 0.6))
         why.append(f"{m['loss_years']} Verlustjahr(e) in der Historie")
@@ -1232,6 +1459,8 @@ def score_risk(m):
         return {"score": None, "adjective": "berechenbar", "reasons": why}
     vol, beta = m["vol"] or 0.3, m["beta"] or 1.0
     lev = m["nd_ebitda"] or 0
+    if biz == "real_estate":  # hohe Verschuldung ist bei Immobilien normal -> an der Beleihungsquote messen
+        lev = 4 if (m["ltv"] or 0) > 0.55 else 0
     if r >= 0.2:
         if sec in DEFENSIVE and lev < 2:
             adj = "krisenfest" if r >= 0.5 else "defensiv"
@@ -1262,7 +1491,8 @@ def score_risk(m):
 
 def score_dividend(m):
     y, p = m["div_yield"], m["payout"]
-    why = [f"Dividendenrendite (12 Monate) {pct(y, 2)}", f"Ausschüttungsquote {pct(p)}"]
+    why = [f"Dividendenrendite (12 Monate) {pct(y, 2)}",
+           f"Ausschüttungsquote {pct(p)}" + (f" vom FFO (vom Gewinn: {pct(m['payout_eps'])})" if m.get("payout_eps") is not None else "")]
     if m["div_years"]:
         why.append(f"Dividende in {m['div_streak']} Jahren in Folge stabil/steigend"
                    + (" – Kürzung in den letzten 5 Jahren" if m["div_cut"] else ""))
@@ -1453,7 +1683,33 @@ def build_fundamentals(m, mac):
     c = m["currency"]
     cy = m["cf_years"] or "?"
     rows_ = lambda *r: list(r)
-    return [
+    biz = m.get("biz", "standard")
+    special = []
+    if biz in ("bank", "insurance"):
+        special = [["Kurs-Buchwert (KBV)", fnum(m["pb"], 2), "zentral für Banken/Versicherer"],
+                   ["Eigenkapitalrendite (ROE)", pct(m["roe"]), "über ~10 % verdient die Kapitalkosten"],
+                   ["Eigenkapitalquote", pct(m["equity_ratio"]), "Bilanz-Eigenkapital / Bilanzsumme"],
+                   ["Bilanzsumme", money(m["assets"], c), ""]]
+    elif biz == "real_estate":
+        special = [["Kurs/FFO (Näherung)", fnum(m["p_ffo"]), "FFO ≈ operativer Cashflow; ~15 neutral"],
+                   ["Kurs-Buchwert (≈ NAV)", fnum(m["pb"], 2), "unter 1 = Abschlag auf den Buchwert der Immobilien"],
+                   ["Beleihungsquote (LTV)", pct(m["ltv"]), "Nettoschulden / Bilanzsumme; unter 45 % solide"],
+                   ["Ausschüttung / FFO", pct(m["payout"]), f"bezogen auf den Gewinn: {pct(m.get('payout_eps'))}"]]
+    elif biz in ("loss_growth", "pre_revenue"):
+        g = growth_estimate(m)
+        special = [["EV/Umsatz", fnum(m["ev_sales"], 1), ""],
+                   ["„Rule of 40“", pct(g + m["fcf_m"]) if g is not None and m["fcf_m"] is not None else "–",
+                    "Wachstum + FCF-Marge; ≥ 40 % stark"],
+                   ["Cash-Reichweite", "–" if m["runway"] is None else fnum(m["runway"], 1) + " Jahre",
+                    "Kasse / jährlicher Mittelabfluss"],
+                   ["Kasse", money(m["cash"], c), ""]]
+    elif biz == "cyclical":
+        hist = [x for x in m["op_m_hist"] if x is not None]
+        special = [["KGV normalisiert", fnum(m["norm_pe"]), "Börsenwert / Ø-Gewinn der Geschäftsjahre"],
+                   ["Operative Marge aktuell / Ø", f"{pct(m['op_m'])} / {pct(sum(hist) / len(hist)) if hist else '–'}",
+                    "weit über Ø = nahe Zyklushoch"]]
+    head = [{"title": f"Branchenspezifisch: {BIZ_MODELS[biz][0]}", "rows": special}] if special else []
+    return head + [
         {"title": "Geschäftsmodell & Wettbewerbsvorteil", "rows": rows_(
             ["Branche", f"{m['sector']} / {m['industry']}", ""],
             ["Marktkapitalisierung", money(m["mcap"], c), ""],
@@ -2856,6 +3112,12 @@ def analyze(query):
     if qs is not None and qs <= -0.5 and total > 14:
         total = 14
         notes.append("Deckel: Unternehmensqualität zu schwach für eine Kaufempfehlung.")
+    biz = m["biz"]
+    if biz == "pre_revenue" and total > 9:
+        total = 9
+        notes.append("Deckel: Vorumsatz-Unternehmen – ohne nennenswerte Umsätze höchstens „Market Perform“.")
+    if biz != "standard":
+        notes.insert(0, f"{BIZ_MODELS[biz][0]}: {BIZ_MODELS[biz][1]}")
     label, group = map_rating(total)
     s_adj = summary_adj(total, cats)
 
@@ -2887,6 +3149,7 @@ def analyze(query):
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
         "profile": profile,
+        "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
