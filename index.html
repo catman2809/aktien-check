@@ -25,6 +25,7 @@
   --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca;
   --track:#eaecf0; --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
   --sma50:#eb6834; --sma200:#6250d6;
+  --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834;
   --radius:12px;
 }
 @media (prefers-color-scheme: dark){
@@ -37,6 +38,7 @@
     --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
     --track:#232c3f; --shadow:none;
     --sma50:#d95926; --sma200:#9085e9;
+    --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
   }
 }
 :root[data-theme="dark"]{
@@ -48,6 +50,7 @@
   --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
   --track:#232c3f; --shadow:none;
   --sma50:#d95926; --sma200:#9085e9;
+  --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:120px}
@@ -357,6 +360,12 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .chart-wrap .vol rect.on{opacity:.9}
 .chart-wrap .vlabel{fill:var(--text-3);font-size:10.5px}
 .chart-wrap .endlbl{font-size:10.5px;font-weight:700}
+.inc-wrap{height:260px}
+.inc-wrap .col.on rect.bg{fill:var(--surface-2)}
+.inc-wrap .zero{stroke:var(--text-3);stroke-width:1}
+.legend i.box{width:10px;height:10px;border:0;border-radius:3px;background:currentColor}
+.legend i.mar{width:18px;border-top:2px solid currentColor;position:relative}
+.legend i.mar::after{content:"";position:absolute;left:5px;top:-5px;width:6px;height:6px;border:2px solid currentColor;border-radius:50%;background:var(--surface)}
 .legend i.sma50{color:var(--sma50)} .legend i.sma200{color:var(--sma200)}
 @media (max-width:640px){.ind-row{justify-content:flex-start}}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
@@ -486,7 +495,7 @@ table.peers .neg{color:var(--neg)}
     --text:#101828; --text-2:#344054; --text-3:#667085; --accent:#1f4fd8; --accent-soft:#eef3ff;
     --pos:#067647; --pos-soft:#ecfdf3; --pos-line:#abefc6; --neu:#b54708; --neu-soft:#fffaeb; --neu-line:#fedf89;
     --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca; --track:#eaecf0; --shadow:none;
-    --sma50:#eb6834; --sma200:#6250d6;
+    --sma50:#eb6834; --sma200:#6250d6; --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834;
   }
   @page{size:A4;margin:14mm 12mm}
   html,body{background:#fff !important;font-size:12px}
@@ -1468,6 +1477,129 @@ function initChart(sym) {
   loadChart(CHART.range);
 }
 
+/* Erfolgsrechnung: Umsatz + Reinertrag (Balken, rechte Achse) und Nettomarge (Linie, linke Achse) */
+const INC = {sym: null, freq: "annual", data: {}, ro: null};
+try { INC.freq = localStorage.getItem("ac-inc-freq") === "quarterly" ? "quarterly" : "annual"; } catch (e) {}
+function incHead(p, D, unit) {
+  const [v, u] = big(p.revenue);
+  $("#inc-val").innerHTML = `${v}<small>${u} ${esc(D.currency)} Umsatz</small>`;
+  const mc = p.margin >= 0 ? "var(--pos)" : "var(--neg)";
+  $("#inc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">Reinertrag ${big(p.net_income).join(" ")} ·
+    Marge <b style="color:${mc}">${pc(p.margin, 1)}</b></span><span>${esc(p.label)}</span>`;
+}
+function drawIncome() {
+  const wrap = $("#inc-wrap"); if (!wrap) return;
+  const D = INC.data[INC.freq]; if (!D) return;
+  const P = D.periods, n = P.length;
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const m = {l: 44, r: 62, t: 12, b: 28};
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  // Rechte Achse: Beträge (Einheit nach größtem Umsatz)
+  const maxV = Math.max(...P.map(p => p.revenue));
+  const [div, unit] = maxV >= 1e12 ? [1e12, "Bio."] : maxV >= 1e9 ? [1e9, "Mrd."] : [1e6, "Mio."];
+  const minV = Math.min(0, ...P.map(p => p.net_income));
+  const {ticks, step} = niceTicks(minV / div, maxV / div * 1.04, 5);
+  const vLo = Math.min(0, ticks[0]), vHi = ticks[ticks.length - 1] < maxV / div ? ticks[ticks.length - 1] + step : ticks[ticks.length - 1];
+  const grid = [...new Set([...ticks.filter(t => t >= vLo), vHi])];
+  const Yv = v => m.t + (1 - (v / div - vLo) / (vHi - vLo)) * ph;
+  // Linke Achse: Nettomarge, auf dieselben Gitterlinien gelegt
+  const mg = P.map(p => p.margin);
+  let mLo = Math.min(...mg), mHi = Math.max(...mg);
+  const mp = (mHi - mLo) * 0.12 || Math.abs(mHi) * 0.2 || 0.05;
+  mLo -= mp; mHi += mp;
+  const Ym = v => m.t + (1 - (v - mLo) / (mHi - mLo)) * ph;
+  const mAt = y => mLo + (1 - (y - m.t) / ph) * (mHi - mLo);
+  const cw = pw / n, bw = Math.min(34, cw * 0.3), gap = Math.min(10, cw * 0.08);
+  const cx = i => m.l + cw * (i + 0.5);
+  const bar = (x, v, cls) => {   // Balken mit gerundetem Ende, am Nullpunkt verankert
+    const y0 = Yv(0), y1 = Yv(v), h = Math.abs(y0 - y1), r = Math.min(4, h, bw / 2), up = v >= 0;
+    if (h < 0.5) return "";
+    const top = up ? y1 : y0, bot = up ? y0 : y1;
+    const d = up ? `M${x},${bot}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${bot}Z`
+                 : `M${x},${top}V${bot - r}Q${x},${bot} ${x + r},${bot}H${x + bw - r}Q${x + bw},${bot} ${x + bw},${bot - r}V${top}Z`;
+    return `<path d="${d}" fill="var(${cls})"/>`;
+  };
+  const line = P.map((p, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${Ym(p.margin).toFixed(1)}`).join("");
+  const tickV = t => nf(t, step < 1 ? (step < 0.1 ? 2 : 1) : 0);
+  const aria = `Erfolgsrechnung ${INC.freq === "annual" ? "jährlich" : "vierteljährlich"}: ` +
+    P.map(p => `${p.label} Umsatz ${big(p.revenue).join(" ")}, Reinertrag ${big(p.net_income).join(" ")}, Marge ${pc(p.margin, 1)}`).join("; ");
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
+    ${P.map((p, i) => `<g class="col" data-i="${i}"><rect class="bg" x="${(m.l + cw * i + 2).toFixed(1)}" y="${m.t}" width="${(cw - 4).toFixed(1)}" height="${ph}" rx="6" fill="transparent"/></g>`).join("")}
+    <g class="grid">${grid.map(t => `<line x1="${m.l}" x2="${m.l + pw}" y1="${Yv(t * div).toFixed(1)}" y2="${Yv(t * div).toFixed(1)}"/>`).join("")}</g>
+    <g class="axis">
+      ${grid.map(t => { const y = Yv(t * div); return `<text x="${W - 2}" y="${(y + 4).toFixed(1)}" text-anchor="end">${tickV(t)} ${unit}</text>
+        <text x="2" y="${(y + 4).toFixed(1)}">${nf(mAt(y) * 100, mHi - mLo < 0.08 ? 1 : 0)} %</text>`; }).join("")}
+      ${P.map((p, i) => `<text x="${cx(i).toFixed(1)}" y="${H - 7}" text-anchor="middle">${esc(p.label)}</text>`).join("")}
+    </g>
+    ${minV < 0 ? `<line class="zero" x1="${m.l}" x2="${m.l + pw}" y1="${Yv(0).toFixed(1)}" y2="${Yv(0).toFixed(1)}"/>` : ""}
+    ${P.map((p, i) => bar(cx(i) - bw - gap / 2, p.revenue, "--inc-rev") + bar(cx(i) + gap / 2, p.net_income, "--inc-ni")).join("")}
+    <path d="${line}" fill="none" stroke="var(--inc-mar)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${P.map((p, i) => `<circle cx="${cx(i).toFixed(1)}" cy="${Ym(p.margin).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--inc-mar)" stroke-width="2"/>`).join("")}
+    <rect id="inc-hit" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>
+  </svg><div class="chart-tip" id="inc-tip"></div>`;
+  const last = P[n - 1];
+  incHead(last, D);
+  $("#inc-foot").innerHTML = `<div class="legend">
+      <span style="color:var(--inc-rev)"><i class="box"></i><span style="color:var(--text-2)">Umsatz</span></span>
+      <span style="color:var(--inc-ni)"><i class="box"></i><span style="color:var(--text-2)">Reinertrag</span></span>
+      <span style="color:var(--inc-mar)"><i class="mar"></i><span style="color:var(--text-2)">Nettomarge % (linke Achse)</span></span></div>
+    <span>${INC.freq === "annual" ? "Geschäftsjahre" : "Quartale (Monat = Periodenende)"} · Beträge in ${unit} ${esc(D.currency)} · Quelle: Yahoo Finance</span>`;
+  const hit = $("#inc-hit"), tip = $("#inc-tip"), cols = wrap.querySelectorAll(".col");
+  const move = e => {
+    const r = hit.getBoundingClientRect();
+    const i = Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
+    const p = P[i];
+    cols.forEach(c => c.classList.toggle("on", +c.dataset.i === i));
+    tip.innerHTML = `<b>${esc(p.label)}</b>
+      <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}</span>
+      <span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}</span>
+      <span style="display:block">Nettomarge: ${pc(p.margin, 1)}</span>`;
+    tip.style.display = "block";
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(W - tw, cx(i) - tw / 2)) + "px";
+    tip.style.top = Math.max(0, Math.min(Yv(p.revenue), Ym(p.margin)) - tip.offsetHeight - 12) + "px";
+    incHead(p, D);
+  };
+  const leave = () => { tip.style.display = "none"; cols.forEach(c => c.classList.remove("on")); incHead(last, D); };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerdown", move);
+  hit.addEventListener("pointerleave", leave);
+  hit.addEventListener("pointercancel", leave);
+}
+async function loadIncome(freq) {
+  INC.freq = freq;
+  try { localStorage.setItem("ac-inc-freq", freq); } catch (e) {}
+  document.querySelectorAll("#inc-seg button").forEach(b => b.classList.toggle("on", b.dataset.f === freq));
+  const sym = INC.sym;
+  if (!INC.data[freq]) {
+    $("#inc-wrap").innerHTML = `<div class="chart-msg">Lade Geschäftszahlen …</div>`;
+    try {
+      const r = await fetch(`/api/income?q=${encodeURIComponent(sym)}&freq=${freq}`);
+      if (r.status === 401) return toLogin();
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      if (sym !== INC.sym) return;
+      INC.data[freq] = d;
+    } catch (e) {
+      if (sym === INC.sym && INC.freq === freq) {
+        $("#inc-wrap").innerHTML = `<div class="chart-msg">Keine Geschäftszahlen verfügbar.</div>`;
+        $("#inc-val").textContent = "–"; $("#inc-sub").innerHTML = ""; $("#inc-foot").innerHTML = "";
+      }
+      return;
+    }
+  }
+  if (INC.freq === freq && sym === INC.sym) drawIncome();
+}
+function initIncome(sym) {
+  INC.sym = sym; INC.data = {};
+  document.querySelectorAll("#inc-seg button").forEach(b => b.onclick = () => loadIncome(b.dataset.f));
+  INC.ro?.disconnect();
+  let last = 0;
+  INC.ro = new ResizeObserver(() => { const w = $("#inc-wrap")?.clientWidth; if (w && w !== last) { last = w; drawIncome(); } });
+  INC.ro.observe($("#inc-wrap"));
+  loadIncome(INC.freq);
+}
+
 /* Termine */
 const EV_DOT = {earnings: "earnings", exdiv: "exdiv", pay: "pay", agm: "agm"};
 function evWhen(days) {
@@ -1734,6 +1866,19 @@ function render(d) {
     <div class="chart-foot" id="ch-foot"></div>
   </section>
 
+  ${crypto ? "" : `<section class="card chart-card" id="erfolg" aria-label="Erfolgsrechnung">
+    <div class="chart-head">
+      <div><div class="eyebrow">Erfolgsrechnung</div>
+        <div class="chart-val num" id="inc-val">–</div>
+        <div class="chart-chg num" id="inc-sub"></div></div>
+      <div class="chart-ctrl">
+        <div class="seg" id="inc-seg"><button data-f="annual">Jährlich</button><button data-f="quarterly">Vierteljährlich</button></div>
+      </div>
+    </div>
+    <div class="chart-wrap inc-wrap" id="inc-wrap"><div class="chart-msg">Lade Geschäftszahlen …</div></div>
+    <div class="chart-foot" id="inc-foot"></div>
+  </section>`}
+
   ${eventsCard(d)}
   ${historyCard(d)}
 
@@ -1861,6 +2006,7 @@ function render(d) {
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
+  if (!crypto) initIncome(d.symbol);
   document.querySelectorAll("table.peers tr.peer").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
   if ((d.history || []).length >= 2) {
     drawHistory(d);

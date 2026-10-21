@@ -2049,6 +2049,51 @@ def chart_data(symbol, rng):
     return out
 
 
+INCOME_CACHE = {}
+MONTHS_DE_SHORT = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
+
+def income_data(symbol, freq):
+    """Erfolgsrechnung (Umsatz, Reinertrag, Nettomarge) je Geschäftsjahr oder Quartal, in Berichtswährung."""
+    symbol = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
+        raise ValueError("Ungültige Anfrage")
+    key = (symbol, freq)
+    hit = INCOME_CACHE.get(key)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    t = yf.Ticker(symbol)
+    df = safe(lambda: t.income_stmt if freq == "annual" else t.quarterly_income_stmt)
+    if df is None or getattr(df, "empty", True):
+        raise ValueError("Keine Geschäftszahlen verfügbar")
+
+    def row(*names):
+        for nm in names:
+            if nm in df.index:
+                return df.loc[nm]
+        return None
+    rev = row("Total Revenue", "Operating Revenue")
+    ni = row("Net Income", "Net Income Common Stockholders", "Net Income From Continuing Operation Net Minority Interest")
+    if rev is None or ni is None:
+        raise ValueError("Keine Geschäftszahlen verfügbar")
+    periods = []
+    for col in sorted(df.columns):
+        r, n = num(rev.get(col)), num(ni.get(col))
+        if r is None or n is None or r <= 0:
+            continue  # Yahoo hängt oft eine leere Spalte an
+        end = col.date() if hasattr(col, "date") else col
+        # Quartale nach Monat des Periodenendes benennen (Geschäftsquartale weichen oft vom Kalender ab)
+        label = str(end.year) if freq == "annual" else f"{MONTHS_DE_SHORT[end.month - 1]} {str(end.year)[2:]}"
+        periods.append({"label": label, "end": end.isoformat(), "revenue": r, "net_income": n, "margin": n / r})
+    periods = periods[-5:] if freq == "annual" else periods[-6:]
+    if not periods:
+        raise ValueError("Keine Geschäftszahlen verfügbar")
+    out = {"symbol": symbol, "freq": freq, "periods": periods,
+           "currency": financial_currency(symbol) or safe(lambda: t.fast_info.currency) or ""}
+    INCOME_CACHE[key] = (time.time(), out)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Kryptowährungen
 # ---------------------------------------------------------------------------
@@ -3577,6 +3622,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/chart":
             try:
                 return self.send(200, json.dumps(json_safe(chart_data(q, (qs.get("range") or ["1y"])[0]))),
+                                 "application/json; charset=utf-8")
+            except ValueError as e:
+                return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+        if u.path == "/api/income":
+            try:
+                return self.send(200, json.dumps(json_safe(income_data(q, (qs.get("freq") or ["annual"])[0]))),
                                  "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
