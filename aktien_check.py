@@ -393,6 +393,11 @@ def search_symbols(q, include_crypto=False):
             nm = re.sub(r"\s+(USD|EUR)$", "", (it.get("shortname") or it.get("longname") or base).strip())
             out.append({"symbol": f"{base}-EUR", "name": nm, "exchange": "Krypto", "crypto": True})
             continue
+        if it.get("quoteType") == "ETF" and it.get("symbol"):
+            out.append({"symbol": it["symbol"], "etf": True,
+                        "name": (it.get("longname") or it.get("shortname") or it["symbol"]).strip(),
+                        "exchange": it.get("exchDisp") or it.get("exchange", ""), "sector": "ETF", "industry": ""})
+            continue
         if it.get("quoteType") == "EQUITY" and it.get("symbol"):
             out.append({"symbol": it["symbol"],
                         "name": (it.get("longname") or it.get("shortname") or it["symbol"]).strip(),
@@ -482,7 +487,7 @@ def fill_info(t, info, hint=None):
     put("sector", hint.get("sector") or None)
     put("industry", hint.get("industry") or None)
     put("fullExchangeName", hint.get("exchange") or safe(lambda: fi.exchange))
-    put("quoteType", "EQUITY")
+    put("quoteType", "ETF" if hint.get("etf") else "EQUITY")
 
     inc, qinc = safe(lambda: t.income_stmt), safe(lambda: t.quarterly_income_stmt)
     cf, qcf = safe(lambda: t.cashflow), safe(lambda: t.quarterly_cashflow)
@@ -560,7 +565,8 @@ def fill_info(t, info, hint=None):
 
 def resolve(query):
     q = query.strip()
-    if re.fullmatch(r"[A-Za-z0-9.\-^=]{1,15}", q):
+    is_isin = bool(re.fullmatch(r"[A-Za-z]{2}[A-Za-z0-9]{9}\d", q))  # ISIN -> über die Suche zur Börsennotierung
+    if re.fullmatch(r"[A-Za-z0-9.\-^=]{1,15}", q) and not is_isin:
         sym = q.upper()
         t = yf.Ticker(sym)
         info = safe(lambda: t.info, {}) or {}
@@ -568,7 +574,7 @@ def resolve(query):
         hint = next((a for a in found if a["symbol"] == sym), None)
         if current_price(info) or hint:
             info = fill_info(t, info, hint)
-        if current_price(info) and info.get("quoteType", "EQUITY") == "EQUITY":
+        if current_price(info) and info.get("quoteType", "EQUITY") in ("EQUITY", "ETF"):
             return sym, t, info, [a for a in found if a["symbol"] != sym][:6]
     found = search_symbols(q)
     if not found:
@@ -3134,6 +3140,299 @@ def analyze_crypto(cr):
 
 
 # ---------------------------------------------------------------------------
+# ETFs: eigenes Schema (Kosten & Struktur, Bewertung der Bestände, Rendite, Risiko & Streuung)
+# ---------------------------------------------------------------------------
+ETF_WEIGHTS = {"valuation": .20, "quality": .25, "growth": .15, "risk": .15, "dividend": .05, "chart": .15,
+               "sentiment": .05, "macro": 0.0}
+SECTOR_DE = {"technology": "Technologie", "financial_services": "Finanzen", "healthcare": "Gesundheit",
+             "industrials": "Industrie", "consumer_cyclical": "Zyklischer Konsum", "consumer_defensive": "Basiskonsum",
+             "communication_services": "Kommunikation", "energy": "Energie", "basic_materials": "Grundstoffe",
+             "utilities": "Versorger", "realestate": "Immobilien"}
+
+
+def etf_short_name(name):
+    """„iShares Core MSCI World UCITS ETF USD (Acc)“ -> „iShares Core MSCI World“ (für die News-Suche)."""
+    n = re.split(r"\s+(?:UCITS|ETF)\b", name or "", maxsplit=1)[0]
+    return n.strip(" -–") or name
+
+
+def etf_price_metrics(m, hist):
+    c = hist["Close"].dropna()
+    c = c[c > 0]
+    last = float(c.iloc[-1])
+    m["last"] = last
+    m["sma50"] = float(c.rolling(50).mean().iloc[-1]) if len(c) >= 50 else None
+    m["sma200"] = float(c.rolling(200).mean().iloc[-1]) if len(c) >= 200 else None
+    m["sma200_3m"] = float(c.rolling(200).mean().iloc[-64]) if len(c) >= 264 else None
+    m["price_3m_ago"] = float(c.iloc[-64]) if len(c) > 64 else None
+
+    def perf(n):
+        return last / float(c.iloc[-n - 1]) - 1 if len(c) > n else None
+    m["perf_1m"], m["perf_3m"], m["perf_6m"], m["perf_1y"] = perf(21), perf(63), perf(126), perf(252)
+    years = (c.index[-1] - c.index[0]).days / 365.25
+    m["data_years"] = years
+
+    def cagr(y):
+        n = int(round(252 * y))
+        return (last / float(c.iloc[-n - 1])) ** (1 / y) - 1 if len(c) > n else None
+    m["cagr3"], m["cagr5"], m["cagr10"] = cagr(3), cagr(5), cagr(10)
+    m["cagr_all"] = (last / float(c.iloc[0])) ** (1 / years) - 1 if years >= 1 else None
+    delta = c.diff()
+    up = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    dn = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    m["rsi"] = float(100 - 100 / (1 + up.iloc[-1] / dn.iloc[-1])) if dn.iloc[-1] else 100.0
+    y = c.iloc[-252:]
+    m["vol"] = float(y.pct_change().dropna().std() * math.sqrt(252))
+    m["hi52"], m["lo52"] = float(y.max()), float(y.min())
+    m["max_dd"] = float((y / y.cummax() - 1).min())
+    y5 = c.iloc[-252 * 5:]
+    m["max_dd_5y"] = float((y5 / y5.cummax() - 1).min())
+
+
+def etf_data(m, t, info):
+    """Fondsdaten: Kosten, Volumen, Zusammensetzung, Bewertung der Bestände (Yahoo; auf Servern teils gesperrt)."""
+    fd = safe(lambda: t.funds_data)
+    ops = safe(lambda: fd.fund_operations) if fd is not None else None
+    ter = num(info.get("netExpenseRatio"))
+    m["ter"] = ter / 100 if ter is not None else None
+    if m["ter"] is None and ops is not None and m["symbol"] in ops:
+        m["ter"] = num(ops[m["symbol"]].get("Annual Report Expense Ratio"))
+    m["aum"] = num(info.get("totalAssets"))
+    m["family"] = info.get("fundFamily") or (safe(lambda: fd.fund_overview.get("family")) if fd is not None else None) or ""
+    m["category"] = info.get("category") or (safe(lambda: fd.fund_overview.get("categoryName")) if fd is not None else None) or ""
+    inc = num(info.get("fundInceptionDate"))
+    m["inception"] = datetime.utcfromtimestamp(inc).strftime("%Y-%m-%d") if inc else None
+    top = safe(lambda: fd.top_holdings) if fd is not None else None
+    m["top"] = []
+    if top is not None and not top.empty:
+        for sym_, r in top.iterrows():
+            w = num(r.get("Holding Percent"))
+            if w is not None:
+                m["top"].append({"symbol": str(sym_), "name": str(r.get("Name") or sym_), "weight": w})
+    m["top10"] = sum(x["weight"] for x in m["top"][:10]) if m["top"] else None
+    sw = safe(lambda: fd.sector_weightings) if fd is not None else None
+    m["sectors"] = sorted(({"name": SECTOR_DE.get(k, k), "weight": num(v)} for k, v in (sw or {}).items()
+                           if num(v)), key=lambda x: -x["weight"])
+    m["max_sector"] = m["sectors"][0] if m["sectors"] else None
+    ac = safe(lambda: fd.asset_classes) if fd is not None else None
+    m["assets"] = {"Aktien": num((ac or {}).get("stockPosition")), "Anleihen": num((ac or {}).get("bondPosition")),
+                   "Cash": num((ac or {}).get("cashPosition")), "Sonstiges": num((ac or {}).get("otherPosition"))}
+    m["bond_etf"] = (m["assets"]["Anleihen"] or 0) > 0.5
+    eq = safe(lambda: fd.equity_holdings) if fd is not None else None
+    m["pe"] = m["pb"] = None
+    if eq is not None and m["symbol"] in eq:
+        ey, by = num(eq[m["symbol"]].get("Price/Earnings")), num(eq[m["symbol"]].get("Price/Book"))
+        # Yahoo liefert hier den Kehrwert (Gewinnrendite): 0,045 -> KGV 22
+        m["pe"] = 1 / ey if ey and 0 < ey < 1 else (ey if ey and ey >= 1 else None)
+        m["pb"] = 1 / by if by and 0 < by < 1 else (by if by and by >= 1 else None)
+    name = (m["name"] or "").lower()
+    if re.search(r"\bacc\b|accumulat|thesaur|\(c\)", name):
+        m["dist"] = "thesaurierend"
+    elif re.search(r"\bdist\b|distribut|aussch|\(d\)", name):
+        m["dist"] = "ausschüttend"
+    else:
+        m["dist"] = None
+
+
+def e_valuation(m):
+    if m["bond_etf"]:
+        return {"score": None, "adjective": "fair bewertet",
+                "reasons": ["Anleihen-ETF: Bewertung über KGV/KBV nicht sinnvoll – zählt nicht"]}
+    parts, why = [], []
+    if m["pe"]:
+        parts.append((clamp((1 - m["pe"] / 20) * 1.5), 1.0))
+        why.append(f"KGV der enthaltenen Aktien {fnum(m['pe'])} (Weltmarkt langfristig ~16–20)")
+    if m["pb"]:
+        parts.append((clamp(1 - m["pb"] / 3.0), 0.5))
+        why.append(f"Kurs-Buchwert der Bestände {fnum(m['pb'], 2)}")
+    if m.get("sma200") and m.get("last"):
+        d200 = m["last"] / m["sma200"] - 1
+        parts.append((clamp(-d200 / 0.15) * 0.5, 0.4))
+        why.append(f"Abstand zur 200-Tage-Linie {pct(d200)} (stark darüber = kurzfristig heißgelaufen)")
+    v = wavg(parts)
+    if v is None:
+        return {"score": None, "adjective": "fair bewertet", "reasons": why + ["Keine Bewertungsdaten der Bestände verfügbar"]}
+    adj = ("günstig" if v >= 0.45 else "preiswert" if v >= 0.3 else "attraktiv bewertet" if v >= 0.15 else
+           "angemessen bewertet" if v >= 0.05 else "fair bewertet" if v >= -0.05 else "marktgerecht" if v >= -0.15 else
+           "ambitioniert bewertet" if v >= -0.3 else "teuer" if v >= -0.45 else "überbewertet")
+    return {"score": v, "adjective": adj, "reasons": why}
+
+
+def e_quality(m):
+    parts, why = [], []
+    if m["ter"] is not None:
+        parts.append((clamp((0.0035 - m["ter"]) / 0.0025), 1.2))
+        why.append(f"Laufende Kosten (TER) {pct(m['ter'], 2)} p. a. (unter 0,2 % günstig, über 0,5 % teuer)")
+    else:
+        why.append("TER nicht verfügbar – bitte beim Anbieter prüfen")
+    if m["aum"]:
+        a_ = m["aum"]
+        parts.append((-0.8 if a_ < 1e8 else -0.2 if a_ < 5e8 else 0.2 if a_ < 1e9 else 0.6 if a_ < 1e10 else 0.9, 0.8))
+        why.append(f"Fondsvolumen {money(a_, 'USD')}" + (" – unter 100 Mio.: erhöhtes Schließungsrisiko" if a_ < 1e8 else ""))
+    age = None
+    if m.get("inception"):
+        age = (datetime.now() - datetime.strptime(m["inception"], "%Y-%m-%d")).days / 365.25
+    elif m.get("data_years"):
+        age = m["data_years"]
+    if age is not None:
+        parts.append((-0.3 if age < 3 else 0.0 if age < 5 else 0.3, 0.4))
+        why.append(f"Alter {fnum(age, 1)} Jahre" + (" (kurze Historie)" if age < 3 else ""))
+    if m["family"]:
+        why.append(f"Anbieter: {m['family']}")
+    q = wavg(parts)
+    if q is None:
+        return {"score": None, "adjective": "solide", "reasons": why}
+    return {"score": q, "adjective": "robust" if q >= 0.5 else "solide" if q >= 0.2 else "stabil" if q >= -0.1 else "schwach",
+            "reasons": why}
+
+
+def e_growth(m):
+    g = next((x for x in (m.get("cagr5"), m.get("cagr3"), m.get("cagr_all"), m.get("perf_1y")) if x is not None), None)
+    why = [f"Rendite p. a. (inkl. Ausschüttungen): 3 J. {pct(m.get('cagr3'))} · 5 J. {pct(m.get('cagr5'))} · "
+           f"10 J. {pct(m.get('cagr10'))}", f"Letzte 12 Monate {pct(m.get('perf_1y'))}"]
+    if g is None:
+        return {"score": None, "adjective": "reif", "reasons": why + ["Zu kurze Kurshistorie"]}
+    adj = ("wachstumsstark" if g >= 0.12 else "dynamisch" if g >= 0.08 else "reif" if g >= 0.04 else
+           "stagnierend" if g >= 0 else "rückläufig")
+    return {"score": clamp((g - 0.07) / 0.07), "adjective": adj, "reasons": why}  # ~7 % p. a. = langfristiger Aktienschnitt
+
+
+def e_risk(m):
+    parts, why = [], []
+    if m.get("vol") is not None:
+        parts.append((clamp((0.22 - m["vol"]) / 0.10), 1.0))
+        why.append(f"Volatilität 1 J. {pct(m['vol'])} (breiter Weltmarkt ~15 %)")
+    if m.get("max_dd_5y") is not None:
+        parts.append((clamp((0.35 + m["max_dd_5y"]) / 0.20), 0.6))
+        why.append(f"Größter Rückgang in 5 J. {pct(m['max_dd_5y'])}")
+    if m.get("top10") is not None:
+        parts.append((clamp((0.45 - m["top10"]) / 0.25), 0.8))
+        why.append(f"Top-10-Positionen = {pct(m['top10'])} des Fonds (unter 25 % breit gestreut, über 50 % konzentriert)")
+    if m.get("max_sector"):
+        ms = m["max_sector"]
+        parts.append((clamp((0.45 - ms["weight"]) / 0.20), 0.5))
+        why.append(f"Größte Branche: {ms['name']} {pct(ms['weight'])}")
+    r = wavg(parts)
+    if r is None:
+        return {"score": None, "adjective": "berechenbar", "reasons": why}
+    vol = m.get("vol") or 0.2
+    adj = ("defensiv" if r >= 0.5 and vol < 0.12 else "schwankungsarm" if r >= 0.3 and vol < 0.16 else
+           "berechenbar" if r >= 0.0 else "volatil" if r >= -0.4 else "riskant")
+    return {"score": r, "adjective": adj, "reasons": why}
+
+
+def e_dividend(m):
+    y = m.get("div_yield") or 0
+    if m["dist"] == "thesaurierend" or (m["dist"] is None and not y):
+        return {"score": None, "adjective": "nicht anwendbar (thesaurierend)",
+                "reasons": ["Thesaurierender ETF: Erträge werden automatisch wieder angelegt (in der Rendite enthalten)"]}
+    why = [f"Ausschüttungsrendite (12 Monate) {pct(y, 2)}"]
+    if y >= 0.03:
+        return {"score": 0.5, "adjective": "ausschüttungsfreudig", "reasons": why}
+    if y >= 0.015:
+        return {"score": 0.3, "adjective": "verlässlich", "reasons": why}
+    return {"score": 0.0, "adjective": "dividendenschwach", "reasons": why}
+
+
+def analyze_etf(symbol, t, info, alternatives):
+    name = info.get("longName") or info.get("shortName") or symbol
+    m = {"symbol": symbol, "name": name, "currency": info.get("currency") or "", "price": current_price(info),
+         "rec_mean": None, "n_analysts": 0, "rec_dist": None, "short_float": None, "mcap": None}
+    short = etf_short_name(name)
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fh = ex.submit(lambda: t.history(period="max", auto_adjust=True))
+        fd = ex.submit(etf_data, m, t, info)
+        fnews = ex.submit(collect_news, symbol, short, "", (), ("ETF",))
+        fmac = ex.submit(gather_macro, m["currency"])
+        hist, news, mac = safe(fh.result), fnews.result(), fmac.result()
+        safe(fd.result)
+    if hist is not None and not hist.empty and len(hist) > 30:
+        hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]
+        etf_price_metrics(m, hist)
+        m["data_since"] = hist.index[0].strftime("%d.%m.%Y")
+        divs = safe(lambda: t.dividends)
+        if divs is not None and len(divs):
+            d_ = divs.copy()
+            d_.index = d_.index.tz_localize(None) if d_.index.tz is not None else d_.index
+            ttm_ = float(d_[d_.index >= datetime.now() - timedelta(days=365)].sum())
+            raw_last = safe(lambda: float(t.history(period="5d", auto_adjust=False)["Close"].dropna().iloc[-1]))
+            m["div_yield"] = ttm_ / raw_last if raw_last and ttm_ > 0 else 0.0
+            if m["dist"] is None:
+                m["dist"] = "ausschüttend" if ttm_ > 0 else "thesaurierend"
+    else:
+        for k in ("last", "sma50", "sma200", "sma200_3m", "price_3m_ago", "perf_1m", "perf_3m", "perf_6m", "perf_1y",
+                  "rsi", "vol", "hi52", "lo52", "max_dd", "max_dd_5y", "cagr3", "cagr5", "cagr10", "cagr_all", "data_years"):
+            m[k] = None
+    m["price"] = m["price"] or m.get("last")
+    for k in ("ter", "aum", "family", "category", "inception", "top", "top10", "sectors", "max_sector", "assets", "bond_etf",
+              "pe", "pb", "dist"):
+        m.setdefault(k, None if k not in ("top", "sectors") else [])
+    m["assets"] = m["assets"] or {}
+
+    cats = {"valuation": e_valuation(m), "quality": e_quality(m), "growth": e_growth(m), "risk": e_risk(m),
+            "dividend": e_dividend(m), "chart": score_chart(m), "sentiment": score_sentiment(m, news, None)}
+    total = (wavg([(cats[k]["score"], w) for k, w in ETF_WEIGHTS.items() if w and k in cats]) or 0.0) * 100
+    notes = ["ETF-Modell: Bewertet werden Kosten und Struktur, die Bewertung der enthaltenen Aktien, die bisherige Rendite, "
+             "Risiko und Streuung sowie der Kurstrend. Eine Kaufempfehlung bezieht sich auf den Zeitpunkt, "
+             "nicht auf die Eignung als langfristiger Sparplan-Baustein."]
+    if m["ter"] is None and not m["top"]:
+        notes.append("Fondsdaten (TER, Zusammensetzung) waren nicht abrufbar – die Einschätzung stützt sich vor allem auf den Kursverlauf.")
+    label, group = map_rating(total)
+    s_adj = summary_adj(total, cats)
+    have = sum(1 for x in (m["ter"], m["aum"], m["pe"], m["top10"], m.get("cagr5"), m.get("vol")) if x is not None)
+    confidence = "hoch" if have >= 5 else "mittel" if have >= 3 else "niedrig"
+    titles = {"valuation": "Bewertung der enthaltenen Aktien", "quality": "Kosten & Struktur",
+              "growth": "Rendite (Wertentwicklung)", "risk": "Risiko und Streuung", "dividend": "Ausschüttung",
+              "chart": "Kursentwicklung und Charttechnik", "sentiment": "Stimmung und Wahrnehmung"}
+    out_cats = [{"key": k, "title": t_, "adjective": cats[k]["adjective"], "options": ADJ[k],
+                 "score": None if cats[k]["score"] is None else round(cats[k]["score"], 3),
+                 "weight": ETF_WEIGHTS[k] if not (k == "dividend" and cats[k]["score"] is None) else 0.0,
+                 "reasons": cats[k]["reasons"]} for k, t_ in titles.items()]
+    c = m["currency"]
+    fundamentals = [
+        {"title": "Kosten & Struktur", "rows": [
+            ["Laufende Kosten (TER)", pct(m["ter"], 2) if m["ter"] is not None else "–", "pro Jahr, im Kurs enthalten"],
+            ["Fondsvolumen", money(m["aum"], "USD"), "unter 100 Mio. = Schließungsrisiko"],
+            ["Anbieter", m["family"] or "–", ""],
+            ["Auflage", datetime.strptime(m["inception"], "%Y-%m-%d").strftime("%d.%m.%Y") if m["inception"] else "–",
+             f"Kursdaten ab {m.get('data_since', '–')}"],
+            ["Ertragsverwendung", (m["dist"] or "–").capitalize(), ""]]},
+        {"title": "Rendite (inkl. wieder angelegter Ausschüttungen)", "rows": [
+            ["12 Monate", pct(m.get("perf_1y")), ""], ["3 Jahre p. a.", pct(m.get("cagr3")), ""],
+            ["5 Jahre p. a.", pct(m.get("cagr5")), ""], ["10 Jahre p. a.", pct(m.get("cagr10")), ""]]},
+        {"title": "Risiko & Streuung", "rows": [
+            ["Volatilität 1 Jahr", pct(m.get("vol")), "breiter Weltmarkt ca. 15 %"],
+            ["Größter Rückgang 5 Jahre", pct(m.get("max_dd_5y")), ""],
+            ["Anteil Top-10-Positionen", pct(m.get("top10")), "unter 25 % = breit gestreut"],
+            ["Größte Branche", f"{m['max_sector']['name']} {pct(m['max_sector']['weight'])}" if m.get("max_sector") else "–", ""]]},
+        {"title": "Bewertung der enthaltenen Aktien", "rows": [
+            ["KGV", fnum(m["pe"]), "Weltmarkt langfristig ~16–20"], ["Kurs-Buchwert", fnum(m["pb"], 2), ""],
+            ["Anlageklassen", " · ".join(f"{k} {pct(v, 0)}" for k, v in m["assets"].items() if v) or "–", ""]]},
+        {"title": "Umfeld", "rows": [
+            ["Handelswährung", c or "–", f"{mac['fx_pair']}: 12M {pct(mac['fx_chg'])} ggü. EUR" if mac.get("fx_pair") else "Euro"],
+            ["US-10J-Rendite", "–" if mac["rf"] is None else fnum(mac["rf"], 2) + " %", ""]]},
+    ]
+    return {
+        "asset": "etf", "symbol": symbol, "name": name, "exchange": info.get("fullExchangeName") or info.get("exchange") or "",
+        "currency": c, "price": m["price"], "sector": "ETF", "industry": m["category"] or (m["family"] or ""),
+        "country": "", "website": "", "business": "", "alternatives": alternatives,
+        "rating": {"label": label, "group": group, "score": round(total, 1),
+                   "scale": [{"label": l_, "group": g_, "min": thr} for thr, l_, g_ in RATING_SCALE]},
+        "summary": {"adjective": s_adj, "options": ADJ["summary"]},
+        "categories": out_cats,
+        "macro": {"score": 0.0, "weight": 0.0, "reasons": ["Makro fließt bei ETFs über Rendite und Risiko ein"]},
+        "fundamentals": fundamentals,
+        "facts": {k: m.get(k) for k in ("ter", "aum", "pe", "perf_1y", "cagr5", "vol", "dist", "top10", "hi52", "lo52")},
+        "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"]},
+        "news": news, "notes": notes, "confidence": confidence, "events": [],
+        "competitors": {"peers": [], "source": "", "industry": ""}, "profile": None,
+        "model": {"key": "etf", "label": "ETF-Modell", "text": notes[0]},
+        "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        "sources": ["Yahoo Finance (Kurse, Fondsdaten)", "Google News"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Unternehmensprofil („Über“): Yahoo + Wikidata (ISIN, Gründung, CEO, Sitz) + OpenFIGI + Finnhub (Börsengang)
 # ---------------------------------------------------------------------------
 PROFILE_CACHE = {}
@@ -3292,6 +3591,10 @@ def analyze(query):
         CACHE[key] = (time.time(), result)
         return result
     symbol, t, info, alternatives = resolve(query)
+    if info.get("quoteType") == "ETF":
+        result = analyze_etf(symbol, t, info, alternatives)
+        CACHE[key] = (time.time(), result)
+        return result
     with ThreadPoolExecutor(max_workers=4) as ex:
         fm = ex.submit(gather, symbol, t, info)
         fmac = ex.submit(gather_macro, info.get("currency") or "")
@@ -3949,7 +4252,144 @@ def alert_loop():
             run_alert_checks()
         except Exception:
             LOG.exception("[Alarm] Prüfung abgebrochen")
+        safe(send_due_reports)
         time.sleep(CHECK_INTERVAL)
+
+
+# ---------------------------------------------------------------------------
+# Wochenbericht: jeden Sonntag ab 18 Uhr (deutsche Zeit) eine Zusammenfassung der Watchlist per Push
+# ---------------------------------------------------------------------------
+REPORT_WEEKDAY, REPORT_HOUR = 6, 18
+REPORT_MAX = 30          # höchstens so viele Watchlist-Werte neu bewerten
+REPORT_LOCK = threading.Lock()
+WEEKDAY_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def berlin_now():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
+    except Exception:
+        return datetime.utcnow() + timedelta(hours=1)
+
+
+def report_settings(sp):
+    return sp.setdefault("report", {"enabled": True, "last": None})
+
+
+def week_change(symbol):
+    h = safe(lambda: yf.Ticker(symbol).history(period="8d", interval="1d", auto_adjust=False))
+    if h is None or h.empty:
+        return None
+    c = h["Close"].dropna()
+    c = c[c.index.tz_localize(None) >= (datetime.now() - timedelta(days=7.5))] if c.index.tz is not None else c.iloc[-6:]
+    return float(c.iloc[-1] / c.iloc[0] - 1) if len(c) >= 2 else None
+
+
+def build_weekly_report(user):
+    """Bewertet die Watchlist neu und baut die Push-Nachricht (Titel, Text)."""
+    sp = user_space(user)
+    items = list(sp.get("watchlist") or [])[:REPORT_MAX]
+    if not items:
+        return None
+    rows = []
+    for it in items:
+        sym = it["symbol"]
+        with STORE.lock:
+            pts = list((sp.get("history") or {}).get(sym) or [])
+        today = datetime.now().strftime("%Y-%m-%d")
+        prev = next((p_[2] for p_ in reversed(pts) if p_[0] != today), None) or it.get("label")
+        res = safe(lambda: analyze(sym))
+        if not res:
+            rows.append({"symbol": sym, "name": it.get("name") or sym, "error": True})
+            continue
+        safe(lambda: record_history(res, user))
+        nm_ = etf_short_name(res["name"]) if res.get("asset") == "etf" else clean_company_name(res["name"])
+        rows.append({"symbol": sym, "name": nm_ or sym, "label": res["rating"]["label"],
+                     "group": res["rating"]["group"], "score": res["rating"]["score"], "prev": prev,
+                     "chg": week_change(res["symbol"]), "price": res.get("price"), "currency": res.get("currency", ""),
+                     "events": [e for e in res.get("events") or [] if 0 <= (e.get("days") if e.get("days") is not None else 99) <= 7]})
+        with STORE.lock:  # Watchlist-Eintrag aktualisieren, damit die App den neuen Stand zeigt
+            for w in sp.get("watchlist") or []:
+                if w["symbol"] == sym:
+                    w.update({"label": res["rating"]["label"], "group": res["rating"]["group"],
+                              "score": res["rating"]["score"], "price": res.get("price"),
+                              "summary": res["summary"]["adjective"], "updated": datetime.now().isoformat(timespec="seconds")})
+            STORE.dirty = True
+    ok = [r for r in rows if not r.get("error")]
+    chg = [r for r in ok if r["chg"] is not None]
+    lines = []
+    avg = sum(r["chg"] for r in chg) / len(chg) if chg else None
+    lines.append(f"{len(ok)} Werte" + (f" · Ø diese Woche {'+' if avg >= 0 else ''}{fnum(avg * 100, 1)} %" if avg is not None else ""))
+    groups = {g: sum(1 for r in ok if r["group"] == g) for g in ("Kaufen", "Halten", "Verkaufen")}
+    lines.append(f"Kaufen {groups['Kaufen']} · Halten {groups['Halten']} · Verkaufen {groups['Verkaufen']}")
+    changed = [r for r in ok if r["prev"] and r["prev"] != r["label"]]
+    if changed:
+        lines += ["", "Empfehlung geändert:"] + [f"• {r['name']}: {r['prev']} → {r['label']}" for r in changed[:8]]
+    if chg:
+        srt = sorted(chg, key=lambda r: r["chg"], reverse=True)
+        fmt = lambda r: f"{r['name']} {'+' if r['chg'] >= 0 else ''}{fnum(r['chg'] * 100, 1)} %"
+        winners = [r for r in srt if r["chg"] > 0][:3]
+        lines.append("")
+        if winners:
+            lines.append("Beste der Woche: " + " · ".join(fmt(r) for r in winners))
+        losers = [r for r in srt[::-1] if r["chg"] < 0][:3]
+        if losers:
+            lines.append("Schwächste: " + " · ".join(fmt(r) for r in losers))
+    ev = sorted(((e["date"], r["name"], e["label"], e.get("estimated")) for r in ok for e in r["events"]), key=lambda x: x[0])
+    if ev:
+        lines += ["", "Termine nächste Woche:"]
+        for d, nm, lab, est in ev[:8]:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            lines.append(f"• {WEEKDAY_DE[dt.weekday()]} {dt.strftime('%d.%m.')} {nm}: {lab}{' (geschätzt)' if est else ''}")
+    bad = [r for r in rows if r.get("error")]
+    if bad:
+        lines += ["", f"Nicht bewertbar: {', '.join(r['name'] for r in bad[:5])}"]
+    if len(sp.get("watchlist") or []) > REPORT_MAX:
+        lines.append(f"(Nur die ersten {REPORT_MAX} Werte der Watchlist)")
+    msg = "\n".join(lines)
+    return f"📊 Wochenbericht {datetime.now().strftime('%d.%m.%Y')}", msg[:3900]
+
+
+def send_weekly_report(user, manual=False):
+    if not REPORT_LOCK.acquire(blocking=manual):
+        return False
+    try:
+        rep_ = build_weekly_report(user)
+        sp = user_space(user)
+        if not rep_:
+            if manual:
+                ntfy_send("📊 Wochenbericht", "Deine Watchlist ist leer – füge Aktien hinzu, dann erhältst du sonntags eine Zusammenfassung.",
+                          topic=sp["topic"])
+            return False
+        ntfy_send(rep_[0], rep_[1], tags=["bar_chart"], priority=3, topic=sp["topic"])
+        LOG.info("[Bericht] Wochenbericht an %s gesendet (%s)", user, "manuell" if manual else "planmäßig")
+        return True
+    finally:
+        REPORT_LOCK.release()
+
+
+def send_due_reports():
+    now = berlin_now()
+    if now.weekday() != REPORT_WEEKDAY or now.hour < REPORT_HOUR:
+        return
+    today = now.strftime("%Y-%m-%d")
+    data = STORE.load()
+    with STORE.lock:
+        due = [u_ for u_, sp in (data.get("u") or {}).items()
+               if report_settings(sp).get("enabled", True) and report_settings(sp).get("last") != today
+               and sp.get("watchlist")]
+        for u_ in due:  # vorab markieren -> kein Doppelversand bei parallelen Prüfungen
+            data["u"][u_]["report"]["last"] = today
+        if due:
+            STORE.dirty = True
+    for u_ in due:
+        try:
+            send_weekly_report(u_)
+        except Exception:
+            LOG.exception("[Bericht] Versand an %s fehlgeschlagen", u_)
+    if due:
+        safe(STORE.save)
 
 
 def alerts_payload(user, host_url=""):
@@ -3960,7 +4400,8 @@ def alerts_payload(user, host_url=""):
             "storage": STORE.backend, "persistent": STORE.persistent, "error": STORE.error,
             "encrypted": STORE.encrypted,
             "hosted": "RENDER" in os.environ,
-            "cron_url": f"{base}/api/cron?key={cron_key()}" if app_password() else ""}
+            "cron_url": f"{base}/api/cron?key={cron_key()}" if app_password() else "",
+            "report": dict(report_settings(sp))}
 
 
 def save_alert(body, user):
@@ -4231,6 +4672,15 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
                     self.admin_action(body, user)
                     return self.send_json(self.admin_list())
+                if u.path == "/api/report":
+                    with STORE.lock:
+                        report_settings(user_space(user))["enabled"] = bool(body.get("enabled"))
+                        STORE.dirty = True
+                    save_async()
+                    return self.send_json(alerts_payload(user, self.host_url()))
+                if u.path == "/api/report/send":
+                    threading.Thread(target=lambda: safe(lambda: send_weekly_report(user, manual=True)), daemon=True).start()
+                    return self.send_json({"ok": True})
                 if not u.path.startswith("/api/alerts"):
                     return self.send(404, json.dumps({"error": "unbekannt"}), "application/json")
                 if u.path == "/api/alerts":
@@ -4358,7 +4808,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/cron":  # Weckruf von cron-job.org: prüft Alarme im Hintergrund
             if not app_password() or not hmac.compare_digest((qs.get("key") or [""])[0], cron_key()):
                 return self.send(403, "forbidden", "text/plain")
-            threading.Thread(target=lambda: safe(run_alert_checks), daemon=True).start()
+            threading.Thread(target=lambda: (safe(run_alert_checks), safe(send_due_reports)), daemon=True).start()
             return self.send(200, "ok", "text/plain")
         if not self.require_login(u):
             return

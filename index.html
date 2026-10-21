@@ -274,6 +274,33 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-empty{padding:40px 24px;text-align:center;color:var(--text-2)}
 .wl-empty b{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
 .wl-preview{margin-top:36px;text-align:left}
+.etf-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
+.etf-grid h3{margin:0 0 10px;font-size:15px}
+.etf-row{display:grid;grid-template-columns:minmax(0,1fr) 90px 52px;gap:10px;align-items:center;padding:5px 0;font-size:13.5px}
+.etf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.etf-link{color:var(--text);text-decoration:none} .etf-link:hover{color:var(--accent);text-decoration:underline}
+.etf-bar{height:8px;background:var(--track);border-radius:4px;overflow:hidden}
+.etf-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.etf-w{text-align:right;color:var(--text-2)}
+@media (max-width:760px){.etf-grid{grid-template-columns:1fr}}
+.report-box{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+.report-box b{display:block;font-size:14px;margin-bottom:2px}
+.report-box .stamp{display:block;max-width:560px}
+.report-ctrl{display:flex;gap:12px;align-items:center}
+.gl{border-bottom:1px dotted var(--text-3);cursor:help}
+.gl:hover,.gl:focus-visible{color:var(--accent);border-bottom-color:var(--accent);outline:none}
+.gl-pop{position:absolute;z-index:60;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;
+  padding:12px 14px;box-shadow:0 8px 24px rgba(16,24,40,.18);font-size:13.5px;line-height:1.5}
+.gl-pop b{display:block;margin-bottom:4px;font-size:14px}
+.gl-pop p{margin:0 0 8px;color:var(--text-2)}
+.gl-pop a{font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600}
+.gl-search{width:100%;height:42px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);
+  padding:0 14px;font:inherit;font-size:15px;margin-bottom:12px}
+.gl-item{padding:12px 18px;border-top:1px solid var(--border)}
+.gl-item:first-child{border-top:0}
+.gl-item b{font-size:14.5px}
+.gl-item p{margin:3px 0 0;color:var(--text-2);font-size:14px;line-height:1.55}
+@media print{.gl{border-bottom:0}}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -699,7 +726,7 @@ $("#q").addEventListener("keydown", e => {
 function renderSg() {
   if (!sugg.length) return hideSg();
   $("#sg").innerHTML = sugg.map((s, i) => `<div class="${i === act ? "act" : ""}" data-s="${esc(s.symbol)}">
-    <span>${esc(s.name)}${s.crypto ? ` <span class="tag" style="font-size:11px;padding:1px 6px">Krypto</span>` : ""}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
+    <span>${esc(s.name)}${s.crypto ? ` <span class="tag" style="font-size:11px;padding:1px 6px">Krypto</span>` : s.etf ? ` <span class="tag" style="font-size:11px;padding:1px 6px">ETF</span>` : ""}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
   $("#sg").style.display = "block";
   $("#sg").querySelectorAll("div").forEach(d => d.onmousedown = () => pick(d.dataset.s));
 }
@@ -1028,7 +1055,25 @@ function renderPush() {
           : `<li>Lokal prüft das Programm die Alarme alle 10 Minuten, solange das Fenster geöffnet ist.</li>`}
       </ol></details>
     <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="push-check">Alarme jetzt prüfen</button></div>
+    <div class="report-box">
+      <div><b>Wochenbericht</b><span class="stamp">Jeden Sonntag ab 18 Uhr: geänderte Empfehlungen, Gewinner und Verlierer der Woche
+        und die Termine der kommenden Woche für deine Watchlist${A.report?.last ? ` · zuletzt am ${new Date(A.report.last).toLocaleDateString("de-DE")}` : ""}.</span></div>
+      <div class="report-ctrl">
+        <label class="toggle"><input type="checkbox" id="rep-on" ${A.report?.enabled !== false ? "checked" : ""}><span class="sw"></span>Aktiv</label>
+        <button class="btn" id="rep-send">Jetzt senden</button>
+      </div>
+    </div>
   </div>`;
+  $("#rep-on").onchange = async e => {
+    try { ALERTS = await api("/api/report", {enabled: e.target.checked}); toast(e.target.checked ? "Wochenbericht aktiviert" : "Wochenbericht deaktiviert"); }
+    catch (err) { if (err.message !== "login") toast("Speichern fehlgeschlagen: " + err.message); }
+  };
+  $("#rep-send").onclick = async e => {
+    e.target.disabled = true;
+    try { await api("/api/report/send", {}); toast("Bericht wird erstellt – kommt in 1–3 Minuten in der ntfy-App an"); }
+    catch (err) { if (err.message !== "login") toast("Senden fehlgeschlagen: " + err.message); }
+    setTimeout(() => { e.target.disabled = false; }, 60000);
+  };
   copyBtn("#cp-topic", A.topic); copyBtn("#cp-cron", A.cron_url);
   box.querySelectorAll("[data-bell]").forEach(b => b.onclick = () => openAlert(b.dataset.bell));
   $("#push-test").onclick = async () => {
@@ -1233,14 +1278,162 @@ function welcome() {
         <span>Die App merkt sich jede Empfehlung mit Kurs und Datum und vergleicht die spätere Entwicklung mit dem Heimatindex.</span></div>
       <button class="btn" id="trkopen">Trefferquote ansehen</button>
     </div>
+    <div class="trk-teaser card">
+      <div><b>Glossar</b><span>KGV, ROIC, Piotroski, TER … alle Fachbegriffe kurz erklärt. In jeder Analyse lassen sich die Begriffe auch direkt antippen.</span></div>
+      <button class="btn" id="glopen">Glossar öffnen</button>
+    </div>
     ${pushGuide()}
     </section>`;
   $("#trkopen").onclick = () => showTrack();
+  $("#glopen").onclick = () => showGlossary();
   wlBind($("#out"));
   bindPushGuide();
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
   bindA2hs();
+}
+
+/* Glossar: Fachbegriffe antippen -> kurze Erklärung */
+const GLOSSARY = [
+  ["KGV", "Kurs-Gewinn-Verhältnis", "Aktienkurs geteilt durch den Gewinn je Aktie. Ein KGV von 20 bedeutet: Man zahlt das 20-Fache des Jahresgewinns. Niedrig = günstig, aber nur im Vergleich mit Branche und Historie aussagekräftig.", ["KGV", "Kurs-Gewinn-Verhältnis"]],
+  ["Forward-KGV", "Forward-KGV", "KGV auf Basis des für die nächsten 12 Monate erwarteten Gewinns. Liegt es unter dem aktuellen KGV, rechnen Analysten mit steigenden Gewinnen.", ["Forward-KGV"]],
+  ["KBV", "Kurs-Buchwert-Verhältnis", "Börsenwert geteilt durch das bilanzielle Eigenkapital. Wichtig bei Banken, Versicherern und Immobilien; unter 1 heißt: Die Börse bewertet das Unternehmen unter seinem Buchwert.", ["Kurs-Buchwert", "KBV"]],
+  ["KUV", "Kurs-Umsatz-Verhältnis", "Börsenwert geteilt durch den Jahresumsatz. Nützlich bei Firmen ohne Gewinn.", ["KUV"]],
+  ["EV/EBITDA", "EV/EBITDA", "Unternehmenswert (Börsenwert plus Nettoschulden) geteilt durch das EBITDA. Berücksichtigt anders als das KGV auch die Verschuldung.", ["EV/EBITDA"]],
+  ["EV/Umsatz", "EV/Umsatz", "Unternehmenswert geteilt durch den Umsatz – Bewertungsmaß für wachsende Firmen, die noch Verluste schreiben.", ["EV/Umsatz"]],
+  ["EBITDA", "EBITDA", "Gewinn vor Zinsen, Steuern und Abschreibungen – grobes Maß für die operative Ertragskraft.", ["EBITDA"]],
+  ["Free Cashflow", "Free Cashflow (FCF)", "Geld, das nach laufendem Geschäft und Investitionen übrig bleibt. Damit werden Dividenden, Aktienrückkäufe oder Schuldenabbau bezahlt.", ["Free Cashflow", "Free-Cashflow", "FCF"]],
+  ["FCF-Rendite", "Free-Cashflow-Rendite", "Free Cashflow geteilt durch den Börsenwert. 4 % ≈ neutral; je höher, desto günstiger.", ["FCF-Rendite", "Free-Cashflow-Rendite"]],
+  ["Aktienvergütung", "Aktienvergütung", "Gehaltsbestandteil in Form von Aktien. Kostet die Aktionäre durch Verwässerung echtes Geld, taucht im Cashflow aber nicht als Ausgabe auf – daher zieht die App sie vom Free Cashflow ab.", ["Aktienvergütung"]],
+  ["PEG", "PEG-Ratio", "KGV geteilt durch das erwartete Gewinnwachstum in Prozent. Unter 1 gilt als günstig im Verhältnis zum Wachstum.", ["PEG-Ratio", "PEG"]],
+  ["ROE", "Eigenkapitalrendite (ROE)", "Gewinn geteilt durch das Eigenkapital. Über ~10 % verdient ein Unternehmen seine Kapitalkosten.", ["Eigenkapitalrendite", "ROE"]],
+  ["ROA", "Gesamtkapitalrendite (ROA)", "Gewinn geteilt durch die Bilanzsumme. Bei Banken gelten ~0,6–1 % als gut.", ["Gesamtkapitalrendite", "ROA"]],
+  ["ROIC", "Kapitalrendite (ROIC)", "Operativer Gewinn nach Steuern geteilt durch das eingesetzte Kapital. Dauerhaft über 15 % deutet auf einen Wettbewerbsvorteil hin.", ["ROIC", "Kapitalrendite"]],
+  ["Bruttomarge", "Bruttomarge", "Anteil des Umsatzes, der nach den direkten Herstellkosten bleibt. Hoch (über 50 %) = Preissetzungsmacht.", ["Bruttomarge"]],
+  ["Operative Marge", "Operative Marge", "Operativer Gewinn (EBIT) geteilt durch den Umsatz – wie profitabel das Kerngeschäft ist.", ["Operative Marge", "operative Marge"]],
+  ["Nettomarge", "Nettomarge", "Gewinn nach allen Kosten, Zinsen und Steuern geteilt durch den Umsatz.", ["Nettomarge"]],
+  ["Nettoverschuldung", "Nettoverschuldung / EBITDA", "Schulden minus Cash, geteilt durch das EBITDA: In wie vielen Jahren könnte die Firma ihre Schulden aus dem operativen Ergebnis tilgen? Unter 2 solide, über 3,5 hoch.", ["Nettoverschuldung"]],
+  ["Reverse-DCF", "Reverse-DCF", "Rechnet rückwärts: Wie stark müsste der Free Cashflow 10 Jahre lang wachsen, damit der heutige Kurs gerechtfertigt ist? Liegt das deutlich über dem realistisch Erwartbaren, ist viel Optimismus eingepreist.", ["Reverse-DCF"]],
+  ["Diskontsatz", "Diskontsatz", "Zins, mit dem künftige Zahlungen auf heute abgezinst werden – entspricht der Renditeerwartung der Anleger (hier: Zinsniveau plus Risikoaufschlag).", ["Diskontsatz", "Eigenkapitalkosten"]],
+  ["CAGR", "CAGR", "Durchschnittliches jährliches Wachstum über mehrere Jahre (Compound Annual Growth Rate).", ["CAGR"]],
+  ["Beta", "Beta", "Wie stark eine Aktie mit dem Gesamtmarkt schwankt. 1 = wie der Markt, 1,5 = 50 % stärkere Ausschläge.", ["Beta"]],
+  ["Volatilität", "Volatilität", "Maß für die Schwankungsbreite des Kurses pro Jahr. Breite Aktienmärkte liegen bei etwa 15 %, Einzelaktien oft bei 25–40 %.", ["Volatilität"]],
+  ["RSI", "RSI (Relative-Stärke-Index)", "Charttechnischer Indikator von 0 bis 100. Über 70 gilt als überkauft, unter 30 als überverkauft.", ["RSI"]],
+  ["Gleitender Durchschnitt", "Gleitender Durchschnitt (GD 50/200)", "Durchschnittskurs der letzten 50 bzw. 200 Handelstage. Liegt der Kurs darüber, gilt der Trend als intakt.", ["200-Tage-Linie", "GD 200", "GD 50", "GD200", "Gleitender Durchschnitt"]],
+  ["Piotroski F-Score", "Piotroski F-Score", "Neun Ja/Nein-Prüfungen, ob sich Gewinn, Cashflow, Verschuldung, Liquidität und Effizienz gegenüber dem Vorjahr verbessert haben. 7–9 stark, 0–3 schwach.", ["Piotroski F-Score", "Piotroski"]],
+  ["Altman Z-Score", "Altman Z-Score", "Formel aus fünf Bilanzkennzahlen, die das Insolvenzrisiko abschätzt. Unter 1,8 Warnzone, über 3 sicher.", ["Altman Z-Score", "Altman"]],
+  ["Zinsdeckung", "Zinsdeckung", "Operativer Gewinn geteilt durch die Zinskosten. Unter 2 wird es eng, über 8 komfortabel.", ["Zinsdeckung"]],
+  ["Gewinnqualität", "Gewinnqualität", "Vergleicht den ausgewiesenen Gewinn mit dem tatsächlichen Cashzufluss. Liegt der Gewinn dauerhaft deutlich über dem Cashflow, ist das ein Warnsignal.", ["Gewinnqualität"]],
+  ["Gewinnrevisionen", "Gewinnrevisionen", "Änderungen der Gewinnschätzungen der Analysten. Steigende Schätzungen gehören zu den stärksten Hinweisen auf künftige Kursgewinne.", ["Gewinnrevisionen"]],
+  ["Gewinnüberraschungen", "Gewinnüberraschungen", "Lag der gemeldete Quartalsgewinn über oder unter der Erwartung der Analysten? Regelmäßige positive Überraschungen sprechen für ein gut geführtes Geschäft.", ["Gewinnüberraschungen"]],
+  ["Insider", "Insidergeschäfte", "Käufe und Verkäufe eigener Aktien durch Vorstände und Aufsichtsräte. Käufe sind ein starkes Vertrauenssignal; Verkäufe sind oft planmäßig und weniger aussagekräftig.", ["Insiderkäufe", "Insiderverkäufe", "Insidergeschäfte"]],
+  ["Leerverkaufsquote", "Leerverkaufsquote", "Anteil der frei handelbaren Aktien, der auf fallende Kurse gesetzt (leerverkauft) ist. Über 10 % zeigt starke Skepsis.", ["Leerverkaufsquote"]],
+  ["Analystenkonsens", "Analystenkonsens", "Durchschnitt der Analystenempfehlungen von 1 (Strong Buy) bis 5 (Strong Sell).", ["Analystenkonsens"]],
+  ["Kursziel", "Kursziel", "Kurs, den Analysten in etwa 12 Monaten erwarten. Die App nutzt den Durchschnitt bzw. Median mehrerer Analysten.", ["Kursziel", "Analysten-Kursziel"]],
+  ["Dividendenrendite", "Dividendenrendite", "Dividenden der letzten 12 Monate geteilt durch den Aktienkurs.", ["Dividendenrendite"]],
+  ["Ausschüttungsquote", "Ausschüttungsquote", "Anteil des Gewinns (bei Immobilien: des FFO), der als Dividende ausgezahlt wird. Über 90 % ist bei normalen Firmen kaum nachhaltig.", ["Ausschüttungsquote"]],
+  ["Aktionärsrendite", "Aktionärsrendite", "Dividenden plus Aktienrückkäufe im Verhältnis zum Börsenwert – alles, was an die Aktionäre zurückfließt.", ["Aktionärsrendite"]],
+  ["Marktkapitalisierung", "Marktkapitalisierung", "Börsenwert: Aktienkurs mal Anzahl aller Aktien.", ["Marktkapitalisierung", "Börsenwert"]],
+  ["Eigenkapitalquote", "Eigenkapitalquote", "Eigenkapital geteilt durch die Bilanzsumme – Puffer gegen Verluste. Bei Banken sind 5–8 % üblich.", ["Eigenkapitalquote"]],
+  ["FFO", "FFO (Funds from Operations)", "Kennzahl für Immobilienfirmen: operativer Mittelzufluss ohne Abschreibungen und Neubewertungen. Ersetzt dort den Gewinn; Kurs/FFO ersetzt das KGV.", ["Kurs/FFO", "FFO"]],
+  ["Beleihungsquote", "Beleihungsquote (LTV)", "Nettoschulden im Verhältnis zum Vermögen. Bei Immobilienfirmen gelten unter 45 % als solide, über 55 % als riskant.", ["Beleihungsquote", "LTV"]],
+  ["Rule of 40", "Rule of 40", "Faustregel für Wachstumsfirmen: Umsatzwachstum plus Free-Cashflow-Marge sollte mindestens 40 % ergeben.", ["Rule of 40"]],
+  ["Cash-Reichweite", "Cash-Reichweite", "Wie viele Jahre reicht das vorhandene Geld beim aktuellen Mittelabfluss? Unter 1,5 Jahren drohen Kapitalerhöhungen.", ["Cash-Reichweite"]],
+  ["TER", "TER (laufende Kosten)", "Jährliche Kosten eines ETFs in Prozent des Anlagebetrags; wird automatisch vom Fondsvermögen abgezogen. Unter 0,2 % gilt als günstig.", ["TER"]],
+  ["Thesaurierend", "Thesaurierend / ausschüttend", "Thesaurierende ETFs legen Dividenden automatisch wieder an, ausschüttende zahlen sie aufs Konto aus.", ["thesaurierend", "Thesaurierend", "ausschüttend"]],
+  ["Fondsvolumen", "Fondsvolumen", "Gesamtes in einem ETF angelegtes Vermögen. Unter 100 Mio. steigt das Risiko, dass der Anbieter den Fonds schließt.", ["Fondsvolumen"]],
+  ["Mayer-Multiple", "Mayer-Multiple", "Kurs geteilt durch die 200-Tage-Linie (bei Kryptowährungen). Unter 1 historisch günstig, über 2,4 überhitzt.", ["Mayer-Multiple"]],
+  ["Fear & Greed", "Fear & Greed Index", "Stimmungsbarometer für Kryptowährungen von 0 (extreme Angst) bis 100 (extreme Gier).", ["Fear & Greed", "Fear &amp; Greed"]],
+  ["ADR", "ADR / Hinterlegungsschein", "An einer US-Börse gehandeltes Zertifikat auf die Aktie eines ausländischen Unternehmens.", ["ADR", "Hinterlegungsschein"]],
+  ["ISIN", "ISIN", "Internationale Wertpapierkennnummer aus 12 Zeichen, z. B. DE0007164600 für SAP.", ["ISIN"]],
+  ["CUSIP", "CUSIP", "Neunstellige Wertpapierkennung in den USA und Kanada; steckt in der ISIN.", ["CUSIP"]],
+  ["FIGI", "FIGI", "Offene Wertpapierkennung von Bloomberg. Die Composite-FIGI bezeichnet die Aktie an allen Börsen eines Landes.", ["FIGI", "Composite-FIGI"]],
+  ["Tier", "Quellen-Tiers", "Einstufung der Nachrichtenquellen: Tier 1 zuverlässige Originalquellen, Tier 2 glaubwürdige Medien (teils Paywall), Tier 3 Pressemitteilungen und Unternehmensblogs, die gegengeprüft werden.", ["Tier 1", "Tier 2", "Tier 3"]],
+  ["Overweight", "Empfehlungsstufen", "14 Stufen von Strong Buy bis Strong Sell. Kaufen: Strong Buy, Buy, Outperform, Overweight, Accumulate. Halten: Market Perform, Equal-weight, Neutral, Hold. Verkaufen: Underperform, Underweight, Reduce, Sell, Strong Sell.", []],
+];
+const GL_INDEX = (() => {
+  const pairs = [];
+  GLOSSARY.forEach((g, i) => g[3].forEach(a => pairs.push([a, i])));
+  pairs.sort((a, b) => b[0].length - a[0].length);   // längere Begriffe zuerst (Forward-KGV vor KGV)
+  const esc_ = t => t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  return {re: new RegExp(`(?<![\\wÄÖÜäöüß-])(${pairs.map(p => esc_(p[0])).join("|")})(?![\\wÄÖÜäöüß])`, "g"),
+          map: new Map(pairs.map(p => [p[0], p[1]]))};
+})();
+function glossarize(root) {
+  if (!root) return;
+  const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat");
+  scopes.forEach(el => {
+    const seen = new Set();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (node.parentElement.closest(".gl, a, button")) return;
+      const txt = node.nodeValue;
+      GL_INDEX.re.lastIndex = 0;
+      if (!GL_INDEX.re.test(txt)) return;
+      GL_INDEX.re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, mt;
+      while ((mt = GL_INDEX.re.exec(txt))) {
+        const i = GL_INDEX.map.get(mt[1]);
+        if (seen.has(i)) continue;
+        seen.add(i);
+        frag.append(txt.slice(last, mt.index));
+        const sp = document.createElement("span");
+        sp.className = "gl"; sp.dataset.g = i; sp.tabIndex = 0; sp.setAttribute("role", "button");
+        sp.textContent = mt[1];
+        frag.append(sp);
+        last = mt.index + mt[1].length;
+      }
+      if (!last) return;
+      frag.append(txt.slice(last));
+      node.replaceWith(frag);
+    });
+  });
+}
+function glPopup(el) {
+  closeGl();
+  const g = GLOSSARY[+el.dataset.g];
+  const pop = document.createElement("div");
+  pop.className = "gl-pop"; pop.setAttribute("role", "dialog");
+  pop.innerHTML = `<b>${esc(g[1])}</b><p>${esc(g[2])}</p><a href="?view=glossar" class="gl-all">Alle Begriffe im Glossar</a>`;
+  document.body.append(pop);
+  const r = el.getBoundingClientRect(), w = Math.min(320, window.innerWidth - 24);
+  pop.style.width = w + "px";
+  pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2)) + window.scrollX + "px";
+  const below = r.bottom + 8 + pop.offsetHeight < window.innerHeight;
+  pop.style.top = (below ? r.bottom + 8 : r.top - pop.offsetHeight - 8) + window.scrollY + "px";
+  pop.querySelector(".gl-all").onclick = e => { e.preventDefault(); closeGl(); showGlossary(); };
+}
+function closeGl() { document.querySelectorAll(".gl-pop").forEach(p => p.remove()); }
+document.addEventListener("click", e => {
+  const g = e.target.closest(".gl");
+  if (g) { e.preventDefault(); glPopup(g); return; }
+  if (!e.target.closest(".gl-pop")) closeGl();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeGl();
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("gl")) { e.preventDefault(); glPopup(e.target); }
+});
+window.addEventListener("scroll", closeGl, {passive: true});
+function showGlossary() {
+  runId++; wlView = false;
+  $("#subnav").style.display = "none";
+  history.replaceState(null, "", "?view=glossar");
+  window.scrollTo({top: 0});
+  const items = [...GLOSSARY].sort((a, b) => a[1].localeCompare(b[1], "de"));
+  $("#out").innerHTML = `<div class="wl-head"><div><div class="eyebrow">Nachschlagen</div><h1>Glossar <span class="stamp" style="font-size:15px">${items.length} Begriffe</span></h1></div>
+      <div class="wl-actions"><button class="btn" id="glback">Zur Startseite</button></div></div>
+    <input id="glq" class="gl-search" type="search" placeholder="Begriff suchen, z. B. KGV oder TER" aria-label="Glossar durchsuchen">
+    <div class="card gl-list" id="gllist">${items.map(g => `<div class="gl-item" data-s="${esc((g[1] + " " + g[3].join(" ")).toLowerCase())}">
+      <b>${esc(g[1])}</b><p>${esc(g[2])}</p></div>`).join("")}</div>
+    <p class="stamp" style="margin-top:10px">In jeder Analyse sind diese Begriffe gepunktet unterstrichen – antippen zeigt die Erklärung direkt an.</p>`;
+  $("#glback").onclick = () => { history.replaceState(null, "", location.pathname); welcome(); };
+  $("#glq").oninput = e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll(".gl-item").forEach(it => it.style.display = !q || it.dataset.s.includes(q) ? "" : "none");
+  };
 }
 
 /* Trefferquote der eigenen Empfehlungen */
@@ -1907,8 +2100,31 @@ document.addEventListener("click", e => {
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(v).then(done, legacy); else legacy();
 });
 
+function etfSection(d) {
+  const E = d.etf || {};
+  const top = E.top || [], sec = E.sectors || [];
+  const head = `<h2 class="section" id="konkurrenz">Zusammensetzung</h2>
+    <p class="section-sub">Größte Positionen und Branchenmix des ETFs${E.family ? " · Anbieter " + esc(E.family) : ""}.</p>`;
+  if (!top.length && !sec.length) return head + `<div class="card empty">Die Zusammensetzung war nicht abrufbar.</div>`;
+  const maxT = Math.max(...top.map(x => x.weight), 0.01), maxS = Math.max(...sec.map(x => x.weight), 0.01);
+  const bar = (w, max) => `<span class="etf-bar"><i style="width:${Math.max(2, w / max * 100)}%"></i></span>`;
+  return head + `<div class="etf-grid">
+    ${top.length ? `<div class="card pad"><h3>Top ${top.length} Positionen</h3>${top.map(x => `<div class="etf-row">
+      <span class="etf-name"><a href="?q=${encodeURIComponent(x.symbol)}" data-q="${esc(x.symbol)}" class="etf-link">${esc(x.name)}</a></span>
+      ${bar(x.weight, maxT)}<span class="num etf-w">${pc(x.weight, 1)}</span></div>`).join("")}
+      <div class="stamp" style="margin-top:8px">Zusammen ${pc(top.reduce((a, x) => a + x.weight, 0), 1)} des Fonds</div></div>` : ""}
+    ${sec.length ? `<div class="card pad"><h3>Branchen</h3>${sec.map(x => `<div class="etf-row">
+      <span class="etf-name">${esc(x.name)}</span>${bar(x.weight, maxS)}<span class="num etf-w">${pc(x.weight, 1)}</span></div>`).join("")}</div>` : ""}
+  </div>`;
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest(".etf-link"); if (!a) return;
+  e.preventDefault(); $("#q").value = a.dataset.q; run(a.dataset.q);
+});
+
 function peersSection(d) {
   if (d.asset === "crypto") return cryptoPeersSection(d);
+  if (d.asset === "etf") return etfSection(d);
   const C = d.competitors || {};
   const peers = C.peers || [], own = C.own || {}, S = C.summary || {};
   const head = `<h2 class="section" id="konkurrenz">Konkurrenzvergleich</h2>
@@ -1958,16 +2174,20 @@ function exportPdf(d) {
 const FG_DE = {"Extreme Fear": "extreme Angst", "Fear": "Angst", "Neutral": "neutral", "Greed": "Gier", "Extreme Greed": "extreme Gier"};
 function render(d) {
   const R = d.rating, F = d.facts || {}, N = d.news;
-  const crypto = d.asset === "crypto";
+  const crypto = d.asset === "crypto", etf = d.asset === "etf";
   const gt = groupTone[R.group];
   const idx = R.scale.findIndex(s => s.label === R.label);
   const segCls = {Kaufen: "p", Halten: "n", Verkaufen: "x"};
   const scaleBar = R.scale.map((s, i) => `<i class="${segCls[s.group]} ${i === idx ? "on" : ""}" title="${esc(s.label)}"></i>`).join("");
   const markerLeft = ((idx + 0.5) / R.scale.length) * 100;
   const perfTone = F.perf_1m == null ? "" : F.perf_1m >= 0 ? "var(--pos)" : "var(--neg)";
-  const allCats = [...d.categories, {key: "macro", title: "Makro & Umfeld", adjective: d.macro.score >= 0.15 ? "Rückenwind" : d.macro.score <= -0.15 ? "Gegenwind" : "neutral", score: d.macro.score, weight: d.macro.weight, reasons: d.macro.reasons, options: []}];
+  const allCats = etf ? [...d.categories] : [...d.categories, {key: "macro", title: "Makro & Umfeld", adjective: d.macro.score >= 0.15 ? "Rückenwind" : d.macro.score <= -0.15 ? "Gegenwind" : "neutral", score: d.macro.score, weight: d.macro.weight, reasons: d.macro.reasons, options: []}];
 
   $("#navsym").textContent = `${d.name} · ${R.label}`;
+  const nk = document.querySelector('#subnav a[href="#konkurrenz"]');
+  if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
+  const nu = document.querySelector('#subnav a[href="#ueber"]');
+  if (nu) nu.style.display = etf || crypto ? "none" : "";
   $("#subnav").style.display = "block";
 
   $("#out").innerHTML = `
@@ -2012,6 +2232,8 @@ function render(d) {
         <div><dt>Datenbasis</dt><dd>${esc(d.confidence)}</dd></div>
         ${crypto ? `<div><dt>Fear &amp; Greed</dt><dd class="num">${F.fg != null ? F.fg + " / 100" : "–"} <span class="stamp">${esc(FG_DE[F.fg_class] || "")}</span></dd></div>
         <div><dt>Abstand Allzeithoch</dt><dd class="num">${pc(F.ath_change, 1, true)}</dd></div>`
+        : etf ? `<div><dt>Laufende Kosten (TER)</dt><dd class="num">${F.ter != null ? pc(F.ter, 2) : "–"}</dd></div>
+        <div><dt>Ertragsverwendung</dt><dd>${esc(F.dist ? F.dist[0].toUpperCase() + F.dist.slice(1) : "–")}</dd></div>`
         : `<div><dt>Analystenkonsens</dt><dd class="num">${F.rec_mean ? nf(F.rec_mean, 1) + " / 5" : "–"} <span class="stamp">${F.n_analysts ? `(${F.n_analysts} Analysten)` : ""}</span></dd></div>
         <div><dt>Kursziel Ø</dt><dd class="num">${F.target ? nf(F.target) : "–"} <span class="stamp">${F.upside != null ? pc(F.upside, 1, true) : ""}</span></dd></div>`}
       </dl>
@@ -2040,7 +2262,7 @@ function render(d) {
     <div class="chart-foot" id="ch-foot"></div>
   </section>
 
-  ${crypto ? "" : `<section class="card chart-card" id="erfolg" aria-label="Erfolgsrechnung">
+  ${crypto || etf ? "" : `<section class="card chart-card" id="erfolg" aria-label="Erfolgsrechnung">
     <div class="chart-head">
       <div><div class="eyebrow">Erfolgsrechnung</div>
         <div class="chart-val num" id="inc-val">–</div>
@@ -2057,7 +2279,11 @@ function render(d) {
   ${historyCard(d)}
 
   <dl class="card facts" style="margin-bottom:0">
-    ${(crypto
+    ${(etf
+      ? [["TER", F.ter != null ? pc(F.ter, 2) : "–"], ["Fondsvolumen", F.aum ? big(F.aum)[0] : "–", F.aum ? `${big(F.aum)[1]} USD` : ""],
+         ["KGV Bestände", nf(F.pe, 1)], ["Rendite 1J", pc(F.perf_1y, 1, true)], ["Rendite 5J p. a.", pc(F.cagr5, 1, true)],
+         ["Top 10", pc(F.top10, 0), "Anteil"], ["Volatilität 1J", pc(F.vol, 0)]]
+      : crypto
       ? [["Marktkapitalisierung", big(F.mcap)[0], `${big(F.mcap)[1]} ${esc(d.currency)}`], ["Rang", F.rank ? "#" + F.rank : "–"],
          ["Volumen 24 Std.", big(F.vol24)[0], `${big(F.vol24)[1]} ${esc(d.currency)}`], ["Allzeithoch", F.ath ? nf(F.ath, F.ath < 10 ? 4 : 0) : "–", pc(F.ath_change, 0)],
          ["Mayer-Multiple", nf(F.mayer, 2)], ["Performance 1J", pc(F.perf_1y, 0, true)], ["Volatilität 1J", pc(F.vol, 0)]]
@@ -2102,7 +2328,8 @@ function render(d) {
   ${peersSection(d)}
 
   <h2 class="section" id="fundamental">Fundamentaldaten</h2>
-  <p class="section-sub">${crypto ? "Markt und Netzwerk, Angebot und Inflation, Marktzyklus, Risiko und Stimmung."
+  <p class="section-sub">${etf ? "Kosten, Rendite, Risiko und Streuung sowie die Bewertung der enthaltenen Aktien."
+    : crypto ? "Markt und Netzwerk, Angebot und Inflation, Marktzyklus, Risiko und Stimmung."
     : "Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen."}</p>
   <div class="fund">${d.fundamentals.map((s, i) => `
     <div class="card"><h3><span>${i + 1}</span>${esc(s.title)}</h3>
@@ -2140,7 +2367,10 @@ function render(d) {
     </div>
     <div class="card pad"><h3>Regeln</h3><ul>
       <li>Jede Kategorie erhält einen Teilscore von −100 bis +100 aus mehreren Kennzahlen; daraus folgt das passende Adjektiv.</li>
-      ${crypto ? `<li>Bewertung: Mayer-Multiple (Kurs ÷ 200-Tage-Linie), Abstand zum Allzeithoch, Marktwert im Verhältnis zum Handelsvolumen.</li>
+      ${etf ? `<li>ETF-Modell: Kosten &amp; Struktur (TER, Fondsvolumen, Alter), Bewertung der enthaltenen Aktien (KGV, KBV),
+        Rendite p. a. über 3/5/10 Jahre, Risiko und Streuung (Volatilität, Rückgänge, Top-10-Anteil, größte Branche) und Kurstrend.</li>
+      <li>Thesaurierende ETFs: Ausschüttung zählt nicht (Erträge stecken in der Rendite).</li>`
+      : crypto ? `<li>Bewertung: Mayer-Multiple (Kurs ÷ 200-Tage-Linie), Abstand zum Allzeithoch, Marktwert im Verhältnis zum Handelsvolumen.</li>
       <li>Netzwerk: Rang nach Marktwert, Alter, Liquidität, begrenzte Maximalmenge. Wachstum: 12-Monats-Entwicklung und Verwässerung durch Neuausgabe.</li>
       <li>Risiko ist bei Kryptowährungen grundsätzlich höchstens „neutral“. Coins außerhalb der Top 50: höchstens „Halten“. Stablecoins: immer „Neutral“.</li>
       <li>Stimmung: Crypto Fear &amp; Greed Index und News-Tonalität. Dividende: nicht anwendbar (0 % Gewicht).</li>`
@@ -2186,7 +2416,8 @@ function render(d) {
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
-  if (!crypto) initIncome(d.symbol);
+  glossarize($("#out"));
+  if (!crypto && !etf) initIncome(d.symbol);
   document.querySelectorAll("table.peers tr.peer").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
   if ((d.history || []).length >= 2) {
     drawHistory(d);
@@ -2212,6 +2443,7 @@ if (location.protocol === "file:") {
   if (ps.get("import")) wlImport(ps.get("import"));
   else if (ps.get("view") === "watchlist") showWatchlist();
   else if (ps.get("view") === "trefferquote") showTrack();
+  else if (ps.get("view") === "glossar") showGlossary();
   else if (pre) { $("#q").value = pre; run(pre); } else welcome();
 }
 </script>

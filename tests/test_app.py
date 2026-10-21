@@ -521,5 +521,76 @@ class TestQualityAndTrack(unittest.TestCase):
         self.assertIn("12M", row_["h"])
 
 
+class TestEtfAndReport(Isolated):
+    """ETF-Bewertung und Wochenbericht (ohne Internet)."""
+
+    def etf(self, **kw):
+        base = {"ter": 0.002, "aum": 5e10, "inception": "2010-01-01", "family": "Test", "data_years": 15, "pe": 20, "pb": 3,
+                "bond_etf": False, "sma200": 100, "last": 100, "cagr5": 0.09, "cagr3": 0.08, "cagr10": 0.1, "perf_1y": 0.1,
+                "vol": 0.14, "max_dd_5y": -0.2, "top10": 0.22, "max_sector": {"name": "Technologie", "weight": 0.3},
+                "dist": "thesaurierend", "div_yield": 0}
+        return {**base, **kw}
+
+    def test_cheap_beats_expensive_etf(self):
+        cheap = a.e_quality(self.etf(ter=0.0007))["score"]
+        dear = a.e_quality(self.etf(ter=0.0075, aum=5e7))["score"]
+        self.assertGreater(cheap, 0.5)
+        self.assertLess(dear, -0.3)
+
+    def test_concentration_raises_risk(self):
+        broad = a.e_risk(self.etf())["score"]
+        narrow = a.e_risk(self.etf(top10=0.65, max_sector={"name": "Technologie", "weight": 0.6}, vol=0.24))["score"]
+        self.assertGreater(broad, narrow + 0.5)
+
+    def test_accumulating_etf_has_no_dividend_score(self):
+        self.assertIsNone(a.e_dividend(self.etf())["score"])
+        self.assertIsNotNone(a.e_dividend(self.etf(dist="ausschüttend", div_yield=0.035))["score"])
+
+    def test_isin_detection_and_etf_name(self):
+        self.assertEqual(a.etf_short_name("iShares Core MSCI World UCITS ETF USD (Acc)"), "iShares Core MSCI World")
+
+    def test_weekly_report_text(self):
+        sp = a.user_space("anna")
+        sp["watchlist"] = [{"symbol": "SAP.DE", "label": "Outperform"}, {"symbol": "BAYN.DE", "label": "Hold"}]
+        fake = {
+            "SAP.DE": {"symbol": "SAP.DE", "name": "SAP SE", "price": 200, "currency": "EUR", "summary": {"adjective": "x"},
+                       "rating": {"label": "Buy", "group": "Kaufen", "score": 45},
+                       "events": [{"date": "2026-10-28", "label": "Quartalszahlen", "days": 3}]},
+            "BAYN.DE": {"symbol": "BAYN.DE", "name": "Bayer AG", "price": 25, "currency": "EUR", "summary": {"adjective": "x"},
+                        "rating": {"label": "Hold", "group": "Halten", "score": -10}, "events": []}}
+        orig = (a.analyze, a.week_change)
+        a.analyze = lambda q: fake[q]
+        a.week_change = lambda s_: {"SAP.DE": 0.03, "BAYN.DE": -0.02}[s_]
+        try:
+            title, msg = a.build_weekly_report("anna")
+        finally:
+            a.analyze, a.week_change = orig
+        self.assertIn("Wochenbericht", title)
+        self.assertIn("SAP: Outperform → Buy", msg)
+        self.assertNotIn("Bayer: Hold →", msg)            # unverändert
+        self.assertIn("Beste der Woche: SAP +3,0 %", msg)
+        self.assertIn("Schwächste: Bayer -2,0 %", msg)
+        self.assertIn("SAP: Quartalszahlen", msg)
+        self.assertEqual(sp["watchlist"][0]["label"], "Buy")  # Watchlist wurde aktualisiert
+
+    def test_report_schedule(self):
+        sent = []
+        sp = a.user_space("anna")
+        sp["watchlist"] = [{"symbol": "SAP.DE"}]
+        orig = (a.berlin_now, a.send_weekly_report)
+        a.send_weekly_report = lambda u, manual=False: sent.append(u)
+        try:
+            a.berlin_now = lambda: a.datetime(2026, 10, 24, 19)   # Samstag -> nichts
+            a.send_due_reports()
+            a.berlin_now = lambda: a.datetime(2026, 10, 25, 17)   # Sonntag vor 18 Uhr -> nichts
+            a.send_due_reports()
+            a.berlin_now = lambda: a.datetime(2026, 10, 25, 18, 5)
+            a.send_due_reports()
+            a.send_due_reports()                                  # zweiter Lauf am selben Sonntag -> kein Doppelversand
+        finally:
+            a.berlin_now, a.send_weekly_report = orig
+        self.assertEqual(sent, ["anna"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
