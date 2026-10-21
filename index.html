@@ -1611,12 +1611,12 @@ function renderScreener() {
       </div>
     </div>
     ${!D.running && SCR.panel ? (() => {
-      const pick = SCR.pick || (SCR.uni !== "all" ? [SCR.uni] : Object.keys(U));
+      const pick = (Array.isArray(SCR.pick) ? SCR.pick : [SCR.pick]).filter(k => U[k]).slice(0, 1);
       const n = SCR.mode === "all" ? pick.reduce((a, k) => a + U[k].total, 0) : pick.reduce((a, k) => a + (D.due_by?.[k] || 0), 0);
       return `<div class="scr-panel card" id="scrpanel">
-        <b>Welche Indizes sollen bewertet werden?</b>
+        <b>Welchen Index soll der Screener bewerten?</b>
         <div class="scr-picks">${Object.entries(U).map(([k, u]) => `<label class="scr-pick">
-          <input type="checkbox" value="${k}" ${pick.includes(k) ? "checked" : ""}>
+          <input type="radio" name="scruni" value="${k}" ${pick.includes(k) ? "checked" : ""}>
           <span><b>${esc(u.name)}</b><small>${u.total} Werte · ${D.due_by?.[k] || 0} veraltet</small></span></label>`).join("")}</div>
         <div class="scr-modes">
           <label><input type="radio" name="scrmode" value="due" ${SCR.mode !== "all" ? "checked" : ""}> Nur veraltete Werte (älter als 20 Stunden)</label>
@@ -1624,8 +1624,8 @@ function renderScreener() {
         </div>
         <div class="scr-err" id="screrr" role="alert"></div>
         <div class="scr-go">
-          <span class="stamp">${pick.length ? `${pick.length > 1 ? "bis zu " : ""}${n} ${n === 1 ? "Wert" : "Werte"} · etwa ${Math.max(1, Math.round(n * (D.pause + 25) / 60))} Min.${n === 0 ? " – nichts zu tun, ggf. „Alle Werte neu bewerten“ wählen" : ""}` : ""}
-            ${pick.length > 1 ? " · Werte in mehreren Indizes zählen nur einmal" : ""}</span>
+          <span class="stamp">${pick.length ? `${n} ${n === 1 ? "Wert" : "Werte"} · etwa ${Math.max(1, Math.round(n * (D.pause + 25) / 60))} Min.${n === 0 ? " – nichts zu tun, ggf. „Alle Werte neu bewerten“ wählen" : ""}` : ""}
+</span>
           <span><button class="btn" id="scrcancel">Abbrechen</button> <button class="btn primary" id="scrgo">Starten</button></span>
         </div>
       </div>`; })() : ""}
@@ -1636,7 +1636,7 @@ function renderScreener() {
         <div class="stamp">${D.current ? `Bewertet gerade ${esc(D.current)} · ` : ""}etwa ${Math.max(1, Math.round((D.target - D.done) * (D.pause + 25) / 60))} Min. verbleibend · die Liste aktualisiert sich alle 10 Sekunden.
           Du kannst die Seite schließen – der Durchgang läuft auf dem Server weiter.</div>
       </div>`
-      : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Screening starten</b> drückst und die gewünschten Indizes auswählst.
+      : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Screening starten</b> drückst und einen Index auswählst – immer einer pro Durchgang.
         Die Werte werden nacheinander analysiert, danach stoppt er von selbst.
         ${D.finished ? ` Letzter Durchgang beendet ${ago_(D.finished)}.` : ""} ${D.due ? "" : "Alle Werte sind aktuell."}</p>`}
     <div class="scr-ctrl">
@@ -1671,13 +1671,13 @@ function renderScreener() {
   if (sp_) sp_.onclick = () => { sp_.disabled = true; scrAction("/api/screener/stop"); };
   const pn = $("#scrpanel");
   if (pn) {
-    const picked = () => [...pn.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
-    pn.querySelectorAll("input[type=checkbox]").forEach(i => i.onchange = () => { SCR.pick = picked(); scrSave(); renderScreener(); });
+    const picked = () => [...pn.querySelectorAll("input[name=scruni]:checked")].map(i => i.value);
+    pn.querySelectorAll("input[name=scruni]").forEach(i => i.onchange = () => { SCR.pick = picked(); scrSave(); renderScreener(); });
     pn.querySelectorAll("input[name=scrmode]").forEach(i => i.onchange = () => { SCR.mode = i.value; renderScreener(); });
     $("#scrcancel").onclick = () => { SCR.panel = false; renderScreener(); };
     $("#scrgo").onclick = () => {
       const unis = picked();
-      if (!unis.length) { $("#screrr").textContent = "Bitte mindestens einen Index auswählen."; return; }
+      if (!unis.length) { $("#screrr").textContent = "Bitte einen Index auswählen."; return; }
       SCR.pick = unis; SCR.panel = false; scrSave();
       $("#scrgo").disabled = true;
       scrAction("/api/screener/start", {mode: SCR.mode, unis});

@@ -4506,8 +4506,10 @@ def screener_run():
 
 
 def screener_start(user, mode="due", unis=None):
-    """Startet einen Durchgang für die gewählten Indizes, falls keiner läuft. Gibt (gestartet, Meldung) zurück."""
-    unis = [k for k in (unis or []) if k in SCREENER_UNIVERSES] or list(SCREENER_UNIVERSES)
+    """Startet einen Durchgang für genau einen Index, falls keiner läuft. Gibt (gestartet, Meldung) zurück."""
+    unis = [k for k in (unis or []) if k in SCREENER_UNIVERSES][:1]  # immer nur ein Index je Durchgang
+    if not unis:
+        return False, "Bitte einen Index auswählen."
     with SCREENER_LOCK:
         st = SCREENER_STATE
         if st["running"]:

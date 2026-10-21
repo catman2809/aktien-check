@@ -621,16 +621,17 @@ class TestScreenerStart(Isolated):
                                                  "summary": {"adjective": "x"}, "categories": [], "facts": {}})[1]
         try:
             a.screener_store()["AAA"] = {"symbol": "AAA", "label": "Buy", "updated": int(time.time())}  # aktuell
-            ok, _ = a.screener_start("anna")
+            self.assertFalse(a.screener_start("anna")[0])            # ohne Index kein Start
+            ok, _ = a.screener_start("anna", "due", ["t"])
             self.assertTrue(ok)
             for _ in range(50):
                 if not a.SCREENER_STATE["running"]:
                     break
                 time.sleep(0.05)
             self.assertEqual(sorted(calls), ["BBB", "CCC"])        # nur veraltete
-            self.assertFalse(a.screener_start("anna")[0])          # alles aktuell -> kein neuer Durchgang
+            self.assertFalse(a.screener_start("anna", "due", ["t"])[0])  # alles aktuell -> kein neuer Durchgang
             calls.clear()
-            self.assertTrue(a.screener_start("anna", "all")[0])     # „Alle neu bewerten“
+            self.assertTrue(a.screener_start("anna", "all", ["t"])[0])  # „Alle neu bewerten“
             for _ in range(50):
                 if not a.SCREENER_STATE["running"]:
                     break
@@ -639,7 +640,7 @@ class TestScreenerStart(Isolated):
             # nur ein gewählter Index
             a.SCREENER_UNIVERSES = {"t": ("Test", ["AAA"]), "u": ("Zwei", ["DDD", "EEE"])}
             calls.clear()
-            self.assertTrue(a.screener_start("anna", "all", ["u"])[0])
+            self.assertTrue(a.screener_start("anna", "all", ["u", "t"])[0])  # mehrere übergeben -> nur der erste
             for _ in range(50):
                 if not a.SCREENER_STATE["running"]:
                     break
