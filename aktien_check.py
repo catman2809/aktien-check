@@ -3847,6 +3847,8 @@ def analyze(query):
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
     }
     CACHE[key] = (time.time(), result)
+    if len(CACHE) > 40:
+        safe(prune_caches)
     return result
 
 
@@ -4294,11 +4296,49 @@ def clean_watchlist(items):
     return out[:150]
 
 
+# ---------------------------------------------------------------------------
+# Zwischenspeicher begrenzen: abgelaufene Einträge löschen, Höchstzahl je Speicher (älteste zuerst raus)
+# ---------------------------------------------------------------------------
+def cache_rules():
+    """(Name, Speicher, Lebensdauer in Sekunden, Höchstzahl Einträge) – Einträge sind (Zeitstempel, Daten)."""
+    return [("Analysen", CACHE, 900, 40), ("Charts", CHART_CACHE, 12 * 3600, 120),
+            ("Erfolgsrechnung", INCOME_CACHE, 12 * 3600, 60), ("Profile", PROFILE_CACHE, 7 * 86400, 150),
+            ("Wettbewerber", PEER_CACHE, 6 * 3600, 200), ("Termine", EVENT_CACHE, 6 * 3600, 100),
+            ("Finnhub", FINNHUB_CACHE, 3600, 400), ("CoinGecko", CG_CACHE, 86400, 60),
+            ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50)]
+
+
+def prune_caches():
+    """Räumt alle Zwischenspeicher auf; gibt die Zahl gelöschter Einträge zurück."""
+    removed, now = 0, time.time()
+    for _name, cache, ttl, maxn in cache_rules():
+        items = list(cache.items())
+        for k, v in items:
+            ts = v[0] if isinstance(v, tuple) and v and isinstance(v[0], (int, float)) else now
+            if now - ts > ttl:
+                cache.pop(k, None)
+                removed += 1
+        if len(cache) > maxn:
+            for k, _v in sorted(cache.items(), key=lambda kv: kv[1][0] if isinstance(kv[1], tuple) else 0)[:len(cache) - maxn]:
+                cache.pop(k, None)
+                removed += 1
+    if len(FIN_CUR_CACHE) > 500:  # nur kurze Texte (Bilanzwährung) – bei Bedarf komplett leeren
+        removed += len(FIN_CUR_CACHE)
+        FIN_CUR_CACHE.clear()
+    if removed:
+        import gc
+        gc.collect()
+    return removed
+
+
 def history_flush_loop():
     while True:
         time.sleep(60)
         if STORE.dirty:
             safe(STORE.save)
+        n = safe(prune_caches) or 0
+        if n:
+            LOG.info("[Speicher] Zwischenspeicher aufgeräumt: %d Einträge entfernt", n)
 
 
 def app_base_url():
@@ -4422,6 +4462,8 @@ def alert_loop():
 REPORT_WEEKDAY, REPORT_HOUR = 6, 18
 REPORT_MAX = 30          # höchstens so viele Watchlist-Werte neu bewerten
 REPORT_LOCK = threading.Lock()
+REPORT_PAUSE = 1.5       # Sekunden zwischen zwei Werten (Prozessor des kostenlosen Servers schonen)
+REPORT_USER_PAUSE = 20   # Sekunden zwischen zwei Konten
 WEEKDAY_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
@@ -4460,6 +4502,7 @@ def build_weekly_report(user):
         today = datetime.now().strftime("%Y-%m-%d")
         prev = next((p_[2] for p_ in reversed(pts) if p_[0] != today), None) or it.get("label")
         res = safe(lambda: analyze(sym))
+        time.sleep(REPORT_PAUSE)
         if not res:
             rows.append({"symbol": sym, "name": it.get("name") or sym, "error": True})
             continue
@@ -4543,11 +4586,14 @@ def send_due_reports():
             data["u"][u_]["report"]["last"] = today
         if due:
             STORE.dirty = True
-    for u_ in due:
+    for i_, u_ in enumerate(due):  # Konten nacheinander, mit Pause und Aufräumen dazwischen
+        if i_:
+            time.sleep(REPORT_USER_PAUSE)
         try:
             send_weekly_report(u_)
         except Exception:
             LOG.exception("[Bericht] Versand an %s fehlgeschlagen", u_)
+        safe(prune_caches)
     if due:
         safe(STORE.save)
 

@@ -558,13 +558,14 @@ class TestEtfAndReport(Isolated):
                        "events": [{"date": "2026-10-28", "label": "Quartalszahlen", "days": 3}]},
             "BAYN.DE": {"symbol": "BAYN.DE", "name": "Bayer AG", "price": 25, "currency": "EUR", "summary": {"adjective": "x"},
                         "rating": {"label": "Hold", "group": "Halten", "score": -10}, "events": []}}
-        orig = (a.analyze, a.week_change)
+        orig = (a.analyze, a.week_change, a.REPORT_PAUSE)
         a.analyze = lambda q: fake[q]
+        a.REPORT_PAUSE = 0
         a.week_change = lambda s_: {"SAP.DE": 0.03, "BAYN.DE": -0.02}[s_]
         try:
             title, msg = a.build_weekly_report("anna")
         finally:
-            a.analyze, a.week_change = orig
+            a.analyze, a.week_change, a.REPORT_PAUSE = orig
         self.assertIn("Wochenbericht", title)
         self.assertIn("SAP: Outperform → Buy", msg)
         self.assertNotIn("Bayer: Hold →", msg)            # unverändert
@@ -590,6 +591,22 @@ class TestEtfAndReport(Isolated):
         finally:
             a.berlin_now, a.send_weekly_report = orig
         self.assertEqual(sent, ["anna"])
+
+
+class TestCachePruning(unittest.TestCase):
+    def test_prune_expired_and_cap(self):
+        saved = (dict(a.CACHE), dict(a.PEER_CACHE))
+        try:
+            a.CACHE.clear()
+            a.CACHE.update({f"x{i}": (time.time() - i, {}) for i in range(60)})
+            a.PEER_CACHE["alt"] = (time.time() - 7 * 3600, None)
+            a.prune_caches()
+            self.assertEqual(len(a.CACHE), 40)          # Höchstzahl
+            self.assertIn("x0", a.CACHE)                # neueste bleiben
+            self.assertNotIn("x59", a.CACHE)            # älteste zuerst raus
+            self.assertNotIn("alt", a.PEER_CACHE)       # abgelaufen
+        finally:
+            a.CACHE.clear(); a.CACHE.update(saved[0]); a.PEER_CACHE.clear(); a.PEER_CACHE.update(saved[1])
 
 
 class TestForecastAndFairValue(unittest.TestCase):
