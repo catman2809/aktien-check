@@ -366,6 +366,19 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .legend i.box{width:10px;height:10px;border:0;border-radius:3px;background:currentColor}
 .legend i.mar{width:18px;border-top:2px solid currentColor;position:relative}
 .legend i.mar::after{content:"";position:absolute;left:5px;top:-5px;width:6px;height:6px;border:2px solid currentColor;border-radius:50%;background:var(--surface)}
+.about dl{margin:0}
+.about-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 22px;border-top:1px solid var(--border)}
+.about-row:first-child{border-top:0}
+.about-row dt{color:var(--text-2);font-size:14px}
+.about-row dt small{display:block;color:var(--text-3);font-size:11.5px}
+.about-row dd{margin:0;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14.5px;text-align:right;min-width:0;overflow-wrap:anywhere}
+.about-row dd a{color:var(--accent);text-decoration:none}
+.about-row dd a:hover{text-decoration:underline}
+.about-row .mono{font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.copy-btn{flex:none;width:30px;height:30px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-3);cursor:pointer}
+.copy-btn:hover{color:var(--text);border-color:var(--border-strong)}
+.copy-btn.ok{color:var(--pos);border-color:var(--pos-line)}
+@media (max-width:640px){.about-row{padding:11px 16px}}
 .legend i.mar.op{border-top-style:dashed}
 .legend i.mar.op::after{border-radius:1.5px}
 .legend i.sma50{color:var(--sma50)} .legend i.sma200{color:var(--sma200)}
@@ -503,7 +516,7 @@ table.peers .neg{color:var(--neg)}
   html,body{background:#fff !important;font-size:12px}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .topbar,.subnav,.watch-row,.alts,.more,.chart-ctrl,#ch-seg,.ind-row,.toggle,.seg,#nlist,.tier-desc,.ev-head .btn,
-  .bell-btn,.x-btn,.toast,.modal-bg,.a2hs,#ch-hover,#ch-tip,.chart-tip,.peer-foot br{display:none !important}
+  .bell-btn,.x-btn,.copy-btn,.toast,.modal-bg,.a2hs,#ch-hover,#ch-tip,.chart-tip,.peer-foot br{display:none !important}
   .print-only{display:block !important}
   main{padding:0}
   .container{max-width:none;padding:0}
@@ -616,7 +629,7 @@ table.peers .neg{color:var(--neg)}
 <nav class="subnav" id="subnav">
   <div class="container">
     <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#kategorien">Einschätzung im Detail</a>
-    <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#methodik">Methodik</a>
+    <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
 </nav>
@@ -1746,6 +1759,49 @@ function cryptoPeersSection(d) {
     <div class="peer-foot">Quelle: ${esc(C.source || "CoinGecko")}. Marktwert in Euro.</div>
   </div>`;
 }
+/* Unternehmensprofil („Über“) */
+const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+function aboutSection(d) {
+  const p = d.profile;
+  if (!p || d.asset === "crypto") return "";
+  const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; } };
+  const date = iso => { const t = new Date(iso + "T00:00:00"); return isNaN(t) ? iso : t.toLocaleDateString("de-DE", {day: "numeric", month: "short", year: "numeric"}); };
+  const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
+  const rows = [
+    ["Sektor", p.sector || d.sector],
+    ["Branche", p.industry || d.industry],
+    ["CEO", p.ceo],
+    ["Webseite", safeUrl(p.website || d.website) ? `<a href="${esc(safeUrl(p.website || d.website))}" target="_blank" rel="noopener">${esc(host(p.website || d.website))}</a>` : "", true],
+    ["Hauptsitz", p.hq],
+    ["Gegründet", p.founded],
+    [p.ipo_label === "Erster Handelstag" ? "Erster Handelstag" : "IPO-Datum", p.ipo ? date(p.ipo) : "", false,
+     p.ipo_label === "Erster Handelstag" ? "an diesem Börsenplatz, laut Yahoo" : ""],
+    ["Mitarbeiter", p.employees ? nf(p.employees, 0) : ""],
+    ["ISIN", p.isin, false, p.isin_home ? "der Aktie an der Heimatbörse" : "", true],
+    ["CUSIP", p.cusip, false, "", true],
+    ["FIGI", p.figi, false, "Composite-FIGI dieses Börsenplatzes", true],
+  ].filter(r => r[1]);
+  if (!rows.length) return "";
+  return `<h2 class="section" id="ueber">Über ${esc(d.name)}</h2>
+  <p class="section-sub">Stammdaten des Unternehmens. Quellen: ${esc((p.sources || []).join(", "))}.</p>
+  <div class="card about"><dl>${rows.map(([k, v, html, hint, copy]) => `<div class="about-row">
+      <dt>${esc(k)}${hint ? `<small>${esc(hint)}</small>` : ""}</dt>
+      <dd>${html ? v : `<span class="${copy ? "num mono" : ""}">${esc(v)}</span>`}${copy ? `<button class="copy-btn" data-copy="${esc(v)}" aria-label="${esc(k)} kopieren" title="Kopieren">${COPY_SVG}</button>` : ""}</dd>
+    </div>`).join("")}</dl></div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest(".copy-btn"); if (!b) return;
+  const v = b.dataset.copy;
+  const done = () => { toast(`${v} kopiert`); b.classList.add("ok"); setTimeout(() => b.classList.remove("ok"), 1200); };
+  const legacy = () => {  // Ersatzweg, wenn die Zwischenablage-Schnittstelle gesperrt ist
+    const t = document.createElement("textarea"); t.value = v; t.setAttribute("readonly", "");
+    t.style.cssText = "position:absolute;left:-9999px"; document.body.appendChild(t); t.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (err) {} t.remove();
+    ok ? done() : toast("Kopieren nicht möglich");
+  };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(v).then(done, legacy); else legacy();
+});
+
 function peersSection(d) {
   if (d.asset === "crypto") return cryptoPeersSection(d);
   const C = d.competitors || {};
@@ -1968,6 +2024,8 @@ function render(d) {
     <div class="news-foot">Tier-3-Meldungen (Pressemitteilungen, Unternehmensseiten) gelten als <b>bestätigt</b>, wenn eine Tier-1/2-Quelle inhaltlich übereinstimmt. Unbestätigte fließen nur zur Hälfte ein.
       ${N.errors.length ? `<br>Nicht erreichbar: ${esc(N.errors.join(", "))}` : ""}</div>
   </div>
+
+  ${aboutSection(d)}
 
   <h2 class="section" id="methodik">Methodik</h2>
   <p class="section-sub">So entsteht die Empfehlung. Alle Regeln sind transparent und im Programmcode anpassbar.</p>

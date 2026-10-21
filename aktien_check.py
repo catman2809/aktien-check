@@ -2648,6 +2648,152 @@ def analyze_crypto(cr):
     }
 
 
+# ---------------------------------------------------------------------------
+# Unternehmensprofil („Über“): Yahoo + Wikidata (ISIN, Gründung, CEO, Sitz) + OpenFIGI + Finnhub (Börsengang)
+# ---------------------------------------------------------------------------
+PROFILE_CACHE = {}
+# Yahoo-Börsenkürzel -> Länderkennung der ISIN und Bloomberg-Börsencode (Composite) für OpenFIGI
+SUFFIX_MARKET = {"": ("US", "US"), "DE": ("DE", "GR"), "F": ("DE", "GR"), "BE": ("DE", "GR"), "MU": ("DE", "GR"),
+                 "SG": ("DE", "GR"), "HM": ("DE", "GR"), "DU": ("DE", "GR"), "HA": ("DE", "GR"), "L": ("GB", "LN"),
+                 "PA": ("FR", "FP"), "AS": ("NL", "NA"), "MI": ("IT", "IM"), "SW": ("CH", "SW"), "CO": ("DK", "DC"),
+                 "ST": ("SE", "SS"), "HE": ("FI", "FH"), "OL": ("NO", "NO"), "MC": ("ES", "SM"), "VI": ("AT", "AV"),
+                 "BR": ("BE", "BB"), "LS": ("PT", "PL"), "IR": ("IE", "ID"), "TO": ("CA", "CN"), "V": ("CA", "CN"),
+                 "T": ("JP", "JP"), "HK": ("HK", "HK"), "AX": ("AU", "AU")}
+
+
+COUNTRY_DE = {"United States": "USA", "Germany": "Deutschland", "United Kingdom": "Großbritannien",
+              "France": "Frankreich", "Netherlands": "Niederlande", "Switzerland": "Schweiz", "Denmark": "Dänemark",
+              "Sweden": "Schweden", "Finland": "Finnland", "Norway": "Norwegen", "Spain": "Spanien", "Italy": "Italien",
+              "Austria": "Österreich", "Belgium": "Belgien", "Ireland": "Irland", "Japan": "Japan", "China": "China",
+              "Taiwan": "Taiwan", "South Korea": "Südkorea", "Canada": "Kanada", "Australia": "Australien",
+              "Hong Kong": "Hongkong", "Luxembourg": "Luxemburg", "Portugal": "Portugal", "Israel": "Israel",
+              "India": "Indien", "Brazil": "Brasilien"}
+
+
+def _plain_name(s):
+    return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower().replace("&", " and ")).split()
+
+
+def wikidata_company(ticker, company, isin_cc):
+    """Stammdaten über das Börsenkürzel aus Wikidata; nur wenn der Firmenname passt."""
+    variants = {ticker, ticker.replace("-", " "), ticker.replace("-", "."), ticker.replace("-", "")}
+    vals = " ".join('"%s"' % v.replace('"', "") for v in variants)
+    q = '''SELECT ?c ?cLabel ?isin ?inc ?ceoLabel ?hqLabel ?web WHERE {
+      VALUES ?t { %s } ?c p:P414 ?st. ?st pq:P249 ?t.
+      OPTIONAL { ?c wdt:P946 ?isin }
+      OPTIONAL { ?c wdt:P571 ?inc }
+      OPTIONAL { ?c p:P169 ?cs. ?cs ps:P169 ?ceo. FILTER NOT EXISTS { ?cs pq:P582 ?end } }
+      OPTIONAL { ?c wdt:P159 ?hq }
+      OPTIONAL { ?c wdt:P856 ?web }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". } } LIMIT 80''' % vals
+    url = "https://query.wikidata.org/sparql?format=json&query=" + urllib.parse.quote(q)
+    req = urllib.request.Request(url, headers={"User-Agent": "Aktien-Check/1.0 (private Analyse-App)"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        rows = json.loads(r.read())["results"]["bindings"]
+    want = _plain_name(company)
+    if not want:
+        return None
+    best = {}
+    for b in rows:
+        v = {k: x["value"] for k, x in b.items()}
+        got = _plain_name(v.get("cLabel"))
+        # Erster Namensbestandteil muss übereinstimmen (verhindert z. B. SAP -> Sappi, ALV -> Autoliv/Allianz)
+        if not got or got[0] != want[0]:
+            continue
+        e = best.setdefault(v["c"], {"isins": set(), "inc": None, "ceo": None, "hq": None, "web": None})
+        e["web"] = e["web"] or v.get("web")
+        if v.get("isin"):
+            e["isins"].add(v["isin"])
+        e["inc"] = e["inc"] or v.get("inc")
+        if v.get("ceoLabel") and not re.fullmatch(r"Q\d+", v["ceoLabel"]):
+            e["ceo"] = e["ceo"] or v["ceoLabel"]
+        if v.get("hqLabel") and not re.fullmatch(r"Q\d+", v["hqLabel"]):
+            e["hq"] = e["hq"] or v["hqLabel"]
+    if len(best) != 1:
+        return None  # nicht eindeutig -> lieber nichts anzeigen
+    e = next(iter(best.values()))
+    isins = sorted(e["isins"], key=lambda i: (not i.startswith(isin_cc), i))
+    return {"isins": isins, "founded": e["inc"][:4] if e["inc"] and e["inc"][:1] != "-" else None,
+            "ceo": e["ceo"], "hq": e["hq"], "website": e["web"]}
+
+
+def openfigi_map(id_type, value, exch):
+    body = json.dumps([{"idType": id_type, "idValue": value, "exchCode": exch, "marketSecDes": "Equity"}]).encode()
+    req = urllib.request.Request("https://api.openfigi.com/v3/mapping", data=body,
+                                 headers={**UA, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return (json.loads(r.read()) or [{}])[0].get("data") or []
+
+
+def verified_isin(isins, ticker, exch):
+    """Wikidata kennt oft mehrere ISINs (z. B. A- und B-Aktie) -> per OpenFIGI die zum Kürzel passende wählen."""
+    want = ticker.replace("-", "/").upper()
+    for isin in isins[:3]:
+        data = safe(lambda: openfigi_map("ID_ISIN", isin, exch)) if exch else None
+        if data and any((d.get("ticker") or "").upper() == want for d in data):
+            return isin, True
+    return (isins[0], False) if len(isins) == 1 else (None, False)
+
+
+def openfigi(ticker, exch):
+    """Composite-FIGI des Börsenplatzes (frei nutzbare OpenFIGI-Schnittstelle)."""
+    body = json.dumps([{"idType": "TICKER", "idValue": ticker.replace("-", "/"), "exchCode": exch,
+                        "marketSecDes": "Equity"}]).encode()
+    req = urllib.request.Request("https://api.openfigi.com/v3/mapping", data=body,
+                                 headers={**UA, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = (json.loads(r.read()) or [{}])[0].get("data") or []
+    return data[0].get("compositeFIGI") or data[0].get("figi") if data else None
+
+
+def company_profile(symbol, info, company):
+    hit = PROFILE_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1]
+    base, _, suf = symbol.partition(".")
+    isin_cc, exch = SUFFIX_MARKET.get(suf, (None, None))
+    wd = safe(lambda: wikidata_company(base, company, isin_cc or "")) or {}
+    figi = safe(lambda: openfigi(base, exch)) if exch else None
+    fh = (safe(lambda: finnhub("stock/profile2", symbol=symbol)) or {}) if not suf else {}
+    # CEO: Yahoo ist aktueller als Wikidata
+    ceo = None
+    for o in info.get("companyOfficers") or []:
+        title = o.get("title") or ""
+        if re.search(r"\bCEO\b|Chief Executive", title) and not re.search(r"\b(Former|Ex-)\b", title):
+            nm = re.sub(r"^(Mr|Ms|Mrs|Dr|Prof)\.?\s+", "", re.sub(r"\s+", " ", o.get("name") or ""))
+            # Abschlüsse/Titel am Ende entfernen (z. B. „B.A.“, „Ph.D.“, „CPA“)
+            nm = re.sub(r"(,?\s+(?:[A-Z][a-zA-Z]{0,3}\.){1,4}|,?\s+(?:CPA|CFA|MBA|BSc|MSc))+$", "", nm).strip(" ,")
+            ceo = nm or None
+            break
+    ceo = ceo or wd.get("ceo")
+    hq = wd.get("hq") or info.get("city")
+    country = COUNTRY_DE.get(info.get("country") or "", info.get("country") or "")
+    isin, isin_ok = verified_isin(wd.get("isins") or [], base, exch)
+    ipo, ipo_label = None, "Börsengang"
+    if fh.get("ipo"):
+        ipo = fh["ipo"]
+    else:
+        ms = num(info.get("firstTradeDateMilliseconds"))
+        if ms:
+            ipo, ipo_label = datetime.utcfromtimestamp(ms / 1000).strftime("%Y-%m-%d"), "Erster Handelstag"
+    out = {
+        "sector": info.get("sector") or "", "industry": info.get("industry") or fh.get("finnhubIndustry") or "",
+        "ceo": ceo, "website": info.get("website") or fh.get("weburl") or wd.get("website") or "",
+        "hq": ", ".join(x for x in (hq, country) if x) or None,
+        "founded": wd.get("founded"), "ipo": ipo, "ipo_label": ipo_label,
+        "employees": num(info.get("fullTimeEmployees")),
+        "isin": isin,
+        # ISIN einer anderen Börse (z. B. US-Hinterlegungsschein auf eine deutsche Aktie)
+        "isin_home": bool(isin and not isin_ok and isin_cc and not isin.startswith(isin_cc)),
+        "cusip": isin[2:11] if isin and isin[:2] in ("US", "CA") else None,
+        "figi": figi,
+        "sources": [s for s, ok in (("Yahoo Finance", True), ("Wikidata", bool(wd)), ("OpenFIGI", bool(figi)),
+                                    ("Finnhub", bool(fh))) if ok],
+    }
+    PROFILE_CACHE[symbol] = (time.time(), out)
+    return out
+
+
 CACHE = {}
 
 
@@ -2661,7 +2807,7 @@ def analyze(query):
         CACHE[key] = (time.time(), result)
         return result
     symbol, t, info, alternatives = resolve(query)
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         fm = ex.submit(gather, symbol, t, info)
         fmac = ex.submit(gather_macro, info.get("currency") or "")
         company = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
@@ -2670,9 +2816,11 @@ def analyze(query):
         ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         fpeer = ex.submit(competitors, symbol, info, alternatives)
+        fprof = ex.submit(company_profile, symbol, info, company)
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
+        profile = safe(lambda: fprof.result(timeout=30))
     finnhub_enrich(m, symbol, alternatives)
     own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
                "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],
@@ -2738,6 +2886,7 @@ def analyze(query):
                                         "upside", "target", "beta", "hi52", "lo52", "n_analysts", "rec_mean",
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
+        "profile": profile,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
