@@ -2074,17 +2074,20 @@ def income_data(symbol, freq):
         return None
     rev = row("Total Revenue", "Operating Revenue")
     ni = row("Net Income", "Net Income Common Stockholders", "Net Income From Continuing Operation Net Minority Interest")
+    op = row("Operating Income", "Total Operating Income As Reported", "EBIT")
     if rev is None or ni is None:
         raise ValueError("Keine Geschäftszahlen verfügbar")
     periods = []
     for col in sorted(df.columns):
         r, n = num(rev.get(col)), num(ni.get(col))
+        o = num(op.get(col)) if op is not None else None
         if r is None or n is None or r <= 0:
             continue  # Yahoo hängt oft eine leere Spalte an
         end = col.date() if hasattr(col, "date") else col
         # Quartale nach Monat des Periodenendes benennen (Geschäftsquartale weichen oft vom Kalender ab)
         label = str(end.year) if freq == "annual" else f"{MONTHS_DE_SHORT[end.month - 1]} {str(end.year)[2:]}"
-        periods.append({"label": label, "end": end.isoformat(), "revenue": r, "net_income": n, "margin": n / r})
+        periods.append({"label": label, "end": end.isoformat(), "revenue": r, "net_income": n, "margin": n / r,
+                        "op_income": o, "op_margin": o / r if o is not None else None})
     periods = periods[-5:] if freq == "annual" else periods[-6:]
     if not periods:
         raise ValueError("Keine Geschäftszahlen verfügbar")
