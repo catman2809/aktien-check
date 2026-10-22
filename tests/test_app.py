@@ -384,7 +384,7 @@ class TestHTTP(Isolated):
         self.assertEqual(self.login(op, "admin", "falsch"), 401)
         self.assertEqual(self.login(op, "admin", "test-admin-pass"), 303)
         st, _, b = self.call(op, "/api/me")
-        self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True})
+        self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True, "unread": 0})
 
     def test_users_watchlist_and_permissions(self):
         adm, anna = self.client(), self.client()
@@ -405,6 +405,18 @@ class TestHTTP(Isolated):
         dash = json.loads(self.call(adm, "/api/admin/dashboard")[2])
         self.assertEqual(dash["subs"]["active"], 1)
         self.assertEqual(next(u_ for u_ in dash["users"] if u_["name"] == "anna")["sub"]["state"], "aktiv")
+        # Nachrichten: Benutzer -> Admin -> Benutzer, mit Ungelesen-Zähler
+        self.assertEqual(self.call(anna, "/api/messages", {"text": "  "})[0], 400)        # leere Nachricht abgelehnt
+        self.call(anna, "/api/messages", {"text": "Hallo Admin, wie bezahle ich?"})
+        self.assertEqual(json.loads(self.call(adm, "/api/me")[2])["unread"], 1)
+        self.assertEqual(self.call(anna, "/api/admin/messages")[0], 403)
+        th = json.loads(self.call(adm, "/api/admin/messages?user=anna")[2])["messages"]
+        self.assertEqual(th[0]["text"], "Hallo Admin, wie bezahle ich?")
+        self.assertEqual(json.loads(self.call(adm, "/api/me")[2])["unread"], 0)          # beim Öffnen gelesen
+        self.call(adm, "/api/admin/messages", {"user": "anna", "text": "Per Überweisung."})
+        self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["unread"], 1)
+        self.assertEqual(len(json.loads(self.call(anna, "/api/messages")[2])["messages"]), 2)
+        self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["unread"], 0)
         self.assertEqual(self.call(anna, "/api/admin/dashboard")[0], 403)          # Dashboard nur für Admins
         self.assertEqual(self.call(anna, "/api/admin/system", {"action": "save"})[0], 403)
         st_, _h, body_ = self.call(adm, "/api/admin/dashboard")
@@ -726,6 +738,24 @@ class TestTechnicals(unittest.TestCase):
         closes = [100 + 2 * math.sin(i / 3) for i in range(120)] + [104, 106, 108]
         names = [p_["name"] for p_ in a.chart_patterns(self.ohlc(closes))]
         self.assertIn("Ausbruch nach oben", names)
+
+
+class TestSubReminder(Isolated):
+    def test_reminder_five_days_before_once(self):
+        orig = (a.users, a.ntfy_send)
+        a.users = lambda: {"admin": {"admin": True}, "anna": {"admin": False}, "ben": {"admin": False}}
+        a.ntfy_send = lambda *x, **k: True
+        try:
+            a.user_space("anna")["sub"] = {"paid_until": int(time.time() + 3 * 86400)}     # läuft in 3 Tagen ab
+            a.user_space("ben")["sub"] = {"paid_until": int(time.time() + 20 * 86400)}     # noch lange
+            self.assertEqual(a.check_sub_reminders(), 1)
+            self.assertEqual(a.check_sub_reminders(), 0)                                   # nur einmal je Laufzeit
+            msgs = a.user_space("anna")["messages"]
+            self.assertTrue(msgs[-1]["system"] and "läuft am" in msgs[-1]["text"])
+            self.assertEqual(a.unread_for_user("anna"), 1)
+            self.assertNotIn("messages", a.user_space("ben"))
+        finally:
+            a.users, a.ntfy_send = orig
 
 
 class TestForecastAndFairValue(unittest.TestCase):

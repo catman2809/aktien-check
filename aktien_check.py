@@ -4815,6 +4815,110 @@ def sub_admin_action(admin, name, action, months=1):
     return sub_status(sp)
 
 
+# ---------------------------------------------------------------------------
+# Nachrichten zwischen Benutzer und Admin (ein Verlauf je Benutzer) + Abo-Erinnerung
+# ---------------------------------------------------------------------------
+MSG_MAX_LEN = 2000
+MSG_KEEP = 200
+SUB_REMIND_DAYS = 5
+
+
+def admin_names():
+    return [u_ for u_, acc in users().items() if acc.get("admin")]
+
+
+def notify_admins(title, text, tags=None):
+    for tp in {user_space(a_)["topic"] for a_ in admin_names()}:
+        safe(lambda: ntfy_send(title, text, tags=tags or ["envelope"], priority=3, topic=tp))
+
+
+def post_message(thread_user, sender, text, system=False):
+    """Neue Nachricht im Verlauf von thread_user. sender = Benutzername (Benutzer oder Admin) oder „System“."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Bitte eine Nachricht eingeben.")
+    if len(text) > MSG_MAX_LEN:
+        raise ValueError(f"Die Nachricht ist zu lang (höchstens {MSG_MAX_LEN} Zeichen).")
+    sp = user_space(thread_user)
+    from_admin = system or sender != thread_user
+    with STORE.lock:
+        msgs = sp.setdefault("messages", [])
+        msgs.append({"t": int(time.time()), "from": sender, "admin": from_admin, "system": system, "text": text,
+                     "read_user": not from_admin, "read_admin": from_admin})
+        del msgs[:-MSG_KEEP]
+        STORE.dirty = True
+    save_async()
+    if from_admin:
+        safe(lambda: ntfy_send("✉️ Nachricht vom Aktien-Check-Admin" if not system else "ℹ️ Aktien-Check",
+                               text[:300] + (" …" if len(text) > 300 else ""), tags=["envelope"], priority=3, topic=sp["topic"]))
+    else:
+        notify_admins(f"✉️ Nachricht von {thread_user}", text[:300] + (" …" if len(text) > 300 else ""))
+    LOG.info("[Nachricht] %s → %s", sender, "Admin" if not from_admin else thread_user)
+    return sp["messages"]
+
+
+def thread_payload(thread_user, viewer_is_admin):
+    """Verlauf eines Benutzers; markiert Nachrichten der Gegenseite als gelesen."""
+    sp = user_space(thread_user)
+    with STORE.lock:
+        msgs = sp.setdefault("messages", [])
+        changed = False
+        for m_ in msgs:
+            key = "read_admin" if viewer_is_admin else "read_user"
+            if not m_.get(key):
+                m_[key] = True
+                changed = True
+        if changed:
+            STORE.dirty = True
+        return [dict(m_) for m_ in msgs]
+
+
+def unread_for_user(user):
+    return sum(1 for m_ in user_space(user).get("messages", []) if m_.get("admin") and not m_.get("read_user"))
+
+
+def admin_threads():
+    out = []
+    data = STORE.load()
+    with STORE.lock:
+        for name, sp in data["u"].items():
+            msgs = sp.get("messages") or []
+            if not msgs:
+                continue
+            last = msgs[-1]
+            out.append({"user": name, "count": len(msgs), "unread": sum(1 for m_ in msgs if not m_.get("admin") and not m_.get("read_admin")),
+                        "last_t": last["t"], "last_text": last["text"][:120], "last_from_admin": last.get("admin")})
+    return sorted(out, key=lambda x: (-x["unread"], -x["last_t"]))
+
+
+def check_sub_reminders():
+    """5 Tage vor Ablauf: Push an den Benutzer, Hinweis an die Admins, automatische Nachricht im Verlauf."""
+    now = time.time()
+    due = []
+    data = STORE.load()
+    accs = users()
+    with STORE.lock:
+        for name, sp in data["u"].items():
+            if (accs.get(name) or {}).get("admin"):
+                continue
+            sub = sp.get("sub") or {}
+            until = sub.get("paid_until") or 0
+            if until > now and until - now <= SUB_REMIND_DAYS * 86400 and not sub.get("cancel_requested") \
+                    and sub.get("reminded_for") != until:
+                sub["reminded_for"] = until  # je Laufzeit nur einmal erinnern
+                due.append((name, until))
+        if due:
+            STORE.dirty = True
+    for name, until in due:
+        d_ = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
+        safe(lambda: post_message(name, "System", f"Dein Aktien-Check-Abo läuft am {d_} ab. Wenn du es verlängern möchtest, "
+                                  "überweise bitte den nächsten Beitrag – der Administrator schaltet es nach Zahlungseingang frei. "
+                                  "Bei Fragen antworte einfach auf diese Nachricht.", system=True))
+        notify_admins("💶 Abo läuft bald ab", f"Das Abo von {name} läuft am {d_} ab.", tags=["moneybag"])
+        LOG.info("[Abo] Erinnerung an %s (Ablauf %s)", name, d_)
+    return len(due)
+
+
 def record_usage(user, symbol):
     """Zählt Analysen je Tag, Benutzer und Wert (für das Admin-Dashboard; 90 Tage)."""
     data = STORE.load()
@@ -4892,7 +4996,9 @@ def admin_dashboard():
     mem = mem_mb()
     subs_active = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["active"])
     subs_open = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["state"] == "angefragt")
+    threads = admin_threads()
     return {
+        "messages": {"threads": threads, "unread": sum(t_["unread"] for t_ in threads)},
         "subs": {"active": subs_active, "requested": subs_open, "revenue_month": subs_active * SUB_PRICE_EUR,
                  "price": SUB_PRICE_EUR, "payment_info": payment_info()},
         "kpi": {"users": len(accs), "analyses_today": (st["days"].get(today) or {}).get("analyses", 0),
@@ -5398,6 +5504,7 @@ def alert_loop():
         except Exception:
             LOG.exception("[Alarm] Prüfung abgebrochen")
         safe(send_due_reports)
+        safe(check_sub_reminders)
         time.sleep(CHECK_INTERVAL)
 
 
@@ -5818,6 +5925,17 @@ class Handler(BaseHTTPRequestHandler):
                         acc["pw"], acc["ver"] = hash_pw(new), int(acc.get("ver", 0)) + 1  # andere Geräte abmelden
                     STORE.save()
                     return self.send_json({"ok": True}, cookie=self.cookie(make_session_token(user), SESSION_DAYS * 86400))
+                if u.path == "/api/messages":
+                    post_message(user, user, str(body.get("text") or ""))
+                    return self.send_json({"messages": thread_payload(user, False)})
+                if u.path == "/api/admin/messages":
+                    if not self.is_admin():
+                        return self.send_json({"error": "Nur für Administratoren"}, 403)
+                    who = str(body.get("user") or "").strip().lower()
+                    if who not in users():
+                        raise ValueError("Diesen Benutzer gibt es nicht.")
+                    post_message(who, user, str(body.get("text") or ""))
+                    return self.send_json({"user": who, "messages": thread_payload(who, True)})
                 if u.path == "/api/subscription":
                     return self.send_json({**sub_user_action(user, body.get("action")), "payment_info": payment_info()})
                 if u.path == "/api/admin/subscription":
@@ -6028,7 +6146,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/cron":  # Weckruf von cron-job.org: prüft Alarme im Hintergrund
             if not app_password() or not hmac.compare_digest((qs.get("key") or [""])[0], cron_key()):
                 return self.send(403, "forbidden", "text/plain")
-            threading.Thread(target=lambda: (safe(run_alert_checks), safe(send_due_reports)), daemon=True).start()
+            threading.Thread(target=lambda: (safe(run_alert_checks), safe(send_due_reports), safe(check_sub_reminders)),
+                             daemon=True).start()
             return self.send(200, "ok", "text/plain")
         if not self.require_login(u):
             return
@@ -6062,7 +6181,20 @@ class Handler(BaseHTTPRequestHandler):
             if time.time() - (sp_.get("last_seen") or 0) > 300:
                 sp_["last_seen"] = int(time.time())
                 STORE.dirty = True
-            return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
+            adm_ = self.is_admin()
+            unread_ = sum(t_["unread"] for t_ in admin_threads()) if adm_ else unread_for_user(user)
+            return self.send_json({"user": user, "admin": adm_, "multi": bool(app_password()), "unread": unread_})
+        if u.path == "/api/messages":
+            return self.send_json({"messages": thread_payload(user, False)})
+        if u.path == "/api/admin/messages":
+            if not self.is_admin():
+                return self.send_json({"error": "Nur für Administratoren"}, 403)
+            who = (qs.get("user") or [""])[0].strip().lower()
+            if who:
+                if who not in users():
+                    return self.send_json({"error": "Diesen Benutzer gibt es nicht."}, 404)
+                return self.send_json({"user": who, "messages": thread_payload(who, True)})
+            return self.send_json({"threads": admin_threads()})
         if u.path == "/api/subscription":
             acc_ = users().get(user) or {}
             return self.send_json({**sub_status(user_space(user)), "admin": bool(acc_.get("admin")) or not app_password(),

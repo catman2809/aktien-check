@@ -436,6 +436,27 @@ table.scr td b{font-weight:600}
 .ho-top span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.ck-grid{grid-template-columns:1fr;gap:12px}.ck-card{padding:14px 16px}}
 @media print{#ch-osc{display:none}}
+.acct-btn{position:relative}
+.acct-btn .badge-n{position:absolute;top:-4px;right:-4px}
+.msg-thread{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);margin-bottom:8px}
+.msg{max-width:85%;display:flex;flex-direction:column;gap:2px;font-size:14px;line-height:1.45}
+.msg span{padding:8px 11px;border-radius:12px;overflow-wrap:anywhere}
+.msg small{font-size:11px;color:var(--text-3);padding:0 4px}
+.msg.mine{align-self:flex-end;align-items:flex-end} .msg.mine span{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg.theirs{align-self:flex-start} .msg.theirs span{background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg.sys{align-self:center;max-width:95%;text-align:center} .msg.sys span{background:var(--neu-soft);color:var(--text);font-size:13px}
+.msg-empty{padding:12px;text-align:center}
+.msg-input{width:100%;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:8px 10px;font:inherit;font-size:14px;resize:vertical}
+.am-grid{display:grid;grid-template-columns:240px 1fr;gap:14px}
+.am-list{display:flex;flex-direction:column;gap:4px}
+.am-list select{height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:0 8px;font:inherit;font-size:13.5px}
+.am-t{text-align:left;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:9px;padding:8px 10px;cursor:pointer;font:inherit;display:flex;flex-direction:column;gap:2px}
+.am-t.on{border-color:var(--accent);background:var(--accent-soft)}
+.am-t span{display:flex;justify-content:space-between;align-items:center;font-size:13.5px}
+.am-t small{color:var(--text-3);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-b{position:static}
+.am-h{margin-bottom:6px;font-size:14px}
+@media (max-width:640px){.am-grid{grid-template-columns:1fr}}
 .sub-status{font-size:14.5px}
 .sub-info{padding:10px 12px;border-radius:10px;background:var(--accent-soft);font-size:13.5px}
 .sub-info p{margin:4px 0 0;color:var(--text-2);white-space:normal}
@@ -832,6 +853,7 @@ table.peers .neg{color:var(--neg)}
     <button class="icon-btn acct-btn" id="acctbtn" title="Konto" aria-label="Konto" style="display:none">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
       <span class="acct-name" id="acctname"></span>
+      <span class="badge-n" id="acctunread" style="display:none">0</span>
     </button>
     <button class="icon-btn" id="theme" title="Hell/Dunkel umschalten" aria-label="Farbschema umschalten">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
@@ -930,6 +952,8 @@ async function initAccount() {
   try { ME = await api("/api/me"); } catch (e) { return; }
   WL_KEY = "ac-watchlist:" + ME.user;
   if (ME.admin && document.querySelector(".welcome") && !document.querySelector("#admopen")) welcome();  // Admin-Kachel nachreichen
+  setUnread(ME.unread || 0);
+  if (ME.multi) setInterval(async () => { try { const me_ = await api("/api/me"); setUnread(me_.unread || 0); } catch (e) {} }, 60000);
   if (ME.admin && location.search.includes("view=admin")) showAdmin();
   // Einmalige Übernahme der bisherigen Geräte-Watchlist in das Konto
   let legacy = [];
@@ -1279,8 +1303,14 @@ async function openAccount() {
       <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="pw-save">Passwort ändern</button></div>
       <div class="form-msg" id="pw-msg"></div>
       <small class="stamp">Andere Geräte werden dabei abgemeldet, dieses bleibt angemeldet.</small></div>
+    ${!ME.admin ? `<div class="sec"><h4>Nachrichten an den Admin</h4>
+      <div class="msg-thread" id="msg-thread"><div class="stamp">Lade …</div></div>
+      <textarea id="msg-text" class="msg-input" rows="3" maxlength="2000" placeholder="Deine Nachricht an den Administrator …"></textarea>
+      <div class="modal-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn primary" id="msg-send">Senden</button></div>
+      <div class="form-msg" id="msg-msg"></div>
+      <small class="stamp">Antworten des Admins bekommst du als Push-Nachricht und hier im Verlauf.</small></div>` : ""}
     ${!ME.admin ? `<div class="sec" id="sub-sec"><h4>Abo – 2 € pro Monat</h4><div id="sub-box" class="stamp">Lade …</div></div>` : ""}
-    ${ME.admin ? `<div class="sec"><h4>Administration</h4><button class="btn primary" id="adm-open">Admin-Dashboard öffnen</button></div>` : ""}
+    ${ME.admin ? `<div class="sec"><h4>Administration</h4><button class="btn primary" id="adm-open">Admin-Dashboard öffnen${ME.unread ? ` · ${ME.unread} ungelesene Nachricht${ME.unread === 1 ? "" : "en"}` : ""}</button></div>` : ""}
     ${ME.admin ? `<div class="sec"><h4>Benutzer verwalten</h4><div id="users-list" class="stamp">Lade …</div>
       <h4 style="margin-top:18px">Neuen Benutzer anlegen</h4>
       <div class="field"><label for="nu-name">Benutzername</label><input id="nu-name" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="z. B. anna"></div>
@@ -1295,6 +1325,7 @@ async function openAccount() {
   $("#acct-close").onclick = closeModal;
   const ao_ = $("#adm-open"); if (ao_) ao_.onclick = () => { closeModal(); showAdmin(); };
   if ($("#sub-box")) loadSub();
+  if ($("#msg-thread")) loadThread();
   const msg = (id, text, ok) => { const m = $(id); m.textContent = text; m.className = "form-msg " + (ok ? "ok" : "err"); };
   $("#pw-save").onclick = async () => {
     try {
@@ -2075,6 +2106,38 @@ function healthSection(d) {
     <div class="an-grid">${bal}${div}${hold}</div>`;
 }
 
+/* Nachrichten Benutzer <-> Admin */
+function setUnread(n) {
+  if (ME) ME.unread = n;
+  const b = $("#acctunread"); if (!b) return;
+  b.textContent = n; b.style.display = n ? "" : "none";
+  $("#acctbtn")?.setAttribute("aria-label", n ? `Konto – ${n} ungelesene Nachricht${n === 1 ? "" : "en"}` : "Konto");
+}
+function threadHtml(msgs, me) {
+  if (!msgs.length) return `<div class="stamp msg-empty">Noch keine Nachrichten.</div>`;
+  return msgs.map(m_ => {
+    const when = new Date(m_.t * 1000).toLocaleString("de-DE", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
+    if (m_.system) return `<div class="msg sys"><span>${esc(m_.text)}</span><small>${when} · automatisch</small></div>`;
+    const mine = me === "admin" ? m_.admin : !m_.admin;
+    return `<div class="msg ${mine ? "mine" : "theirs"}"><span>${esc(m_.text).replace(/\n/g, "<br>")}</span>
+      <small>${mine ? "Du" : m_.admin ? "Admin (" + esc(m_.from) + ")" : esc(m_.from)} · ${when}</small></div>`;
+  }).join("");
+}
+async function loadThread() {
+  const box = $("#msg-thread"); if (!box) return;
+  try { const r = await api("/api/messages"); box.innerHTML = threadHtml(r.messages, "user"); box.scrollTop = box.scrollHeight; setUnread(0); }
+  catch (e) { box.innerHTML = `<div class="stamp">Nachrichten nicht verfügbar.</div>`; }
+  $("#msg-send").onclick = async () => {
+    const t = $("#msg-text"), m = $("#msg-msg");
+    if (!t.value.trim()) { m.textContent = "Bitte eine Nachricht eingeben."; m.className = "form-msg err"; return; }
+    $("#msg-send").disabled = true;
+    try { const r = await api("/api/messages", {text: t.value}); t.value = ""; box.innerHTML = threadHtml(r.messages, "user"); box.scrollTop = box.scrollHeight;
+      m.textContent = "Gesendet – der Admin wurde benachrichtigt."; m.className = "form-msg ok"; }
+    catch (e) { m.textContent = e.message; m.className = "form-msg err"; }
+    $("#msg-send").disabled = false;
+  };
+}
+
 /* Abo (manuelle Zahlung) */
 const SUB_LABEL = {aktiv: "aktiv", gekündigt: "gekündigt", angefragt: "angefragt", abgelaufen: "abgelaufen", inaktiv: "nicht aktiv"};
 const subDate = ts => ts ? new Date(ts * 1000).toLocaleDateString("de-DE") : "–";
@@ -2113,6 +2176,7 @@ function renderSub(S) {
 
 /* Admin-Dashboard */
 let admTimer = null, admDiag = null;
+const ADM_MSG = {sel: null, draft: ""};
 async function showAdmin() {
   runId++; wlView = false;
   $("#subnav").style.display = "none";
@@ -2125,6 +2189,9 @@ async function showAdmin() {
 async function loadAdmin() {
   clearTimeout(admTimer);
   if (!location.search.includes("view=admin")) return;
+  if (document.activeElement?.id === "adm-msg-text" || document.activeElement?.id === "adm-payinfo") {  // nicht beim Schreiben neu zeichnen
+    admTimer = setTimeout(loadAdmin, 30000); return;
+  }
   let D;
   try { D = await api("/api/admin/dashboard"); } catch (e) {
     if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Dashboard nicht verfügbar: ${esc(e.message)}</div>`; return; }
@@ -2151,6 +2218,7 @@ function renderAdmin(D) {
       ${kpi("Analysen 7 Tage", K.analyses_7d)}
       ${kpi("Aktive Preisalarme", K.alerts)}
       ${kpi("Aktive Abos", D.subs.active, `${D.subs.revenue_month} € pro Monat`, D.subs.active ? "var(--pos)" : null)}
+      ${kpi("Ungelesene Nachrichten", D.messages.unread, D.messages.threads.length + " Unterhaltung(en)", D.messages.unread ? "var(--accent)" : null)}
       ${kpi("Offene Abo-Anfragen", D.subs.requested, D.subs.requested ? "Zahlung prüfen und freischalten" : "keine", D.subs.requested ? "var(--accent)" : null)}
       ${kpi("Arbeitsspeicher", K.memory_mb ? `${K.memory_mb} MB` : "–", S.hosted ? "von 512 MB" : "lokal (kein Limit)",
             memPct == null || !S.hosted ? null : memPct > 0.85 ? "var(--neg)" : memPct > 0.7 ? "var(--neu)" : "var(--pos)")}
@@ -2166,6 +2234,18 @@ function renderAdmin(D) {
       <div class="card pad"><h3>Meistanalysierte Werte</h3>
         ${D.top_symbols.length ? D.top_symbols.map((x, i) => `<div class="adm-row"><span>${i + 1}. <a href="?q=${encodeURIComponent(x.symbol)}" class="adm-sym" data-q="${esc(x.symbol)}">${esc(x.symbol)}</a></span><b class="num">${x.n}</b></div>`).join("")
           : `<div class="stamp">Noch keine Analysen gezählt.</div>`}</div>
+
+      <div class="card pad adm-wide" id="adm-msgs"><h3>Nachrichten <span class="stamp">${D.messages.unread ? D.messages.unread + " ungelesen" : "alles gelesen"}</span></h3>
+        <div class="am-grid">
+          <div class="am-list">
+            ${D.messages.threads.map(t => `<button class="am-t ${t.user === ADM_MSG.sel ? "on" : ""}" data-thread="${esc(t.user)}">
+              <span><b>${esc(t.user)}</b>${t.unread ? `<span class="badge-n am-b">${t.unread}</span>` : ""}</span>
+              <small>${t.last_from_admin ? "Du: " : ""}${esc(t.last_text)}</small></button>`).join("") || `<div class="stamp">Noch keine Nachrichten.</div>`}
+            <label class="stamp" for="am-new" style="margin-top:10px;display:block">Neue Unterhaltung mit:</label>
+            <select id="am-new"><option value="">Benutzer wählen …</option>${D.users.filter(u_ => !u_.admin).map(u_ => `<option value="${esc(u_.name)}">${esc(u_.name)}</option>`).join("")}</select>
+          </div>
+          <div class="am-view" id="am-view">${ADM_MSG.sel ? `<div class="stamp">Lade …</div>` : `<div class="stamp msg-empty">Unterhaltung links auswählen.</div>`}</div>
+        </div></div>
 
       <div class="card pad adm-wide"><h3>Benutzer</h3>
         <div class="peer-scroll"><table class="trk adm-t"><thead><tr><th>Name</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzter Login</th><th>Analysen 30 T.</th><th>Watchlist</th><th>Alarme</th><th>Signale</th><th>Wochenbericht</th><th>Abo (${D.subs.price} €/Monat)</th></tr></thead>
@@ -2222,6 +2302,34 @@ function renderAdmin(D) {
   $("#admback").onclick = () => { clearTimeout(admTimer); goHome(); };
   $("#admref").onclick = () => loadAdmin();
   $("#admusers").onclick = () => openAccount();
+  const openThread = async who => {
+    ADM_MSG.sel = who;
+    document.querySelectorAll(".am-t").forEach(b => b.classList.toggle("on", b.dataset.thread === who));
+    const view = $("#am-view");
+    view.innerHTML = `<div class="stamp">Lade …</div>`;
+    try {
+      const r = await api("/api/admin/messages?user=" + encodeURIComponent(who));
+      view.innerHTML = `<div class="am-h"><b>${esc(who)}</b></div><div class="msg-thread" id="am-thread">${threadHtml(r.messages, "admin")}</div>
+        <textarea id="adm-msg-text" class="msg-input" rows="3" maxlength="2000" placeholder="Antwort an ${esc(who)} …">${esc(ADM_MSG.draft)}</textarea>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn primary" id="am-send">Senden</button></div>`;
+      const th = $("#am-thread"); th.scrollTop = th.scrollHeight;
+      const tb = document.querySelector(`.am-t[data-thread="${CSS.escape(who)}"] .am-b`); if (tb) tb.remove();
+      $("#adm-msg-text").oninput = e => { ADM_MSG.draft = e.target.value; };
+      $("#am-send").onclick = async () => {
+        const txt = $("#adm-msg-text").value;
+        if (!txt.trim()) { toast("Bitte eine Nachricht eingeben."); return; }
+        $("#am-send").disabled = true;
+        try { const r2 = await api("/api/admin/messages", {user: who, text: txt}); ADM_MSG.draft = "";
+          $("#am-thread").innerHTML = threadHtml(r2.messages, "admin"); $("#am-thread").scrollTop = 1e9; $("#adm-msg-text").value = "";
+          toast(`Gesendet – ${who} bekommt eine Push-Nachricht`); }
+        catch (err) { toast("Fehlgeschlagen: " + err.message); }
+        $("#am-send").disabled = false;
+      };
+    } catch (err) { view.innerHTML = `<div class="stamp">Nicht verfügbar: ${esc(err.message)}</div>`; }
+  };
+  document.querySelectorAll(".am-t").forEach(b => b.onclick = () => { ADM_MSG.draft = ""; openThread(b.dataset.thread); });
+  $("#am-new").onchange = e => { if (e.target.value) { ADM_MSG.draft = ""; openThread(e.target.value); } };
+  if (ADM_MSG.sel) openThread(ADM_MSG.sel);
   $("#adm-paysave").onclick = async () => {
     try { const r = await api("/api/admin/subscription", {payment_info: $("#adm-payinfo").value}); toast(r.message); }
     catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }
