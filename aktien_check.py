@@ -5748,6 +5748,28 @@ class Handler(BaseHTTPRequestHandler):
                             c.clear()
                         mb = release_memory()
                         return self.send_json({"ok": True, "message": "Zwischenspeicher geleert" + (f" – Speicher jetzt {mb:.0f} MB" if mb else "")})
+                    if act == "reset_all":
+                        if SCREENER_STATE["running"]:
+                            SCREENER_STATE["stop"] = True          # laufenden Durchgang beenden
+                            for _ in range(60):
+                                if not SCREENER_STATE["running"]:
+                                    break
+                                time.sleep(0.5)
+                        removed = sum(len(c) for _n, c, _t, _m in cache_rules()) + len(FIN_CUR_CACHE)
+                        for _n, c, _t, _m in cache_rules():
+                            c.clear()
+                        FIN_CUR_CACHE.clear()
+                        data_ = STORE.load()
+                        with STORE.lock:
+                            n_scr = len(data_.get("screener") or {})
+                            data_["screener"] = {}
+                            STORE.dirty = True
+                        SCREENER_STATE.update(done=0, target=0, finished=None, mem_stop=False, seen=set())
+                        STORE.save()
+                        mb = release_memory()
+                        LOG.warning("[Admin] %s: alles geleert – %d Zwischenspeicher-Einträge, %d Screener-Werte", user, removed, n_scr)
+                        return self.send_json({"ok": True, "message": f"Geleert: {removed} Zwischenspeicher-Einträge und {n_scr} Screener-Werte"
+                                               + (f" – Speicher jetzt {mb:.0f} MB" if mb else "")})
                     if act == "save":
                         STORE.save()
                         return self.send_json({"ok": True, "message": "Speicher gesichert"})

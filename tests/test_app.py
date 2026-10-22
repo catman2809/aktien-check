@@ -398,6 +398,12 @@ class TestHTTP(Isolated):
         st_, _h, body_ = self.call(adm, "/api/admin/dashboard")
         self.assertEqual(st_, 200)
         self.assertIn("kpi", json.loads(body_))
+        a.screener_store()["SAP.DE"] = {"symbol": "SAP.DE", "label": "Buy", "updated": int(time.time())}
+        a.CACHE["x"] = (time.time(), {})
+        self.assertEqual(self.call(anna, "/api/admin/system", {"action": "reset_all"})[0], 403)
+        self.assertEqual(self.call(adm, "/api/admin/system", {"action": "reset_all"})[0], 200)
+        self.assertEqual(a.STORE.load().get("screener"), {})                      # Screener-Ergebnisse gelöscht
+        self.assertEqual(len(a.CACHE), 0)
         self.assertEqual(self.call(anna, "/api/watchlist", "x=1", ctype="text/plain")[0], 415)
         self.call(anna, "/api/watchlist", {"items": [{"symbol": "ALV.DE"}]})
         self.assertEqual([x["symbol"] for x in json.loads(self.call(anna, "/api/watchlist")[2])["items"]], ["ALV.DE"])

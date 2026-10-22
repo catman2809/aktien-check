@@ -2145,7 +2145,8 @@ function renderAdmin(D) {
         <div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">
           <button class="btn" data-act="clear_cache">Zwischenspeicher leeren</button>
           <button class="btn" data-act="save">Jetzt speichern</button>
-          <button class="btn" data-act="check_alerts">Alarme prüfen</button></div></div>
+          <button class="btn" data-act="check_alerts">Alarme prüfen</button>
+          <button class="btn danger" id="admreset">Alles leeren (inkl. Screener)</button></div></div>
 
       <div class="card pad"><h3>Zwischenspeicher</h3>
         ${D.caches.map(c => `<div class="adm-uni"><span>${esc(c.name)}</span><span class="adm-ub"><i style="width:${Math.min(100, c.entries / c.max * 100)}%"></i></span><span class="num stamp">${c.entries}/${c.max}</span></div>`).join("")}</div>
@@ -2171,6 +2172,18 @@ function renderAdmin(D) {
       $("#adm-diag").innerHTML = admDiag;
     } catch (err) { $("#adm-diag").innerHTML = `<div class="stamp">Prüfung fehlgeschlagen: ${esc(err.message)}</div>`; }
     e.target.disabled = false; e.target.textContent = "Jetzt prüfen";
+  };
+  $("#admreset").onclick = async e => {
+    if (!confirm(`Arbeitsspeicher komplett leeren?
+
+• alle Zwischenspeicher (Analysen, Charts, Profile …) werden geleert
+• ein laufender Screener wird gestoppt
+• ALLE ${Sc.rated} Screener-Ergebnisse werden dauerhaft gelöscht
+
+Watchlists, Alarme, Konten und die Trefferquote bleiben erhalten.`)) return;
+    e.target.disabled = true; e.target.textContent = "Leere …";
+    try { const r = await api("/api/admin/system", {action: "reset_all"}); toast(r.message || "Geleert"); loadAdmin(); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); e.target.disabled = false; e.target.textContent = "Alles leeren (inkl. Screener)"; }
   };
   document.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
     b.disabled = true;
