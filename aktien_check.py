@@ -926,7 +926,7 @@ def pd_ts(v):
 
 def expectations(m, t):
     """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
-    m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = None
+    m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = m["eps_quarters"] = None
     m["est_rev"], m["est_eps"] = {}, {}
     tr = safe(lambda: t.eps_trend)
     if tr is not None and not tr.empty and "current" in tr and "90daysAgo" in tr:
@@ -956,6 +956,9 @@ def expectations(m, t):
     m["est_rev"] = est(safe(lambda: t.revenue_estimate))
     m["est_eps"] = est(safe(lambda: t.earnings_estimate))
     eh = safe(lambda: t.earnings_history)
+    if eh is not None and not eh.empty and "epsActual" in eh:
+        m["eps_quarters"] = [{"q": str(getattr(q_, "date", lambda: q_)())[:10], "est": num(r_.get("epsEstimate")),
+                              "act": num(r_.get("epsActual"))} for q_, r_ in eh.iterrows()][-8:]
     if eh is not None and not eh.empty and "surprisePercent" in eh:
         vals = [num(v) for v in eh["surprisePercent"].tolist()]
         vals = [v for v in vals if v is not None][-4:]
@@ -978,6 +981,115 @@ def expectations(m, t):
         m["insider"] = {"buys": buys, "sells": sells, "buyers": len(buyers), "src": "Yahoo", "cur": m["currency"]}
     elif it is not None and getattr(it, "empty", False):
         m["insider"] = None  # keine Meldungen (z. B. außerhalb der USA) -> Finnhub probieren
+
+
+def chart_extras(m, t, inc, bs, divs):
+    """Daten für Bewertungschart, KGV-Verlauf, Bilanz, Dividendenhistorie und Aktionärsstruktur."""
+    import pandas as pd
+    # Gewinn je Aktie je Geschäftsjahr (älteste zuerst)
+    eps = []
+    if inc is not None and not getattr(inc, "empty", True):
+        r_ = next((n for n in ("Diluted EPS", "Basic EPS") if n in inc.index), None)
+        if r_:
+            for col in sorted(inc.columns):
+                v = num(inc.loc[r_, col])
+                if v is not None:
+                    eps.append([col.strftime("%Y-%m-%d"), round(v, 4)])
+    # Prognosen (dieses / nächstes GJ) – nur wenn Größenordnung zur Historie passt (Währung!)
+    est = []
+    if eps:
+        last_d = datetime.strptime(eps[-1][0], "%Y-%m-%d")
+        for i_, per in enumerate(("0y", "+1y"), start=1):
+            avg = ((m.get("est_eps") or {}).get(per) or {}).get("avg")
+            if avg and eps[-1][1] > 0 and 0.33 < avg / eps[-1][1] < 3:
+                est.append([(last_d.replace(year=last_d.year + i_)).strftime("%Y-%m-%d"), round(avg, 4)])
+    # Monatskurse (unbereinigt) für Bewertungschart und KGV-Verlauf
+    h = safe(lambda: t.history(period="7y", interval="1mo", auto_adjust=False))
+    prices = []
+    if h is not None and not h.empty:
+        for ts, c in h["Close"].dropna().items():
+            prices.append([int(pd.Timestamp(ts).timestamp() * 1000), round(float(c), 4)])
+    pe_norm = m.get("pe_hist_med") or m.get("peer_pe_med") or SECTOR_REF.get(m["sector"], (20, 13))[0]
+    pe_norm = clamp(pe_norm, 8, 40)
+    # KGV je Monat: Kurs / Gewinn des zuletzt abgeschlossenen Geschäftsjahres
+    pe_series = []
+    if prices and eps:
+        eps_dt = [(datetime.strptime(d, "%Y-%m-%d").timestamp() * 1000, v) for d, v in eps]
+        for ts, c in prices:
+            cur = [v for d, v in eps_dt if d <= ts]
+            if cur and cur[-1] > 0:
+                pe_series.append([ts, round(c / cur[-1], 2)])
+    m["valchart"] = {"eps": eps, "est": est, "prices": prices, "pe_norm": round(pe_norm, 1), "pe": pe_series,
+                     "pe_avg": round(sum(x[1] for x in pe_series) / len(pe_series), 2) if pe_series else None}
+    # Bilanz über die Jahre
+    def brow(*names):
+        return [num(v) for v in row(bs, *names)][::-1]
+    if bs is not None and not getattr(bs, "empty", True):
+        years = [c.strftime("%Y") for c in sorted(bs.columns)]
+        m["balance"] = {"years": years, "debt": brow("Total Debt"), "cash": brow("Cash Cash Equivalents And Short Term Investments",
+                        "Cash And Cash Equivalents"), "equity": brow("Stockholders Equity", "Common Stock Equity"),
+                        "assets": brow("Total Assets"), "liab": brow("Total Liabilities Net Minority Interest"),
+                        "ca": brow("Current Assets"), "cl": brow("Current Liabilities")}
+    # Dividendenhistorie (volle Jahre)
+    if divs is not None and len(divs):
+        d = divs.copy()
+        d.index = d.index.tz_localize(None) if d.index.tz is not None else d.index
+        yearly = d.groupby(d.index.year).sum()
+        this_year = datetime.now().year
+        all_years = [(int(y), round(float(v), 4)) for y, v in yearly.items() if y < this_year and v > 0]
+        streak = 0
+        for i_ in range(len(all_years) - 1, 0, -1):  # Jahre in Folge ohne Kürzung (über die ganze Historie)
+            if all_years[i_][1] >= all_years[i_ - 1][1] * 0.98 and all_years[i_][0] - all_years[i_ - 1][0] == 1:
+                streak += 1
+            else:
+                break
+        if streak > (m.get("div_streak") or 0):
+            m["div_streak"] = streak
+        full = all_years[-20:]
+        ytd = float(yearly.get(this_year, 0) or 0)
+        def cagr(n):
+            if len(full) > n and full[-1 - n][1] > 0:
+                return (full[-1][1] / full[-1 - n][1]) ** (1 / n) - 1
+            return None
+        eps_by_year = {int(dd[:4]): v for dd, v in eps}
+        payout = [[y, round(v / eps_by_year[y], 3)] for y, v in full if eps_by_year.get(y) and eps_by_year[y] > 0]
+        # Dividendensicherheit: Ausschüttung aus Gewinn und Free Cashflow, Historie, Verschuldung
+        pts, why = 0, []
+        po = m.get("payout")
+        if po is not None:
+            pts += 2 if po < 0.6 else 1 if po < 0.8 else -1 if po > 1 else 0
+            why.append(f"Ausschüttungsquote {pct(po)} vom Gewinn")
+        fcf, paid = m.get("fcf"), (m.get("div_paid") or 0) / (m.get("cf_years") or 1)
+        if fcf is not None and paid:
+            cov = fcf / paid
+            pts += 2 if cov > 1.5 else 1 if cov > 1.1 else -2 if cov < 0.9 else 0
+            why.append(f"Free Cashflow deckt die Dividende {fnum(cov, 1)}-fach")
+        pts += 2 if streak >= 10 else 1 if streak >= 5 else 0
+        why.append(f"{streak} Jahre in Folge ohne Kürzung")
+        if m.get("div_cut"):
+            pts -= 2
+        if (m.get("nd_ebitda") or 0) > 3.5 and not m.get("is_financial"):
+            pts -= 1
+            why.append("hohe Verschuldung")
+        label = "hoch" if pts >= 5 else "mittel" if pts >= 2 else "niedrig"
+        m["divhist"] = {"years": [y for y, _ in full], "dps": [v for _, v in full], "ytd": round(ytd, 4) if ytd else None,
+                        "g5": cagr(5), "g10": cagr(10), "payout": payout, "currency": m["currency"], "streak": streak,
+                        "safety": {"label": label, "reasons": why} if full else None}
+    # Aktionärsstruktur
+    mh = safe(lambda: t.major_holders)
+    if mh is not None and not getattr(mh, "empty", True):
+        val = mh.iloc[:, 0] if mh.shape[1] else None
+        get_ = lambda k: num(val.get(k)) if val is not None and k in val.index else None
+        ins, inst = get_("insidersPercentHeld"), get_("institutionsPercentHeld")
+        top = []
+        ih = safe(lambda: t.institutional_holders)
+        if ih is not None and not ih.empty and "pctHeld" in ih:
+            for _, r_ in ih.sort_values("pctHeld", ascending=False).head(8).iterrows():
+                if num(r_.get("pctHeld")):
+                    top.append({"name": str(r_.get("Holder") or "").strip(), "pct": num(r_.get("pctHeld"))})
+        if ins is not None or inst is not None:
+            m["holders"] = {"insiders": ins, "institutions": inst, "count": get_("institutionsCount"),
+                            "top": top if top and top[0]["pct"] >= 0.005 else []}
 
 
 def gather(symbol, t, info):
@@ -1199,7 +1311,12 @@ def gather(symbol, t, info):
         dist = {k: int(r0.get(k, 0) or 0) for k in ("strongBuy", "buy", "hold", "sell", "strongSell")}
         if sum(dist.values()):
             m["rec_dist"] = dist
+        m["rec_hist"] = [{"period": str(r_.get("period")), **{k: int(r_.get(k, 0) or 0) for k in
+                          ("strongBuy", "buy", "hold", "sell", "strongSell")}} for _, r_ in rec.iterrows()][:6]
+    m["target_low"], m["target_high"] = num(g("targetLowPrice")), num(g("targetHighPrice"))
+    m["target_median"] = num(g("targetMedianPrice"))
     expectations(m, t)
+    safe(lambda: chart_extras(m, t, inc, bs, divs))
     return m
 
 
@@ -1372,6 +1489,92 @@ def fair_value(m, mac):
     if out["base"] is None:
         return None
     out["upside"] = out["base"] / price - 1
+    return out
+
+
+def checklist(m, cats):
+    """Stärken und Warnsignale als kompakte Liste (Typ, Text)."""
+    biz, out = m.get("biz", "standard"), []
+    add = lambda kind, text: out.append({"type": kind, "text": text})
+    fin = m.get("is_financial")
+    nd, cov = m.get("nd_ebitda"), m.get("int_cov")
+    if not fin and biz != "real_estate":
+        if nd is not None and nd < 0:
+            add("plus", "Mehr Cash als Schulden (Netto-Cash)")
+        elif nd is not None and nd > 3.5:
+            add("risk", f"Hohe Verschuldung: Nettoschulden = {fnum(nd, 1)}-faches EBITDA")
+        if cov is not None and (m.get("debt") or 0) > 0 and cov < 3:
+            add("risk", f"Zinsen nur knapp gedeckt (Zinsdeckung {fnum(cov, 1)}x)")
+        z = m.get("altman_z")
+        if z is not None and z < 1.8:
+            add("risk", f"Altman Z-Score {fnum(z, 1)}: erhöhtes Insolvenzrisiko")
+    if biz == "real_estate" and (m.get("ltv") or 0) > 0.55:
+        add("risk", f"Hohe Beleihungsquote ({pct(m['ltv'])})")
+    sc = m.get("share_change")
+    if sc is not None and sc > 0.05:
+        add("risk", f"Aktionäre verwässert: Aktienanzahl +{fnum(sc * 100, 1)} % in {len(m.get('revenues') or [])} Jahren")
+    elif sc is not None and sc < -0.02:
+        add("plus", f"Aktienrückkäufe: Aktienanzahl {fnum(sc * 100, 1)} %")
+    y, p_ = m.get("div_yield") or 0, m.get("payout")
+    if y > 0 and p_ is not None and p_ > 0.9 and biz != "real_estate":
+        add("risk", f"Dividende kaum durch Gewinn gedeckt (Ausschüttungsquote {pct(p_)})")
+    if y > 0 and m.get("div_paid") and m.get("fcf") is not None and m.get("cf_years"):
+        if m["fcf"] < (m["div_paid"] / m["cf_years"]) * 0.9:
+            add("risk", "Dividende nicht durch den Free Cashflow gedeckt")
+    if (m.get("div_streak") or 0) >= 10 and y > 0:
+        add("plus", f"Dividende seit {m['div_streak']} Jahren stabil oder steigend")
+    if m.get("div_cut"):
+        add("risk", "Dividende in den letzten 5 Jahren gekürzt")
+    if (m.get("loss_years") or 0) > 0 and biz not in ("loss_growth", "pre_revenue"):
+        add("risk", f"{m['loss_years']} Verlustjahr(e) in den letzten Jahren")
+    if m.get("fcf") is not None and m["fcf"] < 0:
+        add("risk", "Negativer Free Cashflow")
+    if (m.get("fcf_m_adj") or 0) >= 0.15:
+        add("plus", f"Hohe Free-Cashflow-Marge ({pct(m['fcf_m_adj'])} nach Aktienvergütung)")
+    if (m.get("roic") or 0) >= 0.15 and not fin:
+        add("plus", f"Hohe Kapitalrendite (ROIC {pct(m['roic'])})")
+    rc = m.get("rev_cagr")
+    if rc is not None and rc < 0:
+        add("risk", f"Umsatz schrumpft ({pct(rc)} p. a.)")
+    elif rc is not None and rc >= 0.10:
+        add("plus", f"Umsatz wächst stark ({pct(rc)} p. a.)")
+    tr = m.get("op_m_trend")
+    if tr is not None and tr <= -0.03:
+        add("risk", f"Operative Marge sinkt ({fnum(tr * 100, 1)} Prozentpunkte)")
+    elif tr is not None and tr >= 0.03:
+        add("plus", f"Operative Marge steigt (+{fnum(tr * 100, 1)} Prozentpunkte)")
+    pio = m.get("piotroski")
+    if pio is not None and pio >= 7:
+        add("plus", f"Piotroski F-Score {fnum(pio, 0)}/9: Fundamentaldaten verbessern sich")
+    elif pio is not None and pio <= 3:
+        add("risk", f"Piotroski F-Score {fnum(pio, 0)}/9: Fundamentaldaten verschlechtern sich")
+    if (m.get("accruals") or 0) > 0.08:
+        add("risk", "Gewinn kaum durch Cash gedeckt (Gewinnqualität)")
+    er = m.get("eps_rev")
+    if er is not None and er >= 0.03:
+        add("plus", f"Analysten heben Gewinnschätzungen an (+{fnum(er * 100, 1)} % in 90 Tagen)")
+    elif er is not None and er <= -0.03:
+        add("risk", f"Analysten senken Gewinnschätzungen ({fnum(er * 100, 1)} % in 90 Tagen)")
+    sp = m.get("surprises") or []
+    if len(sp) >= 4 and all(x > 0 for x in sp[-4:]):
+        add("plus", "Erwartungen in allen letzten 4 Quartalen übertroffen")
+    ins = m.get("insider") or {}
+    if ins.get("buyers", 0) >= 2:
+        add("plus", f"Insiderkäufe: {ins['buyers']} Insider kauften in 6 Monaten")
+    fv = m.get("fair") or {}
+    if fv.get("upside") is not None and fv["upside"] >= 0.20:
+        add("plus", f"Kurs {fnum(fv['upside'] * 100, 0)} % unter dem fairen Wert (Basisszenario)")
+    elif fv.get("upside") is not None and fv["upside"] <= -0.30:
+        add("risk", f"Kurs {fnum(-fv['upside'] * 100, 0)} % über dem fairen Wert (Basisszenario)")
+    if (m.get("vol") or 0) > 0.45:
+        add("risk", f"Sehr schwankungsanfällig (Volatilität {pct(m['vol'])})")
+    if (m.get("short_float") or 0) > 0.10:
+        add("risk", f"Viele Leerverkäufer ({pct(m['short_float'])} des Streubesitzes)")
+    if m.get("sma200") and m.get("last"):
+        if m["last"] > m["sma200"] * 1.02 and (m.get("perf_6m") or 0) > 0:
+            add("plus", "Kurs im Aufwärtstrend (über der 200-Tage-Linie)")
+        elif m["last"] < m["sma200"] * 0.95:
+            add("risk", "Kurs im Abwärtstrend (unter der 200-Tage-Linie)")
     return out
 
 
@@ -2333,6 +2536,9 @@ def finnhub_enrich(m, symbol, alternatives):
                 vals = [v / 100 for v in vals if v is not None][::-1]
                 if vals:
                     m["surprises"] = vals
+                    if not m.get("eps_quarters"):
+                        m["eps_quarters"] = [{"q": str(x.get("period") or "")[:10], "est": num(x.get("estimate")),
+                                              "act": num(x.get("actual"))} for x in ea[:8]][::-1]
                     m["finnhub"].append(f"Gewinnüberraschungen ({sym})")
         if m.get("insider") is None:
             frm = (datetime.now() - timedelta(days=183)).strftime("%Y-%m-%d")
@@ -3857,6 +4063,12 @@ def analyze(query):
         "profile": profile,
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
+        "checklist": safe(lambda: checklist(m, cats), []) or [],
+        "valchart": m.get("valchart"), "balance": m.get("balance"), "divhist": m.get("divhist"),
+        "holders": m.get("holders"), "eps_quarters": m.get("eps_quarters"),
+        "targets": {"low": m.get("target_low"), "high": m.get("target_high"), "mean": m.get("target"),
+                    "median": m.get("target_median"), "n": m.get("n_analysts"), "hist": m.get("rec_hist"),
+                    "items": m.get("target_items") or [], "src": m.get("target_src") or ""},
         "forecast": {"rev": m.get("est_rev") or {}, "eps": m.get("est_eps") or {}, "n": est_analysts(m),
                      "fpe": m.get("fpe"), "currency": m["currency"]},
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),

@@ -360,6 +360,58 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 table.scr tr.scr-r{cursor:pointer}
 table.scr tr.scr-r:hover td{background:var(--surface-2)}
 table.scr td b{font-weight:600}
+#ch-osc .osc{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.osc-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:13px}
+.osc-ax{fill:var(--text-3);font-size:11px}
+.ck-card{margin-top:16px;padding:18px 22px}
+.ck-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.ck-grid ul{list-style:none;margin:8px 0 0;padding:0}
+.ck-grid li{display:flex;gap:10px;align-items:flex-start;padding:5px 0;font-size:14px;line-height:1.45}
+.ck{flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;margin-top:1px}
+.ck.ok{background:var(--pos-soft);color:var(--pos)} .ck.no{background:var(--neg-soft);color:var(--neg)}
+.an-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.an-grid h3{margin:0 0 12px;font-size:15px;display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+.tg-bar{position:relative;height:8px;background:var(--track);border-radius:4px;margin:46px 8px 42px}
+.tg-span{position:absolute;top:0;height:100%;background:var(--accent-soft);border:1px solid var(--accent);border-radius:4px}
+.tg-tick{position:absolute;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center}
+.tg-tick::before{content:"";width:2px;height:16px;background:var(--accent)}
+.tg-tick b,.tg-tick small{position:absolute;white-space:nowrap}
+.tg-tick b{top:22px;font-size:12.5px} .tg-tick small{top:38px;font-size:11px;color:var(--text-3)}
+.rh-row{display:grid;grid-template-columns:78px 1fr 28px;gap:10px;align-items:center;margin:6px 0}
+.rh-bar{display:flex;height:16px;border-radius:5px;overflow:hidden;background:var(--track)}
+.rh-bar i{display:block;height:100%}
+.hb{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:10px;align-items:center;margin:8px 0;font-size:13px}
+.hb-l{display:flex;flex-direction:column} .hb-l span{color:var(--text-3);font-size:12px} .hb-l:last-child{text-align:right}
+.hb-bars{display:flex;flex-direction:column;gap:3px}
+.hb-bars i{display:block;height:9px;border-radius:3px;opacity:.75} .hb-bars i.pos{background:var(--pos)} .hb-bars i.neg{background:var(--neg);margin-left:auto}
+.yb{display:flex;gap:8px;align-items:flex-end;height:90px;margin-bottom:6px}
+.yb-c{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
+.yb-bars{flex:1;width:100%;display:flex;gap:2px;align-items:flex-end}
+.yb-bars i{flex:1;display:block;border-radius:3px 3px 0 0;opacity:.7} .yb-bars i.pos{background:var(--pos)} .yb-bars i.neg{background:var(--neg)}
+.yb-c small,.db-c small{font-size:11px;color:var(--text-3);margin-top:3px}
+.db{display:flex;gap:3px;align-items:flex-end;height:110px}
+.db-c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.db-c i{display:block;width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.8}
+.dv-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin:12px 0 0}
+.eq{display:flex;gap:6px;margin:4px 0 10px}
+.eq-c{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;font-size:12px}
+.eq-plot{position:relative;width:100%;height:120px;border-bottom:1px solid var(--border)}
+.eq-dot{position:absolute;left:50%;width:12px;height:12px;border-radius:50%;transform:translate(-50%,-50%)}
+.eq-dot.est{border:2px solid var(--text-3);background:var(--surface)} .eq-dot.act.pos{background:var(--pos)} .eq-dot.act.neg{background:var(--neg)}
+.eq-line{position:absolute;left:50%;width:2px;transform:translateX(-50%);opacity:.5} .eq-line.pos{background:var(--pos)} .eq-line.neg{background:var(--neg)}
+.eq-c b{margin-top:6px;font-size:12px} .eq-c small{color:var(--text-3);font-size:11px}
+.dv-stats dt{font-size:11.5px;color:var(--text-3)} .dv-stats dd{margin:2px 0 0;font-weight:700}
+.dv-safe{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;display:flex;flex-direction:column;gap:2px}
+.dv-safe span{color:var(--text-2);font-size:12.5px}
+.dv-safe.hoch{background:var(--pos-soft)} .dv-safe.mittel{background:var(--neu-soft)} .dv-safe.niedrig{background:var(--neg-soft)}
+.ho{display:flex;gap:16px;align-items:center}
+.ho-l{list-style:none;margin:0;padding:0;font-size:13.5px;flex:1}
+.ho-l li{display:flex;align-items:center;gap:8px;padding:3px 0}
+.ho-l li i{width:10px;height:10px;border-radius:3px;flex:none} .ho-l li b{margin-left:auto;white-space:nowrap}
+.ho-top{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0;border-top:1px solid var(--border)}
+.ho-top span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:640px){.ck-grid{grid-template-columns:1fr;gap:12px}.ck-card{padding:14px 16px}}
+@media print{#ch-osc{display:none}}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -734,7 +786,7 @@ table.peers .neg{color:var(--neg)}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
     <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
-    <a href="#konkurrenz">Konkurrenz</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
+    <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
 </nav>
@@ -1384,6 +1436,11 @@ const GLOSSARY = [
   ["Fairer Wert", "Fairer Wert (DCF)", "Was eine Aktie nach einem Cashflow-Modell wert ist: künftige Free Cashflows werden geschätzt und auf heute abgezinst. Drei Szenarien (vorsichtig, Basis, optimistisch) zeigen die Spanne. Bei Banken über Kurs-Buchwert und Eigenkapitalrendite, bei Immobilien über Kurs/FFO.", ["Fairer Wert", "Discounted-Cashflow", "DCF"]],
   ["Owner Earnings", "Owner Earnings", "Operativer Cashflow minus Abschreibungen. Annäherung an den Cashflow ohne Wachstumsinvestitionen – sinnvoll, wenn eine Firma gerade stark investiert (z. B. in Rechenzentren).", ["Owner Earnings"]],
   ["Prognose", "Analystenprognosen", "Durchschnittliche Erwartung der Analysten für Umsatz und Gewinn je Aktie im laufenden und nächsten Geschäftsjahr. Im Schnitt eher zu optimistisch – Änderungen der Prognosen sind aussagekräftiger.", ["Umsatzprognose", "Gewinnprognose"]],
+  ["Bollinger", "Bollinger-Bänder", "Gleitender 20-Tage-Durchschnitt mit Bändern im Abstand von zwei Standardabweichungen. Kurse am oberen Band gelten als hoch, am unteren als niedrig; enge Bänder kündigen oft größere Bewegungen an.", ["Bollinger-Bänder", "Bollinger"]],
+  ["MACD", "MACD", "Differenz zweier gleitender Durchschnitte (12 und 26 Tage) mit einer Signallinie (9 Tage). Kreuzt die MACD-Linie die Signallinie nach oben, gilt das als Kaufsignal, nach unten als Verkaufssignal.", ["MACD"]],
+  ["Unterstützung", "Unterstützung / Widerstand", "Kursniveaus, an denen die Aktie früher mehrfach gedreht hat. Unterstützungen liegen unter dem Kurs (dort fanden sich Käufer), Widerstände darüber (dort wurde verkauft).", ["Unterstützung", "Widerstand"]],
+  ["Normal-KGV", "Normal-KGV", "Das KGV, zu dem die Aktie üblicherweise bewertet wird (Median der eigenen Historie). Gewinn × Normal-KGV ergibt die „faire Linie“ im Bewertungschart.", ["Normal-KGV"]],
+  ["Dividendensicherheit", "Dividendensicherheit", "Einschätzung, wie gut die Dividende abgesichert ist: Ausschüttungsquote, Deckung durch den Free Cashflow, Jahre ohne Kürzung und Verschuldung.", ["Dividendensicherheit"]],
   ["Reverse-DCF", "Reverse-DCF", "Rechnet rückwärts: Wie stark müsste der Free Cashflow 10 Jahre lang wachsen, damit der heutige Kurs gerechtfertigt ist? Liegt das deutlich über dem realistisch Erwartbaren, ist viel Optimismus eingepreist.", ["Reverse-DCF"]],
   ["Diskontsatz", "Diskontsatz", "Zins, mit dem künftige Zahlungen auf heute abgezinst werden – entspricht der Renditeerwartung der Anleger (hier: Zinsniveau plus Risikoaufschlag).", ["Diskontsatz", "Eigenkapitalkosten"]],
   ["CAGR", "CAGR", "Durchschnittliches jährliches Wachstum über mehrere Jahre (Compound Annual Growth Rate).", ["CAGR"]],
@@ -1705,6 +1762,200 @@ function renderScreener() {
   document.querySelectorAll(".scr-r").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
 }
 
+/* Stärken & Warnsignale */
+function checklistCard(d) {
+  const L = d.checklist || [];
+  if (!L.length) return "";
+  const plus = L.filter(x => x.type === "plus"), risk = L.filter(x => x.type === "risk");
+  const li = (x, ok) => `<li><span class="ck ${ok ? "ok" : "no"}" aria-hidden="true">${ok ? "✓" : "!"}</span>${esc(x.text)}</li>`;
+  return `<section class="card ck-card" id="checkliste" aria-label="Stärken und Warnsignale">
+    <div class="ck-grid">
+      <div><div class="eyebrow" style="color:var(--pos)">Stärken · ${plus.length}</div><ul>${plus.map(x => li(x, true)).join("") || "<li class='stamp'>Keine besonderen Stärken gefunden</li>"}</ul></div>
+      <div><div class="eyebrow" style="color:var(--neg)">Warnsignale · ${risk.length}</div><ul>${risk.map(x => li(x, false)).join("") || "<li class='stamp'>Keine Warnsignale gefunden</li>"}</ul></div>
+    </div></section>`;
+}
+
+/* Bewertungschart (Kurs vs. fairer Wert aus Gewinn × Normal-KGV) und KGV-Verlauf */
+const VC = {mode: "fair", d: null};
+function valChartCard(d) {
+  const v = d.valchart;
+  if (!v || !(v.prices || []).length || !(v.eps || []).some(e => e[1] > 0)) return "";
+  return `<section class="card chart-card" id="bewertungschart" aria-label="Bewertung im Zeitverlauf">
+    <div class="chart-head">
+      <div><div class="eyebrow">Bewertung im Zeitverlauf</div><div class="chart-chg" id="vc-sub"></div></div>
+      <div class="seg" id="vc-seg"><button data-m="fair">Kurs vs. fairer Wert</button><button data-m="pe">KGV-Verlauf</button></div>
+    </div>
+    <div class="chart-wrap" id="vc-wrap" style="height:240px"></div>
+    <div class="chart-foot" id="vc-foot"></div>
+  </section>`;
+}
+function initValChart(d) {
+  if (!$("#vc-wrap")) return;
+  VC.d = d;
+  document.querySelectorAll("#vc-seg button").forEach(b => b.onclick = () => { VC.mode = b.dataset.m; drawValChart(); });
+  let last = 0;
+  new ResizeObserver(() => { const w = $("#vc-wrap")?.clientWidth; if (w && w !== last) { last = w; drawValChart(); } }).observe($("#vc-wrap"));
+}
+function drawValChart() {
+  const d = VC.d, v = d?.valchart, wrap = $("#vc-wrap"); if (!v || !wrap) return;
+  document.querySelectorAll("#vc-seg button").forEach(b => b.classList.toggle("on", b.dataset.m === VC.mode));
+  const W = wrap.clientWidth, H = wrap.clientHeight, m = {l: 4, r: 66, t: 12, b: 26}, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const toTs = s_ => new Date(s_ + "T00:00:00").getTime();
+  const P = v.prices, t0 = P[0][0];
+  const epsAll = [...v.eps.map(e => [toTs(e[0]), e[1], false]), ...(v.est || []).map(e => [toTs(e[0]), e[1], true])];
+  const t1 = Math.max(P[P.length - 1][0], ...epsAll.map(e => e[0]));
+  const X = t => m.l + (t - t0) / (t1 - t0) * pw;
+  const yrs = [...new Set(P.map(p => new Date(p[0]).getFullYear()))];
+  const axisX = yrs.filter((y, i) => i % Math.ceil(yrs.length / (W < 420 ? 4 : 7)) === 0)
+    .map(y => `<text x="${X(new Date(y, 0, 1).getTime()).toFixed(1)}" y="${H - 6}" text-anchor="middle">${y}</text>`).join("");
+  if (VC.mode === "pe") {
+    const S = v.pe || []; if (S.length < 2) { wrap.innerHTML = `<div class="chart-msg">Kein KGV-Verlauf verfügbar (Verluste oder zu wenig Daten).</div>`; return; }
+    const vals = [...S.map(x => x[1]), v.pe_avg, v.pe_norm].filter(x => x != null);
+    let lo = Math.min(...vals) * 0.9, hi = Math.max(...vals) * 1.08; const {ticks} = niceTicks(lo, hi, 4);
+    const Y = y => m.t + (1 - (y - lo) / (hi - lo)) * ph;
+    wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="KGV-Verlauf">
+      <g class="grid">${ticks.map(t => `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(t)}" y2="${Y(t)}"/>`).join("")}</g>
+      <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${Y(t) + 4}" text-anchor="end">${nf(t, 0)}</text>`).join("")}${axisX}</g>
+      ${v.pe_avg ? `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(v.pe_avg)}" y2="${Y(v.pe_avg)}" stroke="var(--text-3)" stroke-dasharray="5 4"/>` : ""}
+      <path d="${S.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    </svg>`;
+    const cur = S[S.length - 1][1];
+    $("#vc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">KGV aktuell <b class="num">${nf(cur, 1)}</b> · Ø ${nf(v.pe_avg, 1)}</span>
+      <span>${cur > v.pe_avg * 1.15 ? "über dem eigenen Durchschnitt" : cur < v.pe_avg * 0.85 ? "unter dem eigenen Durchschnitt" : "nahe am Durchschnitt"}</span>`;
+    $("#vc-foot").innerHTML = `<div class="legend"><span style="color:var(--accent)"><i></i><span style="color:var(--text-2)">KGV (Kurs / Gewinn des letzten Geschäftsjahres)</span></span>
+      <span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Durchschnitt</span></span></div>`;
+    return;
+  }
+  // Faire Linie: Gewinn je Geschäftsjahr × Normal-KGV, gilt ab Ende des Vorjahres bis Ende des Geschäftsjahres
+  const segs = epsAll.map((e, i) => ({from: i ? epsAll[i - 1][0] : e[0] - 365 * 864e5, to: e[0], val: e[1] * v.pe_norm, est: e[2]}))
+    .filter(s_ => s_.val > 0 && s_.to >= t0);
+  const vals = [...P.map(p => p[1]), ...segs.map(s_ => s_.val)];
+  let lo = Math.min(...vals) * 0.85, hi = Math.max(...vals) * 1.08; lo = Math.max(0, lo);
+  const {ticks} = niceTicks(lo, hi, 4), Y = y => m.t + (1 - (y - lo) / (hi - lo)) * ph;
+  const segPath = s_ => `M${X(Math.max(s_.from, t0)).toFixed(1)},${Y(s_.val).toFixed(1)}L${X(s_.to).toFixed(1)},${Y(s_.val).toFixed(1)}`;
+  const area = segs.filter(s_ => !s_.est).map(s_ => `<rect x="${X(Math.max(s_.from, t0)).toFixed(1)}" y="${Y(s_.val).toFixed(1)}" width="${(X(s_.to) - X(Math.max(s_.from, t0))).toFixed(1)}" height="${(m.t + ph - Y(s_.val)).toFixed(1)}" fill="var(--sma50)" opacity=".10"/>`).join("");
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kurs im Vergleich zum fairen Wert aus Gewinn mal Normal-KGV">
+    <g class="grid">${ticks.map(t => `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(t)}" y2="${Y(t)}"/>`).join("")}</g>
+    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${Y(t) + 4}" text-anchor="end">${nf(t, t < 10 ? 1 : 0)}</text>`).join("")}${axisX}</g>
+    ${area}
+    ${segs.map(s_ => `<path d="${segPath(s_)}" fill="none" stroke="var(--sma50)" stroke-width="2.2" ${s_.est ? 'stroke-dasharray="5 4"' : ""}/>`).join("")}
+    <path d="${P.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("")}" fill="none" stroke="var(--text)" stroke-width="1.8"/>
+  </svg>`;
+  const lastP = P[P.length - 1][1], curSeg = segs.find(s_ => s_.from <= P[P.length - 1][0] && s_.to >= P[P.length - 1][0]) || segs[segs.length - 1];
+  const gap = curSeg ? lastP / curSeg.val - 1 : null;
+  $("#vc-sub").innerHTML = gap == null ? "" : `<span style="color:${gap > 0.1 ? "var(--neg)" : gap < -0.1 ? "var(--pos)" : "var(--text-2)"};margin:0">Kurs ${pc(gap, 0, true)} ${gap >= 0 ? "über" : "unter"} der fairen Linie</span>
+    <span>bei einem Normal-KGV von ${nf(v.pe_norm, 1)}</span>`;
+  $("#vc-foot").innerHTML = `<div class="legend"><span style="color:var(--text)"><i></i><span style="color:var(--text-2)">Kurs (Monatsende)</span></span>
+    <span style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">Gewinn je Aktie × ${nf(v.pe_norm, 1)} (Normal-KGV)</span></span>
+    ${(v.est || []).length ? `<span style="color:var(--sma50)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Prognose der Analysten</span></span>` : ""}</div>
+    <span>Liegt der Kurs über der orangen Linie, ist die Aktie teurer als üblich – darunter günstiger.</span>`;
+}
+
+/* Analysten: Kursziel-Spanne, Urteile im Zeitverlauf, Gewinnüberraschungen */
+function analystSection(d) {
+  if (d.asset === "crypto" || d.asset === "etf") return "";
+  const T = d.targets || {}, Q = (d.eps_quarters || []).filter(q => q.est != null && q.act != null), price = d.price;
+  const hasRange = T.low && T.high && price, hasHist = (T.hist || []).length, hasQ = Q.length >= 2;
+  if (!hasRange && !hasHist && !hasQ) return "";
+  let range = "";
+  if (hasRange) {
+    const lo = Math.min(T.low, price) * 0.97, hi = Math.max(T.high, price) * 1.03, X = v => ((v - lo) / (hi - lo) * 100).toFixed(2);
+    range = `<div class="card pad"><h3>Kursziele der Analysten${T.n ? ` <span class="stamp">${T.n} Analysten</span>` : ""}</h3>
+      <div class="tg-bar"><span class="tg-span" style="left:${X(T.low)}%;width:${X(T.high) - X(T.low)}%"></span>
+        ${[["low", "Tief"], ["mean", "Ø"], ["high", "Hoch"]].filter(([k]) => T[k]).map(([k, l]) => `<span class="tg-tick ${k}" style="left:${X(T[k])}%"><b class="num">${nf(T[k], T[k] < 10 ? 2 : 0)}</b><small>${l}</small></span>`).join("")}
+        <span class="fv-price" style="left:${X(price)}%"><b class="num">${nf(price, price < 10 ? 2 : 0)}</b><small>Kurs</small></span></div>
+      <div class="stamp">Potenzial bis zum Ø-Kursziel: <b style="color:${T.mean >= price ? "var(--pos)" : "var(--neg)"}">${pc(T.mean / price - 1, 1, true)}</b>
+        · Spanne ${pc(T.low / price - 1, 0, true)} bis ${pc(T.high / price - 1, 0, true)}</div></div>`;
+  }
+  let hist = "";
+  if (hasHist) {
+    const lab = {"0m": "aktuell", "-1m": "vor 1 Mon.", "-2m": "vor 2 Mon.", "-3m": "vor 3 Mon."};
+    const keys = [["strongBuy", "Strong Buy", "var(--pos)", 1], ["buy", "Buy", "var(--pos)", .55], ["hold", "Hold", "var(--neu)", .7], ["sell", "Sell", "var(--neg)", .55], ["strongSell", "Strong Sell", "var(--neg)", 1]];
+    hist = `<div class="card pad"><h3>Analystenurteile im Zeitverlauf</h3>
+      ${T.hist.slice().reverse().map(r => { const tot = keys.reduce((a, [k]) => a + (r[k] || 0), 0) || 1;
+        return `<div class="rh-row"><span class="stamp">${esc(lab[r.period] || r.period)}</span><span class="rh-bar">${keys.map(([k, l, c, o]) => r[k] ? `<i style="width:${r[k] / tot * 100}%;background:${c};opacity:${o}" title="${l}: ${r[k]}"></i>` : "").join("")}</span><span class="num stamp">${tot}</span></div>`; }).join("")}
+      <div class="legend" style="margin-top:8px">${keys.map(([k, l, c, o]) => `<span><i style="border:0;width:10px;height:10px;border-radius:3px;background:${c};opacity:${o}"></i>${l}</span>`).join("")}</div></div>`;
+  }
+  let qs = "";
+  if (hasQ) {
+    const vals = Q.flatMap(q => [q.est, q.act]);
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.25 || Math.abs(hi) * 0.2 || 0.1; lo -= pad; hi += pad;
+    const top = v => ((1 - (v - lo) / (hi - lo)) * 100).toFixed(1);
+    const qLabel = s_ => { const dt = new Date(s_ + "T00:00:00"); return isNaN(dt) ? s_ : `Q${Math.floor(dt.getMonth() / 3) + 1} ${String(dt.getFullYear()).slice(2)}`; };
+    qs = `<div class="card pad"><h3>Gewinnüberraschungen <span class="stamp">Gewinn je Aktie</span></h3>
+      <div class="eq" role="img" aria-label="Erwarteter und tatsächlicher Gewinn je Aktie der letzten ${Q.length} Quartale">
+        ${Q.map(q => { const beat = q.act >= q.est, a_ = +top(q.act), e_ = +top(q.est);
+          return `<div class="eq-c" title="${qLabel(q.q)}: erwartet ${nf(q.est, 2)}, tatsächlich ${nf(q.act, 2)}">
+            <div class="eq-plot"><span class="eq-line ${beat ? "pos" : "neg"}" style="top:${Math.min(a_, e_)}%;height:${Math.abs(a_ - e_)}%"></span>
+              <span class="eq-dot est" style="top:${e_}%"></span><span class="eq-dot act ${beat ? "pos" : "neg"}" style="top:${a_}%"></span></div>
+            <b class="num" style="color:${beat ? "var(--pos)" : "var(--neg)"}">${q.est ? pc(q.act / q.est - 1, 0, true) : ""}</b>
+            <small>${qLabel(q.q)}</small></div>`; }).join("")}
+      </div>
+      <div class="legend"><span><i style="border:2px solid var(--text-3);width:10px;height:10px;border-radius:50%"></i>erwartet</span>
+        <span><i style="border:0;width:10px;height:10px;border-radius:50%;background:var(--pos)"></i>übertroffen</span>
+        <span><i style="border:0;width:10px;height:10px;border-radius:50%;background:var(--neg)"></i>verfehlt</span></div></div>`;
+  }
+  return `<h2 class="section" id="analysten">Analysten & Erwartungen</h2>
+    <p class="section-sub">Kursziele, wie sich die Urteile verändert haben und ob das Unternehmen die Erwartungen zuletzt erfüllt hat.</p>
+    <div class="an-grid">${range}${hist}${qs}</div>`;
+}
+
+/* Finanzielle Gesundheit, Dividendenhistorie, Aktionärsstruktur */
+function healthSection(d) {
+  if (d.asset === "crypto" || d.asset === "etf") return "";
+  const B = d.balance, Dv = d.divhist, Ho = d.holders, cur = esc(d.currency);
+  const last = arr => { for (let i = (arr || []).length - 1; i >= 0; i--) if (arr[i] != null) return arr[i]; return null; };
+  let bal = "";
+  if (B) {
+    const pairs = [["Cash", last(B.cash), "Schulden", last(B.debt)], ["Umlaufvermögen", last(B.ca), "kurzfr. Verbindlichkeiten", last(B.cl)],
+                   ["Eigenkapital", last(B.equity), "Verbindlichkeiten", last(B.liab)]].filter(p => p[1] != null && p[3] != null);
+    const yrs = B.years || [], mx = Math.max(...[...(B.debt || []), ...(B.cash || [])].filter(x => x != null), 1);
+    bal = `<div class="card pad"><h3>Finanzielle Gesundheit <span class="stamp">${esc(yrs[yrs.length - 1] || "")}</span></h3>
+      ${pairs.map(([a, av, b, bv]) => { const mm = Math.max(av, bv, 1); return `<div class="hb">
+        <div class="hb-l"><span>${a}</span><b class="num">${big(av).join(" ")}</b></div>
+        <div class="hb-bars"><i class="pos" style="width:${av / mm * 100}%"></i><i class="neg" style="width:${bv / mm * 100}%"></i></div>
+        <div class="hb-l"><span>${b}</span><b class="num">${big(bv).join(" ")}</b></div></div>`; }).join("")}
+      ${yrs.length >= 3 ? `<div class="stamp" style="margin:12px 0 4px">Schulden und Cash im Zeitverlauf (${cur})</div>
+        <div class="yb">${yrs.map((y, i) => `<div class="yb-c" title="${y}: Schulden ${big(B.debt?.[i]).join(" ")}, Cash ${big(B.cash?.[i]).join(" ")}">
+          <div class="yb-bars"><i class="neg" style="height:${(B.debt?.[i] || 0) / mx * 100}%"></i><i class="pos" style="height:${(B.cash?.[i] || 0) / mx * 100}%"></i></div><small>${y}</small></div>`).join("")}</div>
+        <div class="legend"><span><i style="border:0;width:10px;height:10px;border-radius:3px;background:var(--pos);opacity:.7"></i>Cash</span><span><i style="border:0;width:10px;height:10px;border-radius:3px;background:var(--neg);opacity:.7"></i>Schulden</span></div>` : ""}</div>`;
+  }
+  let div = "";
+  if (Dv && (Dv.dps || []).length) {
+    const mx = Math.max(...Dv.dps), S = Dv.safety;
+    div = `<div class="card pad"><h3>Dividendenhistorie <span class="stamp">je Aktie, ${esc(Dv.currency)}</span></h3>
+      <div class="db">${Dv.years.map((y, i) => { const step = Dv.years.length > 12 ? 5 : Dv.years.length > 6 ? 2 : 1, show = (Dv.years.length - 1 - i) % step === 0;
+        return `<div class="db-c" title="${y}: ${nf(Dv.dps[i], Dv.dps[i] < 1 ? 3 : 2)} ${esc(Dv.currency)}"><i style="height:${Dv.dps[i] / mx * 100}%"></i><small>${show ? y : "&nbsp;"}</small></div>`; }).join("")}</div>
+      <dl class="dv-stats">
+        <div><dt>Wachstum 5 J. p. a.</dt><dd class="num">${pc(Dv.g5, 1, true)}</dd></div>
+        <div><dt>Wachstum 10 J. p. a.</dt><dd class="num">${pc(Dv.g10, 1, true)}</dd></div>
+        <div><dt>Jahre ohne Kürzung</dt><dd class="num">${Dv.streak ?? "–"}</dd></div>
+        <div><dt>Ausschüttungsquote</dt><dd class="num">${Dv.payout?.length ? pc(Dv.payout[Dv.payout.length - 1][1], 0) : "–"}</dd></div>
+      </dl>
+      ${S ? `<div class="dv-safe ${S.label}"><b>Dividendensicherheit: ${esc(S.label)}</b><span>${esc(S.reasons.join(" · "))}</span></div>` : ""}</div>`;
+  }
+  let hold = "";
+  if (Ho && (Ho.institutions != null || Ho.insiders != null)) {
+    const inst = Math.max(0, Math.min(1, Ho.institutions || 0)), ins = Math.max(0, Math.min(1 - inst, Ho.insiders || 0)), free = Math.max(0, 1 - inst - ins);
+    const R = 42, C = 2 * Math.PI * R; let off = 0;
+    const seg = (v, col) => { const s_ = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${col}" stroke-width="18" stroke-dasharray="${(v * C).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-off * C).toFixed(2)}" transform="rotate(-90 60 60)"/>`; off += v; return s_; };
+    hold = `<div class="card pad"><h3>Aktionärsstruktur</h3>
+      <div class="ho"><svg viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Institutionen ${pc(inst, 0)}, Insider ${pc(ins, 0)}, Streubesitz ${pc(free, 0)}">
+        <circle r="${R}" cx="60" cy="60" fill="none" stroke="var(--track)" stroke-width="18"/>
+        ${seg(inst, "var(--accent)")}${seg(ins, "var(--sma50)")}${seg(free, "var(--text-3)")}</svg>
+        <ul class="ho-l"><li><i style="background:var(--accent)"></i>Institutionen <b class="num">${pc(inst, 1)}</b></li>
+          <li><i style="background:var(--sma50)"></i>Insider <b class="num">${pc(ins, 1)}</b></li>
+          <li><i style="background:var(--text-3)"></i>Übrige / Privatanleger <b class="num">${pc(free, 1)}</b></li>
+          ${Ho.count ? `<li class="stamp">${nf(Ho.count, 0)} institutionelle Anleger</li>` : ""}</ul></div>
+      ${(Ho.top || []).length ? `<div class="stamp" style="margin:10px 0 4px">Größte institutionelle Aktionäre</div>
+        ${Ho.top.map(t => `<div class="ho-top"><span>${esc(t.name)}</span><b class="num">${pc(t.pct, 2)}</b></div>`).join("")}` : ""}</div>`;
+  }
+  if (!bal && !div && !hold) return "";
+  return `<h2 class="section" id="bilanz">Bilanz, Dividende & Aktionäre</h2>
+    <p class="section-sub">Wie solide das Unternehmen finanziert ist, wie verlässlich es ausschüttet und wem es gehört.</p>
+    <div class="an-grid">${bal}${div}${hold}</div>`;
+}
+
 /* Trefferquote der eigenen Empfehlungen */
 let trkScope = "me";
 const GROUP_COL = {Kaufen: "var(--pos)", Halten: "var(--neu)", Verkaufen: "var(--neg)"};
@@ -1855,7 +2106,8 @@ function meter(score) {
 }
 
 /* Kurschart (SVG, ohne externe Bibliothek) */
-const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false, ind: {sma50: false, sma200: false, vol: false}};
+const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false,
+  ind: {sma50: false, sma200: false, vol: false, boll: false, levels: false, rsi: false, macd: false}};
 try {
   CHART.range = localStorage.getItem("ac-chart-range") || "1y";
   CHART.tr = localStorage.getItem("ac-chart-tr") === "1";
@@ -1894,6 +2146,72 @@ function setHeadPct(pr, tr, label) {
   $("#ch-val").innerHTML = `<span style="color:${c(tr)}">${pc(tr, 1, true)}</span><small>inkl. Dividenden</small>`;
   $("#ch-chg").innerHTML = `<span style="color:var(--text-2);margin:0">Kurs allein ${pc(pr, 1, true)}</span><span>${esc(label)}</span>`;
 }
+/* Technische Indikatoren (aus den Kurspunkten des gewählten Zeitraums) */
+function sma(arr, n) { return arr.map((_, i) => i < n - 1 ? null : arr.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n); }
+function ema(arr, n) { const k = 2 / (n + 1); const out = []; arr.forEach((v, i) => out.push(i === 0 ? v : v * k + out[i - 1] * (1 - k))); return out; }
+function bollinger(c, n = 20, f = 2) {
+  const mid = sma(c, n);
+  const sd = c.map((_, i) => { if (i < n - 1) return null; const w = c.slice(i - n + 1, i + 1), mu = mid[i]; return Math.sqrt(w.reduce((a, b) => a + (b - mu) ** 2, 0) / n); });
+  return {mid, up: mid.map((v, i) => v == null ? null : v + f * sd[i]), lo: mid.map((v, i) => v == null ? null : v - f * sd[i])};
+}
+function rsiSeries(c, n = 14) {
+  const out = [null]; let up = 0, dn = 0;
+  for (let i = 1; i < c.length; i++) {
+    const d = c[i] - c[i - 1], u = Math.max(d, 0), w = Math.max(-d, 0);
+    if (i <= n) { up += u / n; dn += w / n; out.push(i === n ? (dn ? 100 - 100 / (1 + up / dn) : 100) : null); }
+    else { up = (up * (n - 1) + u) / n; dn = (dn * (n - 1) + w) / n; out.push(dn ? 100 - 100 / (1 + up / dn) : 100); }
+  }
+  return out;
+}
+function macdSeries(c) {
+  const e12 = ema(c, 12), e26 = ema(c, 26);
+  const line = e12.map((v, i) => v - e26[i]);
+  const sig = ema(line, 9);
+  return {line, sig, hist: line.map((v, i) => v - sig[i])};
+}
+function srLevels(c) {
+  // Wendepunkte (lokale Hochs/Tiefs), ähnliche Niveaus bündeln, nächstes Niveau unter/über dem Kurs wählen
+  const n = c.length, w = Math.max(3, Math.round(n / 30)), last = c[n - 1];
+  const piv = [];
+  for (let i = w; i < n - w; i++) {
+    const win = c.slice(i - w, i + w + 1);
+    if (c[i] === Math.max(...win)) piv.push(c[i]);
+    if (c[i] === Math.min(...win)) piv.push(c[i]);
+  }
+  const cl = [];
+  piv.sort((a, b) => a - b).forEach(v => { const g = cl.find(x => Math.abs(x.v - v) / x.v < 0.02); if (g) { g.v = (g.v * g.n + v) / (g.n + 1); g.n++; } else cl.push({v, n: 1}); });
+  const below = cl.filter(x => x.v < last * 0.995).sort((a, b) => b.v - a.v), above = cl.filter(x => x.v > last * 1.005).sort((a, b) => a.v - b.v);
+  return {sup: below[0]?.v ?? null, res: above[0]?.v ?? null};
+}
+function drawOsc(P, D) {
+  const box = $("#ch-osc"); if (!box) return;
+  const show = [CHART.ind.rsi && P.length >= 35 ? "rsi" : null, CHART.ind.macd && P.length >= 35 ? "macd" : null].filter(Boolean);
+  if (!show.length) { box.innerHTML = ""; return; }
+  const c = P.map(p => p[1]), W = $("#ch-wrap").clientWidth, H = 86, ml = 4, mr = 66, pw = W - ml - mr, n = c.length;
+  const X = i => ml + (i / (n - 1)) * pw;
+  const path = (arr, Y) => { let d = "", pen = false; arr.forEach((v, i) => { if (v == null || isNaN(v)) { pen = false; return; } d += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; }); return d; };
+  box.innerHTML = show.map(k => {
+    if (k === "rsi") {
+      const r = rsiSeries(c), Y = v => 6 + (1 - v / 100) * (H - 12), lastV = r[r.length - 1];
+      return `<div class="osc"><div class="osc-h"><b>RSI (14)</b> <span class="num" style="color:${lastV > 70 ? "var(--neg)" : lastV < 30 ? "var(--pos)" : "var(--text-2)"}">${nf(lastV, 0)}</span>
+        <span class="stamp">${lastV > 70 ? "überkauft" : lastV < 30 ? "überverkauft" : "neutral"} · über 70 überkauft, unter 30 überverkauft</span></div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
+        <rect x="${ml}" y="${Y(70)}" width="${pw}" height="${Y(30) - Y(70)}" fill="var(--accent)" opacity=".06"/>
+        ${[30, 50, 70].map(v => `<line x1="${ml}" x2="${ml + pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)" ${v === 50 ? 'stroke-dasharray="3 4"' : ""}/><text x="${W - 4}" y="${Y(v) + 4}" text-anchor="end" class="osc-ax">${v}</text>`).join("")}
+        <path d="${path(r, Y)}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg></div>`;
+    }
+    const md = macdSeries(c), all = [...md.line, ...md.sig, ...md.hist].filter(v => v != null && !isNaN(v));
+    const lo = Math.min(...all, 0), hi = Math.max(...all, 0), Y = v => 6 + (1 - (v - lo) / ((hi - lo) || 1)) * (H - 12);
+    const bw = Math.max(1, pw / n * 0.7), L = md.line[n - 1], S = md.sig[n - 1];
+    return `<div class="osc"><div class="osc-h"><b>MACD (12, 26, 9)</b> <span class="num" style="color:${L >= S ? "var(--pos)" : "var(--neg)"}">${L >= S ? "über" : "unter"} Signallinie</span>
+      <span class="stamp">Kreuzt die MACD-Linie die Signallinie nach oben, gilt das als Kaufsignal</span></div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
+      <line x1="${ml}" x2="${ml + pw}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--border)"/>
+      ${md.hist.map((v, i) => i < 26 ? "" : `<rect x="${(X(i) - bw / 2).toFixed(1)}" y="${Math.min(Y(v), Y(0)).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.abs(Y(v) - Y(0)).toFixed(1)}" fill="${v >= 0 ? "var(--pos)" : "var(--neg)"}" opacity=".35"/>`).join("")}
+      <path d="${path(md.line.map((v, i) => i < 26 ? null : v), Y)}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+      <path d="${path(md.sig.map((v, i) => i < 34 ? null : v), Y)}" fill="none" stroke="var(--sma50)" stroke-width="1.3"/></svg></div>`;
+  }).join("");
+}
 function drawChart() {
   const wrap = $("#ch-wrap"); if (!wrap) return;
   const D = CHART.data[CHART.range];
@@ -1911,7 +2229,9 @@ function drawChart() {
   const showS50 = CHART.ind.sma50 && !pct && D.sma50, showS200 = CHART.ind.sma200 && !pct && D.sma200;
   const showVol = CHART.ind.vol && D.volume;
   document.querySelectorAll("[data-ind]").forEach(b => {
-    const k = b.dataset.ind, avail = k === "vol" ? !!D.volume : !!D[k] && !pct;
+    const k = b.dataset.ind, nEnough = P.length >= 35;
+    const avail = k === "vol" ? !!D.volume : k === "boll" || k === "levels" ? nEnough && !pct
+      : k === "rsi" || k === "macd" ? nEnough : !!D[k] && !pct;
     b.disabled = !avail;
     b.setAttribute("aria-pressed", String(!!CHART.ind[k] && avail));
     b.title = !avail && k !== "vol" && pct ? "In der Gesamtrendite-Ansicht nicht verfügbar" : "";
@@ -1924,7 +2244,11 @@ function drawChart() {
   const pw = W - m.l - m.r;
   const volH = showVol ? Math.round((H - m.t - m.b) * 0.2) : 0, gap = showVol ? 10 : 0;
   const ph = H - m.t - m.b - volH - gap;
-  const smaVals = [...(showS50 ? D.sma50 : []), ...(showS200 ? D.sma200 : [])].filter(v => v != null);
+  const showBoll = CHART.ind.boll && !pct && P.length >= 35, showLev = CHART.ind.levels && !pct && P.length >= 35;
+  const boll = showBoll ? bollinger(P.map(p => p[1]), 20, 2) : null;
+  const lev = showLev ? srLevels(P.map(p => p[1])) : null;
+  const smaVals = [...(showS50 ? D.sma50 : []), ...(showS200 ? D.sma200 : []),
+                   ...(boll ? [...boll.up, ...boll.lo] : []), ...(lev ? [lev.sup, lev.res] : [])].filter(v => v != null);
   const all = [...priceV, ...(trV || []), ...smaVals, ...(D.range === "1d" && D.base ? [D.base] : []), ...(pct ? [0] : [])];
   let lo = Math.min(...all), hi = Math.max(...all);
   const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 0.01;
@@ -1987,6 +2311,15 @@ function drawChart() {
     ${pct ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ""}
     <path d="${area}" fill="url(#${gid})"/>
     ${pct ? `<path d="${path(priceV)}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
+    ${boll ? `<path d="${(() => { const pts = []; boll.up.forEach((v, i) => { if (v != null) pts.push(`${X(i).toFixed(1)},${Y(v).toFixed(1)}`); });
+        const lo = []; boll.lo.forEach((v, i) => { if (v != null) lo.push(`${X(i).toFixed(1)},${Y(v).toFixed(1)}`); });
+        return pts.length ? "M" + pts.join("L") + "L" + lo.reverse().join("L") + "Z" : ""; })()}" fill="var(--accent)" opacity=".08"/>
+      <path d="${smaPath(boll.up)}" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".55"/>
+      <path d="${smaPath(boll.lo)}" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".55"/>
+      <path d="${smaPath(boll.mid)}" fill="none" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 3" opacity=".5"/>` : ""}
+    ${lev ? [["sup", "Unterstützung", "var(--pos)"], ["res", "Widerstand", "var(--neg)"]].filter(([k]) => lev[k] != null).map(([k, l, c]) =>
+      `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(lev[k]).toFixed(1)}" y2="${Y(lev[k]).toFixed(1)}" stroke="${c}" stroke-width="1.2" stroke-dasharray="6 4" opacity=".8"/>
+       <text x="${m.l + 4}" y="${(Y(lev[k]) - 4).toFixed(1)}" class="endlbl" fill="${c}">${l} ${nf(lev[k], lev[k] < 10 ? 2 : 0)}</text>`).join("") : ""}
     ${showS200 ? `<path d="${smaPath(D.sma200)}" fill="none" stroke="var(--sma200)" stroke-width="1.75" stroke-dasharray="7 3" stroke-linejoin="round"/>` : ""}
     ${showS50 ? `<path d="${smaPath(D.sma50)}" fill="none" stroke="var(--sma50)" stroke-width="1.75" stroke-linejoin="round"/>` : ""}
     <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2010,12 +2343,15 @@ function drawChart() {
       : neutral ? `<span><i style="color:var(--text)"></i>Kurs</span>` : "")
     + (showS50 ? `<span><i class="sma50"></i>GD 50 Tage</span>` : "")
     + (showS200 ? `<span><i class="dash sma200"></i>GD 200 Tage</span>` : "")
-    + (showVol ? `<span><i style="border:0;height:8px;width:10px;background:var(--text-3);opacity:.6"></i>Handelsvolumen</span>` : "");
+    + (showVol ? `<span><i style="border:0;height:8px;width:10px;background:var(--text-3);opacity:.6"></i>Handelsvolumen</span>` : "")
+    + (boll ? `<span style="color:var(--accent)"><i></i><span style="color:var(--text-2)">Bollinger-Bänder (20, 2σ)</span></span>` : "")
+    + (lev ? `<span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Unterstützung/Widerstand (aus Wendepunkten)</span></span>` : "");
   const divTxt = divs.length ? `<span><i class="div"></i>Dividende · ${divs.length} ${divs.length === 1 ? "Zahlung" : "Zahlungen"}, zusammen ${nf(divSum)} ${esc(D.currency)} je Aktie</span>` : "";
   const note = D.range === "1d" && D.base ? `Gestrichelt: Schlusskurs Vortag ${nf(D.base)} ${esc(D.currency)}`
     : D.range === "max" ? `Daten ab ${new Date(P[0][0]).toLocaleDateString("de-DE", {month: "long", year: "numeric"})}`
     : pct ? "Dividenden zum Auszahlungstag wieder angelegt" : "";
   $("#ch-foot").innerHTML = `<div class="legend">${legend}${divTxt}</div><span>${note}</span>`;
+  drawOsc(P, D);
   const hit = $("#ch-hit"), hov = $("#ch-hover"), tip = $("#ch-tip");
   const snap = Math.max(1, Math.round(n / 60));  // Dividenden-Markierung leichter treffen
   const move = e => {
@@ -2488,8 +2824,7 @@ function render(d) {
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
   const nu = document.querySelector('#subnav a[href="#ueber"]');
   if (nu) nu.style.display = etf || crypto ? "none" : "";
-  const nf_ = document.querySelector('#subnav a[href="#fairerwert"]');
-  if (nf_) nf_.style.display = etf || crypto ? "none" : "";
+  ["#fairerwert", "#analysten", "#bilanz"].forEach(h => { const a_ = document.querySelector(`#subnav a[href="${h}"]`); if (a_) a_.style.display = etf || crypto ? "none" : ""; });
   $("#subnav").style.display = "block";
 
   $("#out").innerHTML = `
@@ -2557,10 +2892,15 @@ function render(d) {
           <button class="chip-btn" data-ind="sma50" aria-pressed="false" style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">GD 50</span></button>
           <button class="chip-btn" data-ind="sma200" aria-pressed="false" style="color:var(--sma200)"><i></i><span style="color:var(--text-2)">GD 200</span></button>
           <button class="chip-btn vol" data-ind="vol" aria-pressed="false"><i></i>Volumen</button>
+          <button class="chip-btn" data-ind="boll" aria-pressed="false" style="color:var(--accent)"><i></i><span style="color:var(--text-2)">Bollinger</span></button>
+          <button class="chip-btn" data-ind="levels" aria-pressed="false" style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Unterstützung/Widerstand</span></button>
+          <button class="chip-btn" data-ind="rsi" aria-pressed="false" style="color:var(--accent)"><i></i><span style="color:var(--text-2)">RSI</span></button>
+          <button class="chip-btn" data-ind="macd" aria-pressed="false" style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">MACD</span></button>
         </div>
       </div>
     </div>
     <div class="chart-wrap" id="ch-wrap"><div class="chart-msg">Lade Kursverlauf …</div></div>
+    <div id="ch-osc"></div>
     <div class="chart-foot" id="ch-foot"></div>
   </section>
 
@@ -2595,7 +2935,11 @@ function render(d) {
       .map(([k, v, s]) => `<div><dt>${k}</dt><dd class="num">${v}${s ? `<small>${s}</small>` : ""}</dd></div>`).join("")}
   </dl>
 
+  ${checklistCard(d)}
+
   ${fairCard(d)}
+
+  ${valChartCard(d)}
 
   <h2 class="section">Auf einen Blick</h2>
   <p class="section-sub">Das zutreffendste Adjektiv je Kategorie. Der Balken zeigt die Einordnung von negativ (links) bis positiv (rechts).</p>
@@ -2630,6 +2974,10 @@ function render(d) {
   </div>
 
   ${peersSection(d)}
+
+  ${analystSection(d)}
+
+  ${healthSection(d)}
 
   <h2 class="section" id="fundamental">Fundamentaldaten</h2>
   <p class="section-sub">${etf ? "Kosten, Rendite, Risiko und Streuung sowie die Bewertung der enthaltenen Aktien."
@@ -2720,6 +3068,7 @@ function render(d) {
   showTier("1");
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
+  initValChart(d);
   glossarize($("#out"));
   if (!crypto && !etf) initIncome(d.symbol);
   document.querySelectorAll("table.peers tr.peer").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
