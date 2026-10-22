@@ -1482,11 +1482,11 @@ function welcome() {
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
-    <div class="trk-teaser card">
+    ${ME?.admin ? `<div class="trk-teaser card">
       <div><b>Screener: DAX, MDAX, TecDAX, Euro Stoxx 50, Dow Jones, Nasdaq-100, S&amp;P 500</b>
         <span>Alle Werte dieser Indizes per Knopfdruck bewerten lassen – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
       <button class="btn primary" id="scropen">Screener öffnen</button>
-    </div>
+    </div>` : ""}
     <div class="trk-teaser card">
       <div><b>Wie gut sind die Empfehlungen?</b>
         <span>Die App merkt sich jede Empfehlung mit Kurs und Datum und vergleicht die spätere Entwicklung mit dem Heimatindex.</span></div>
@@ -1502,7 +1502,7 @@ function welcome() {
     </section>`;
   const ad_ = $("#admopen"); if (ad_) ad_.onclick = () => showAdmin();
   $("#trkopen").onclick = () => showTrack();
-  $("#scropen").onclick = () => showScreener();
+  const so_ = $("#scropen"); if (so_) so_.onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
   wlBind($("#out"));
   bindPushGuide();
@@ -1766,6 +1766,7 @@ async function showScreener() {
   $("#subnav").style.display = "none";
   navTo("?view=screener");
   window.scrollTo({top: 0});
+  if (ME && !ME.admin) { $("#out").innerHTML = `<div class="card pad">Der Screener ist nur für Administratoren verfügbar.</div>`; return; }
   $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Screener …</b></div>`;
   try { SCR.data = await api("/api/screener"); } catch (e) {
     if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Screener nicht verfügbar: ${esc(e.message)}</div>`; return; }

@@ -418,6 +418,9 @@ class TestHTTP(Isolated):
         self.assertEqual(len(json.loads(self.call(anna, "/api/messages")[2])["messages"]), 2)
         self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["unread"], 0)
         self.assertEqual(self.call(anna, "/api/admin/dashboard")[0], 403)          # Dashboard nur für Admins
+        self.assertEqual(self.call(anna, "/api/screener")[0], 403)                 # Screener nur für Admins
+        self.assertEqual(self.call(anna, "/api/screener/start", {"unis": ["dax"]})[0], 403)
+        self.assertEqual(self.call(adm, "/api/screener")[0], 200)
         self.assertEqual(self.call(anna, "/api/admin/system", {"action": "save"})[0], 403)
         st_, _h, body_ = self.call(adm, "/api/admin/dashboard")
         self.assertEqual(st_, 200)

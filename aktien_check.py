@@ -5999,6 +5999,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
                     self.admin_action(body, user)
                     return self.send_json(self.admin_list())
+                if u.path.startswith("/api/screener") and not self.is_admin():
+                    return self.send_json({"error": "Der Screener ist nur für Administratoren verfügbar."}, 403)
                 if u.path == "/api/screener/start":
                     unis_ = body.get("unis") if isinstance(body.get("unis"), list) else None
                     ok, msg = screener_start(user, "all" if body.get("mode") == "all" else "due", unis_)
@@ -6206,6 +6208,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
         if u.path == "/api/screener":
+            if not self.is_admin():
+                return self.send_json({"error": "Der Screener ist nur für Administratoren verfügbar."}, 403)
             return self.send(200, json.dumps(json_safe(screener_payload()), ensure_ascii=False),
                              "application/json; charset=utf-8")
         if u.path == "/api/track":
