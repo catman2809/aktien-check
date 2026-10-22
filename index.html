@@ -291,6 +291,9 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
+.etf-search{width:100%;height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:0 12px;font:inherit;font-size:14px;margin-bottom:8px}
+.etf-tbl td,.etf-tbl th{white-space:nowrap}
+.etf-tbl td:nth-child(2){white-space:normal;min-width:180px}
 .etf-stack{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
 .etf-stack i{display:block;height:100%;min-width:2px}
 .etf-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:13px;color:var(--text-2)}
@@ -3260,7 +3263,7 @@ function drawIncome() {
       <span style="color:var(--inc-mar)"><i class="mar"></i><span style="color:var(--text-2)">Nettomarge %</span></span>
       ${hasOp ? `<span style="color:var(--text-2)"><i class="mar op"></i>Operative Marge %</span>` : ""}
       <span style="color:var(--text-3)">Margen: linke Achse</span></div>
-    <span>${INC.freq === "annual" ? "Geschäftsjahre" : "Quartale (Monat = Periodenende)"} · Beträge in ${unit} ${esc(D.currency)} · Quelle: Yahoo Finance</span>`;
+    <span>${INC.freq === "annual" ? "Geschäftsjahre" : "Quartale (Monat = Periodenende)"} · Beträge in ${unit} ${esc(D.currency)} · Quelle: ${esc(D.source || "Yahoo Finance")}</span>`;
   const hit = $("#inc-hit"), tip = $("#inc-tip"), cols = wrap.querySelectorAll(".col");
   const move = e => {
     const r = hit.getBoundingClientRect();
@@ -3454,6 +3457,25 @@ function cryptoPeersSection(d) {
 }
 /* Unternehmensprofil („Über“) */
 const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+function secSection(d) {
+  const S = d.sec;
+  if (!S) return "";
+  const date = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  const bn = v => v == null ? "–" : nf(v / 1e9, 1);
+  const A = S.annual || [];
+  return `<h2 class="section" id="sec">Offizielle Angaben (SEC EDGAR)</h2>
+  <p class="section-sub">Pflichtmeldungen an die US-Börsenaufsicht – die verbindliche Originalquelle. <a href="${esc(S.url)}" target="_blank" rel="noopener">Alle Meldungen von ${esc(S.name)}</a></p>
+  <div class="etf-grid">
+    <div class="card pad"><h3>Letzte Meldungen</h3>
+      ${S.filings.map(f => `<div class="adm-row"><span><a href="${esc(f.url)}" target="_blank" rel="noopener"><b>${esc(f.form)}</b></a> <span class="stamp">${esc(f.label)}</span></span><span class="num stamp">${date(f.date)}</span></div>`).join("") || `<div class="stamp">Keine Meldungen gefunden.</div>`}
+      <div class="adm-row"><span>Insider-Meldungen (Form 4), letzte 90 Tage</span><b class="num">${S.form4_90d}</b></div></div>
+    ${A.length ? `<div class="card pad"><h3>Jahreszahlen laut Geschäftsbericht <span class="stamp">Mrd. USD</span></h3>
+      <table class="trk"><thead><tr><th>Geschäftsjahr bis</th><th class="num">Umsatz</th><th class="num">Op. Ergebnis</th><th class="num">Reinertrag</th></tr></thead>
+      <tbody>${A.slice().reverse().map(x => `<tr><td>${date(x.end)}</td><td class="num">${bn(x.revenue)}</td><td class="num">${bn(x.op_income)}</td><td class="num">${bn(x.net_income)}</td></tr>`).join("")}</tbody></table>
+      <div class="stamp" style="margin-top:6px">Aus den XBRL-Daten der 10-K-Berichte; zum Abgleich mit der Erfolgsrechnung oben.</div></div>` : ""}
+  </div>`;
+}
+
 function aboutSection(d) {
   const p = d.profile;
   if (!p || d.asset === "crypto") return "";
@@ -3476,7 +3498,7 @@ function aboutSection(d) {
   ].filter(r => r[1]);
   if (!rows.length) return "";
   return `<h2 class="section" id="ueber">Über ${esc(d.name)}</h2>
-  <p class="section-sub">Stammdaten des Unternehmens. Quellen: ${esc((p.sources || []).join(", "))}.</p>
+  <p class="section-sub">Stammdaten des Unternehmens. Quellen: ${esc([...(p.sources || []), ...(d.sec ? ["SEC EDGAR"] : [])].join(", "))}.</p>
   <div class="card about"><dl>${rows.map(([k, v, html, hint, copy]) => `<div class="about-row">
       <dt>${esc(k)}${hint ? `<small>${esc(hint)}</small>` : ""}</dt>
       <dd>${html ? v : `<span class="${copy ? "num mono" : ""}">${esc(v)}</span>`}${copy ? `<button class="copy-btn" data-copy="${esc(v)}" aria-label="${esc(k)} kopieren" title="Kopieren">${COPY_SVG}</button>` : ""}</dd>
@@ -3495,15 +3517,43 @@ document.addEventListener("click", e => {
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(v).then(done, legacy); else legacy();
 });
 
+let ETF_LIST = {rows: [], q: "", all: false};
+function etfListHtml() {
+  const q = ETF_LIST.q.trim().toLowerCase();
+  const rows = q ? ETF_LIST.rows.filter(r => (r[0] + " " + r[2] + " " + r[3] + " " + r[4]).toLowerCase().includes(q)) : ETF_LIST.rows;
+  const shown = ETF_LIST.all || q ? rows.slice(0, 2000) : rows.slice(0, 25);
+  return `<table class="trk etf-tbl"><thead><tr><th>#</th><th>Position</th><th>Land</th><th>Branche</th><th class="num">Gewicht</th></tr></thead><tbody>
+    ${shown.map(r => `<tr><td class="num stamp">${ETF_LIST.rows.indexOf(r) + 1}</td><td>${/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(r[4]) ? `<a href="?q=${encodeURIComponent(r[4])}" data-q="${esc(r[4])}" class="etf-link">${esc(r[0])}</a>` : esc(r[0])}</td>
+      <td>${esc(r[2] || "–")}</td><td>${esc(r[3] || "–")}</td><td class="num">${pc(r[1], 2)}</td></tr>`).join("")
+      || `<tr><td colspan="5" class="stamp">Keine Position gefunden.</td></tr>`}</tbody></table>
+    ${!q && !ETF_LIST.all && rows.length > 25 ? `<div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="etf-all">Alle ${nf(rows.length, 0)} Positionen anzeigen</button></div>` : ""}
+    ${q ? `<div class="stamp" style="margin-top:6px">${nf(rows.length, 0)} Treffer · zusammen ${pc(rows.reduce((a, r) => a + r[1], 0), 1)}</div>` : ""}`;
+}
+document.addEventListener("input", e => {
+  if (e.target.id !== "etf-q") return;
+  ETF_LIST.q = e.target.value; $("#etf-list").innerHTML = etfListHtml();
+});
+document.addEventListener("click", e => {
+  if (e.target.id !== "etf-all") return;
+  ETF_LIST.all = true; $("#etf-list").innerHTML = etfListHtml();
+});
+
 function etfSection(d) {
-  const E = d.etf || {};
-  const top = E.top || [], sec = E.sectors || [], rat = E.ratings || [];
+  const E = d.etf || {}, I = E.issuer;
+  const top = I ? I.holdings.slice(0, 10).map(h => ({symbol: /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(h[4]) ? h[4] : h[0], name: h[0], weight: h[1]})) : (E.top || []);
+  const sec = I && I.sectors.length ? I.sectors : (E.sectors || []), rat = E.ratings || [];
+  const ctry = I ? I.countries : [];
+  ETF_LIST = {rows: I ? I.holdings : [], q: "", all: false};
   const AC = [["Aktien", "var(--inc-rev)"], ["Anleihen", "var(--inc-ni)"], ["Cash", "var(--text-3)"], ["Sonstiges", "var(--inc-mar)"]];
   const assets = AC.map(([k, c]) => ({name: k, color: c, w: (E.assets || {})[k] || 0})).filter(x => x.w >= 0.0005);
+  const srcNote = I ? `Bestände von ${I.url ? `<a href="${esc(I.url)}" target="_blank" rel="noopener">${esc(I.source)}</a>` : esc(I.source)}${I.asof ? ", Stand " + esc(I.asof) : ""} · ${nf(I.total, 0)} Positionen${I.delayed ? " · Quartalsmeldung an die US-Aufsicht, bis zu drei Monate alt" : ""}`
+    : "Quelle: Yahoo Finance (nur die größten Positionen)";
   const head = `<h2 class="section" id="konkurrenz">Zusammensetzung</h2>
-    <p class="section-sub">Woraus der ETF besteht: Anlageklassen, größte Positionen und Branchen${E.bond ? ", Bonität der Anleihen" : ""}${E.family ? " · Anbieter " + esc(E.family) : ""}.</p>`;
+    <p class="section-sub">Woraus der ETF besteht: Anlageklassen, ${ctry.length ? "Länder, " : ""}Branchen${I ? " und alle Positionen" : " und größte Positionen"}${E.bond ? ", Bonität der Anleihen" : ""}. ${srcNote}${I && I.source === "Vanguard" ? " (Vanguard veröffentlicht keine Länder je Position)" : ""}.</p>
+    ${I && I.synthetic ? `<div class="note" style="margin-bottom:12px"><b>Synthetischer ETF (Swap):</b> Die Bestände sind ein Trägerportfolio, das der Anbieter als Sicherheit hält. Die Wertentwicklung kommt über einen Tauschvertrag (Swap) vom Index – Länder und Branchen unten entsprechen daher nicht dem Index.</div>` : ""}`;
   if (!top.length && !sec.length && !assets.length && !rat.length) return head + `<div class="card empty">Die Zusammensetzung war nicht abrufbar.</div>`;
   const maxT = Math.max(...top.map(x => x.weight), 0.01), maxS = Math.max(...sec.map(x => x.weight), 0.01), maxR = Math.max(...rat.map(x => x.weight), 0.01);
+  const maxC = Math.max(...ctry.map(x => x.weight), 0.01);
   const bar = (w, max) => `<span class="etf-bar"><i style="width:${Math.max(2, w / max * 100)}%"></i></span>`;
   const row = (name, w, max) => `<div class="etf-row"><span class="etf-name">${name}</span>${bar(w, max)}<span class="num etf-w">${pc(w, 1)}</span></div>`;
   const stack = (parts, label) => `<div class="etf-stack" role="img" aria-label="${esc(label)}">${parts.map(p_ =>
@@ -3523,8 +3573,13 @@ function etfSection(d) {
     ${assetsCard}
     ${top.length ? `<div class="card pad"><h3>${topLab}</h3>${top.map(x => row(`<a href="?q=${encodeURIComponent(x.symbol)}" data-q="${esc(x.symbol)}" class="etf-link">${esc(x.name)}</a>`, x.weight, maxT)).join("")}
       <div class="stamp" style="margin-top:8px">Zusammen ${pc(topSum, 1)} des Fonds · Name antippen für die Einzelanalyse</div></div>` : ""}
+    ${ctry.length ? `<div class="card pad"><h3>Länder</h3>${ctry.map(x => row(esc(x.name), x.weight, maxC)).join("")}
+      <div class="stamp" style="margin-top:8px">Sitzland laut ${esc(I.source)}</div></div>` : ""}
     ${sec.length ? `<div class="card pad"><h3>Branchen</h3>${sec.map(x => row(esc(x.name), x.weight, maxS)).join("")}</div>` : ""}
     ${bondCard}
+    ${I && I.holdings.length ? `<div class="card pad etf-wide"><h3>Alle Positionen <span class="stamp">${I.holdings.length < I.total ? `die größten ${nf(I.holdings.length, 0)} von ${nf(I.total, 0)}` : nf(I.total, 0)}</span></h3>
+      <input id="etf-q" class="etf-search" type="search" placeholder="Position, Land oder Branche suchen …" autocomplete="off">
+      <div class="peer-scroll" id="etf-list">${etfListHtml()}</div></div>` : ""}
   </div>`;
 }
 document.addEventListener("click", e => {
@@ -3795,6 +3850,7 @@ function render(d) {
   </div>
 
   ${aboutSection(d)}
+  ${secSection(d)}
 
   <h2 class="section" id="methodik">Methodik</h2>
   <p class="section-sub">So entsteht die Empfehlung. Alle Regeln sind transparent und im Programmcode anpassbar.</p>

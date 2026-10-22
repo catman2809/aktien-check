@@ -891,3 +891,36 @@ class TestOps(Isolated):
         for i in range(20):
             a.ops_tick(i)
         self.assertEqual(len(a.ops()["mem"]), 2 if a.mem_mb() else 0)
+
+
+class TestIssuerParsing(unittest.TestCase):
+    def test_numbers_countries_sectors(self):
+        self.assertEqual(a._num_any("5,47"), 5.47)
+        self.assertEqual(a._num_any("1.234,5"), 1234.5)
+        self.assertEqual(a._num_any("1,234.5"), 1234.5)
+        self.assertEqual(a._num_any("6.82"), 6.82)
+        self.assertIsNone(a._num_any("-"))
+        self.assertEqual(a._country("US"), "USA")
+        self.assertEqual(a._country("Vereinigte Staaten von Amerika"), "USA")
+        self.assertEqual(a._country("Großbritannien (UK)"), "Großbritannien")
+        self.assertEqual(a._country("-"), "Sonstige")
+        self.assertEqual(a._sector("Information Technology"), "IT")
+        self.assertEqual(a._sector("Finanzwesen"), "Finanzen")
+
+    def test_xlsx_reader_and_shares(self):
+        import io, zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+            z.writestr("xl/sharedStrings.xml", f'<sst {ns}><si><t>Name</t></si><si><t>Weighting</t></si><si><t>NVIDIA</t></si></sst>')
+            z.writestr("xl/worksheets/sheet1.xml", f'<worksheet {ns}><sheetData><row r="1"><c r="B1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row>'
+                                                   f'<row r="2"><c r="B2" t="s"><v>2</v></c><c r="C2"><v>0.055</v></c></row></sheetData></worksheet>')
+        rows = a._xlsx_rows(buf.getvalue())
+        self.assertEqual(rows, [["", "Name", "Weighting"], ["", "NVIDIA", "0.055"]])
+        sh = a._shares({f"L{i}": 0.05 for i in range(20)})
+        self.assertEqual(len(sh), 14)
+        self.assertEqual(sh[-1]["name"], "Weitere")
+        self.assertAlmostEqual(sum(x["weight"] for x in sh), 1.0)
+
+    def test_name_tokens(self):
+        self.assertEqual(a._name_tokens("Amundi Core MSCI World UCITS ETF Acc"), {"amundi", "core", "msci", "world"})

@@ -5,8 +5,12 @@ Start:  python aktien_check.py   ->  öffnet http://localhost:8765 im Browser.
 Datenquellen: Yahoo Finance (via yfinance), Google-News-RSS, Yahoo-Finance-RSS.
 Keine Anlageberatung – regelbasiertes Modell auf Basis öffentlich verfügbarer Daten.
 """
+import csv
+import gzip
 import hashlib
+import heapq
 import hmac
+import io
 import http.cookies
 import json
 import logging
@@ -21,6 +25,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 import xml.etree.ElementTree as ET
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -3156,6 +3161,18 @@ def income_data(symbol, freq):
         return hit[1]
     t = yf.Ticker(symbol)
     df = safe(lambda: t.income_stmt if freq == "annual" else t.quarterly_income_stmt)
+    if (df is None or getattr(df, "empty", True)) and freq == "annual" and "." not in symbol:
+        sc = safe(lambda: sec_company(symbol))
+        if sc and sc.get("annual"):  # Ersatz: offizielle Jahreszahlen aus SEC EDGAR
+            out = {"symbol": symbol, "freq": freq, "currency": "USD", "source": "SEC EDGAR",
+                   "periods": [{"label": a_["end"][:4], "end": a_["end"], "revenue": a_["revenue"], "net_income": a_["net_income"],
+                                "margin": a_["net_income"] / a_["revenue"] if a_["revenue"] else None,
+                                "op_income": a_["op_income"],
+                                "op_margin": a_["op_income"] / a_["revenue"] if a_["op_income"] is not None and a_["revenue"] else None}
+                               for a_ in sc["annual"] if a_["revenue"] and a_["net_income"] is not None]}
+            if out["periods"]:
+                INCOME_CACHE[key] = (time.time(), out)
+                return out
     if df is None or getattr(df, "empty", True):
         raise ValueError("Keine Geschäftszahlen verfügbar")
 
@@ -3948,18 +3965,20 @@ def e_dividend(m):
     return {"score": 0.0, "adjective": "dividendenschwach", "reasons": why}
 
 
-def analyze_etf(symbol, t, info, alternatives):
+def analyze_etf(symbol, t, info, alternatives, query=""):
     name = info.get("longName") or info.get("shortName") or symbol
     m = {"symbol": symbol, "name": name, "currency": info.get("currency") or "", "price": current_price(info),
          "rec_mean": None, "n_analysts": 0, "rec_dist": None, "short_float": None, "mcap": None}
     short = etf_short_name(name)
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         fh = ex.submit(lambda: t.history(period="max", auto_adjust=True))
         fd = ex.submit(etf_data, m, t, info)
+        fiss = ex.submit(issuer_holdings, symbol, name, query)
         fnews = ex.submit(collect_news, symbol, short, "", (), ("ETF",))
         fmac = ex.submit(gather_macro, m["currency"])
         hist, news, mac = safe(fh.result), fnews.result(), fmac.result()
         safe(fd.result)
+        iss = safe(lambda: fiss.result(timeout=45))
     if hist is not None and not hist.empty and len(hist) > 30:
         hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]
         etf_price_metrics(m, hist)
@@ -3983,6 +4002,13 @@ def analyze_etf(symbol, t, info, alternatives):
               "pe", "pb", "dist"):
         m.setdefault(k, None if k not in ("top", "sectors") else [])
     m["assets"] = m["assets"] or {}
+    if iss:  # Anbieterdaten ersetzen fehlende Yahoo-Angaben (auf dem Server ist Yahoo dafür oft gesperrt)
+        if not m["top"]:
+            m["top"] = [{"symbol": h[4] or h[0], "name": h[0], "weight": h[1]} for h in iss["holdings"][:10]]
+            m["top10"] = sum(x["weight"] for x in m["top"])
+        if not m["sectors"] and iss["sectors"]:
+            m["sectors"] = [x for x in iss["sectors"] if x["name"] not in ("Cash & Derivate", "Weitere")]
+            m["max_sector"] = m["sectors"][0] if m["sectors"] else None
 
     cats = {"valuation": e_valuation(m), "quality": e_quality(m), "growth": e_growth(m), "risk": e_risk(m),
             "dividend": e_dividend(m), "chart": score_chart(m), "sentiment": score_sentiment(m, news, None)}
@@ -4040,7 +4066,7 @@ def analyze_etf(symbol, t, info, alternatives):
         "facts": {k: m.get(k) for k in ("ter", "aum", "pe", "perf_1y", "cagr5", "vol", "dist", "top10", "hi52", "lo52")},
         "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"],
                 "ratings": m["ratings"], "gov_share": m["gov_share"], "duration": m["duration"], "maturity": m["maturity"],
-                "pe": m["pe"], "pb": m["pb"], "bond": m["bond_etf"]},
+                "pe": m["pe"], "pb": m["pb"], "bond": m["bond_etf"], "issuer": iss},
         "news": news, "notes": notes, "confidence": confidence, "events": [], "tech": m.get("tech"),
         "competitors": {"peers": [], "source": "", "industry": ""}, "profile": None,
         "model": {"key": "etf", "label": "ETF-Modell", "text": notes[0]},
@@ -4052,6 +4078,507 @@ def analyze_etf(symbol, t, info, alternatives):
 # ---------------------------------------------------------------------------
 # Unternehmensprofil („Über“): Yahoo + Wikidata (ISIN, Gründung, CEO, Sitz) + OpenFIGI + Finnhub (Börsengang)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ETF-Bestände direkt vom Anbieter (iShares, Xtrackers, Vanguard, Amundi) und SEC EDGAR (US-Fonds, US-Aktien)
+# ---------------------------------------------------------------------------
+ISSUER_CACHE = {}         # Symbol -> (Zeit, Bestandsdaten)
+SEC_CACHE = {}            # Schlüssel -> (Zeit, Daten)
+VG_MAP = {"t": 0, "map": {}}
+HOLDINGS_MAX = 2000       # so viele Positionen gehen höchstens an die Oberfläche (Länder/Branchen zählen alle)
+SEC_UA = {"User-Agent": os.environ.get("SEC_USER_AGENT") or "Aktien-Check/1.0 (https://aktien-check.onrender.com)"}
+
+ISO_DE = {"US": "USA", "DE": "Deutschland", "GB": "Großbritannien", "FR": "Frankreich", "NL": "Niederlande",
+          "CH": "Schweiz", "DK": "Dänemark", "SE": "Schweden", "FI": "Finnland", "NO": "Norwegen", "ES": "Spanien",
+          "IT": "Italien", "AT": "Österreich", "BE": "Belgien", "IE": "Irland", "JP": "Japan", "CN": "China",
+          "TW": "Taiwan", "KR": "Südkorea", "CA": "Kanada", "AU": "Australien", "HK": "Hongkong", "LU": "Luxemburg",
+          "PT": "Portugal", "IL": "Israel", "IN": "Indien", "BR": "Brasilien", "MX": "Mexiko", "SG": "Singapur",
+          "NZ": "Neuseeland", "ZA": "Südafrika", "SA": "Saudi-Arabien", "AE": "Ver. Arab. Emirate", "PL": "Polen",
+          "BM": "Bermuda", "KY": "Kaimaninseln", "JE": "Jersey", "GG": "Guernsey", "CL": "Chile", "ID": "Indonesien",
+          "TH": "Thailand", "MY": "Malaysia", "PH": "Philippinen", "TR": "Türkei", "GR": "Griechenland",
+          "CZ": "Tschechien", "HU": "Ungarn", "QA": "Katar", "KW": "Kuwait", "PE": "Peru", "CO": "Kolumbien",
+          "AR": "Argentinien", "PR": "Puerto Rico", "LR": "Liberia", "PA": "Panama", "CW": "Curaçao", "MO": "Macau"}
+COUNTRY_FIX = {"Vereinigte Staaten": "USA", "United States": "USA", "Vereinigtes Königreich": "Großbritannien",
+               "United Kingdom": "Großbritannien", "Korea (Süd)": "Südkorea", "Korea (South)": "Südkorea",
+               "Korea": "Südkorea", "Hong Kong": "Hongkong", "Mexico": "Mexiko", "Singapore": "Singapur",
+               "New Zealand": "Neuseeland", "South Africa": "Südafrika", "Saudi Arabia": "Saudi-Arabien",
+               "Poland": "Polen", "Cayman Islands": "Kaimaninseln", "Indonesia": "Indonesien", "Thailand": "Thailand",
+               "Malaysia": "Malaysia", "Turkey": "Türkei", "Greece": "Griechenland", "Czech Republic": "Tschechien",
+               "Hungary": "Ungarn", "Qatar": "Katar", "United Arab Emirates": "Ver. Arab. Emirate",
+               "Philippines": "Philippinen", "Chile": "Chile", "Colombia": "Kolumbien", "Argentina": "Argentinien",
+               "Peru": "Peru", "Kuwait": "Kuwait", "Bermuda": "Bermuda", "Jersey": "Jersey", "Macau": "Macau",
+               "European Union": "Europäische Union", "Supranational": "Supranational",
+               "Vereinigte Staaten von Amerika": "USA", "Großbritannien (UK)": "Großbritannien", "Süd Korea": "Südkorea",
+               "Kaiman Inseln": "Kaimaninseln", "Macao": "Macau", "Ver. Arabische Emirate": "Ver. Arab. Emirate",
+               "Vereinigte Arabische Emirate": "Ver. Arab. Emirate", "Republik Korea": "Südkorea", "Taiwan (Republik China)": "Taiwan"}
+GICS_DE = {"information technology": "IT", "financials": "Finanzen", "health care": "Gesundheit",
+           "consumer discretionary": "Zyklischer Konsum", "communication services": "Kommunikation",
+           "communication": "Kommunikation", "industrials": "Industrie", "consumer staples": "Basiskonsum",
+           "energy": "Energie", "materials": "Grundstoffe", "utilities": "Versorger", "real estate": "Immobilien",
+           "zyklische konsumgüter": "Zyklischer Konsum", "nichtzyklische konsumgüter": "Basiskonsum",
+           "materialien": "Grundstoffe", "informationstechnologie": "IT", "gesundheitsversorgung": "Gesundheit",
+           "cash und/oder derivate": "Cash & Derivate", "cash and/or derivatives": "Cash & Derivate",
+           "cash": "Cash & Derivate", "other": "Sonstige", "sonstige": "Sonstige", "unbekannt": "Sonstige",
+           "finanzwesen": "Finanzen", "gesundheitswesen": "Gesundheit", "industrieunternehmen": "Industrie",
+           "kommunikationsdienste": "Kommunikation", "material": "Grundstoffe", "nicht-basiskonsumgüter": "Zyklischer Konsum",
+           "basiskonsumgüter": "Basiskonsum", "versorgungsunternehmen": "Versorger", "barmittel & derivate": "Cash & Derivate",
+           "treasury": "US-Staatsanleihen", "treasuries": "US-Staatsanleihen", "government": "Staatsanleihen",
+           "mbs pass-through": "Hypotheken-Anleihen (MBS)", "industrial": "Unternehmensanleihen Industrie",
+           "financial institutions": "Unternehmensanleihen Finanzen", "utility": "Unternehmensanleihen Versorger",
+           "agency": "US-Agency-Anleihen", "supranational": "Supranationale Anleihen", "sovereign": "Staatsanleihen",
+           "local authority": "Kommunalanleihen", "covered": "Pfandbriefe", "cmbs": "Gewerbl. Hypotheken (CMBS)",
+           "abs": "Forderungsbesicherte Anleihen (ABS)", "money market": "Geldmarkt",
+           "consumer cyclical": "Zyklischer Konsum", "consumer non-cyclical": "Basiskonsum", "technology": "IT",
+           "communications": "Kommunikation", "basic industry": "Grundstoffe", "capital goods": "Industrie"}
+NPORT_ASSET = {"EC": "Aktien", "EP": "Vorzugsaktien", "DBT": "Anleihen", "STIV": "Geldmarkt", "RF": "Fonds",
+               "DE": "Derivate", "DFE": "Derivate", "DIR": "Derivate", "DCR": "Derivate", "DCO": "Derivate",
+               "DO": "Derivate", "SN": "Strukturierte Produkte", "LON": "Kredite", "RA": "Repo", "COMM": "Rohstoffe"}
+
+
+def _country(c):
+    c = (c or "").strip()
+    if not c or c in ("-", "—", "N/A"):
+        return "Sonstige"
+    if len(c) == 2 and c.isupper():
+        return ISO_DE.get(c, c)
+    return COUNTRY_FIX.get(c) or COUNTRY_DE.get(c) or c
+
+
+def _sector(x):
+    x = (x or "").strip()
+    if not x or x == "-":
+        return ""
+    return GICS_DE.get(x.lower(), x)
+
+
+def _num_any(v):
+    """Zahl aus „5,47“, „1.234,5“, „6.82“ oder „1,234.5“."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    v = (v or "").strip().replace("%", "").replace("\xa0", "")
+    if not v or v == "-":
+        return None
+    if "," in v and "." in v:
+        v = v.replace(".", "").replace(",", ".") if v.rfind(",") > v.rfind(".") else v.replace(",", "")
+    elif "," in v:
+        v = v.replace(",", ".")
+    return num(v)
+
+
+def _fetch(url, headers=None, data=None, timeout=20, limit=40_000_000):
+    req = urllib.request.Request(url, data=data, headers={**UA, "Accept-Encoding": "gzip", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read(limit)
+        return gzip.decompress(raw) if r.headers.get("Content-Encoding") == "gzip" else raw
+
+
+ETF_NAME_SKIP = {"ucits", "etf", "acc", "dist", "accumulating", "distributing", "the", "fund", "index", "solutions", "sicav",
+                 "plc", "and", "of", "usd", "eur", "c", "d", "1c", "1d", "a", "shares", "share", "class"}
+
+
+def _name_tokens(n):
+    return {w for w in re.sub(r"[^a-z0-9]+", " ", (n or "").lower().replace("&", " ")).split() if w not in ETF_NAME_SKIP}
+
+
+def etf_isin(symbol, query="", name=""):
+    """ISIN eines europäischen ETFs: aus der Eingabe oder über das Börsenkürzel (onvista, nur bei exaktem Treffer)."""
+    q = (query or "").strip().upper()
+    if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", q):
+        return q
+    base, _, suf = symbol.partition(".")
+    if not suf:
+        return None
+    hit = SEC_CACHE.get(("isin", symbol))
+    if hit and time.time() - hit[0] < 30 * 86400:
+        return hit[1]
+    d = json.loads(_fetch("https://api.onvista.de/api/v1/instruments/query?searchValue="
+                          + urllib.parse.quote(base) + "&limit=8", timeout=8))
+    isin = None
+    for x in d.get("list") or []:
+        if x.get("entitySubType") == "ETF" and (x.get("symbol") or "").upper() == base.upper() and x.get("isin"):
+            isin = x["isin"]
+            break
+    want = _name_tokens(name)
+    if not isin and len(want) >= 3:  # Ersatz: über den Fondsnamen, nur wenn alle wesentlichen Namensteile passen
+        d = json.loads(_fetch("https://api.onvista.de/api/v1/instruments/query?searchValue="
+                              + urllib.parse.quote(" ".join(sorted(want, key=len, reverse=True)[:5])) + "&limit=10", timeout=8))
+        for x in d.get("list") or []:
+            if x.get("entitySubType") == "ETF" and x.get("isin") and want <= _name_tokens(x.get("name")) | {"core"}:
+                isin = x["isin"]
+                break
+    SEC_CACHE[("isin", symbol)] = (time.time(), isin)
+    return isin
+
+
+def _issuer_of(name):
+    n = (name or "").lower()
+    for key, label in (("ishares", "iShares"), ("xtrackers", "Xtrackers"), ("vanguard", "Vanguard"),
+                       ("amundi", "Amundi"), ("lyxor", "Amundi")):
+        if key in n:
+            return label
+    return None
+
+
+def _ishares(isin, base, us):
+    site, loc = ("us-ishares", "en-us") if us else ("de-ishares-v2", "de-de")
+    pid = None
+    for qv in [v for v in (isin, base) if v]:
+        d = json.loads(_fetch("https://www.ishares.com/varnish-api/core-search/search/products?query="
+                              + urllib.parse.quote(qv) + f"&site={site}&locale={loc}&rows=5&start=0&userType=individual",
+                              timeout=10))
+        for r_ in d.get("results") or []:
+            if qv == isin or qv.upper() in [t_.upper() for t_ in r_.get("fundTicker") or []]:
+                pid = r_.get("portfolioId")
+                break
+        if pid:
+            break
+    if not pid:
+        return None
+    url = (f"https://www.ishares.com/us/products/{pid}/x/latest-holdings.csv" if us
+           else f"https://www.ishares.com/de/privatanleger/de/produkte/{pid}/x/latest-holdings.csv")
+    text = _fetch(url, timeout=20).decode("utf-8-sig", "replace")
+    lines = text.splitlines()
+    asof, start = None, None
+    for i, ln in enumerate(lines[:20]):
+        if re.match(r'"?(Fondsposition per|Fund Holdings as of)', ln):
+            asof = ln.split(",", 1)[1].strip().strip('"')
+        if re.match(r'"?(Emittententicker|Ticker|Name)\b', ln) and ("Gewichtung" in ln or "Weight" in ln):
+            start = i
+            break
+    if start is None:
+        return None
+    rows = list(csv.reader(lines[start:]))
+    head = [h.strip() for h in rows[0]]
+    col = lambda *names: next((i for i, h in enumerate(head) for n_ in names if h.lower().startswith(n_.lower())), None)
+    ci = {"name": col("Name"), "w": col("Gewichtung", "Weight"), "c": col("Standort", "Location"),
+          "s": col("Sektor", "Sector"), "t": col("Emittententicker", "Ticker"), "a": col("Anlageklasse", "Asset Class")}
+    out = []
+    for r_ in rows[1:]:
+        if len(r_) < len(head) - 2 or ci["w"] is None:
+            break  # Fußzeilen
+        w = _num_any(r_[ci["w"]])
+        if w is None:
+            continue
+        g = lambda k: r_[ci[k]].strip() if ci[k] is not None and ci[k] < len(r_) else ""
+        out.append({"name": g("name"), "w": w / 100, "country": _country(g("c")), "sector": _sector(g("s")),
+                    "ticker": g("t"), "isin": "", "kind": g("a")})
+    return {"source": "iShares", "url": url.replace("/x/latest-holdings.csv", "/"), "asof": asof, "holdings": out}
+
+
+def _xlsx_rows(raw):
+    """Minimaler xlsx-Leser (nur Standardbibliothek): Liste von Zeilen mit Zellwerten."""
+    z = zipfile.ZipFile(io.BytesIO(raw))
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    strings = []
+    if "xl/sharedStrings.xml" in z.namelist():
+        for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(ns + "si"):
+            strings.append("".join(t_.text or "" for t_ in si.iter(ns + "t")))
+    sheet = sorted(n_ for n_ in z.namelist() if n_.startswith("xl/worksheets/sheet"))[0]
+    rows = []
+    for row in ET.fromstring(z.read(sheet)).iter(ns + "row"):
+        vals = {}
+        for c in row.iter(ns + "c"):
+            ref = re.match(r"([A-Z]+)", c.get("r") or "")
+            idx = 0
+            for ch in ref.group(1) if ref else "A":
+                idx = idx * 26 + ord(ch) - 64
+            v = c.find(ns + "v")
+            if c.get("t") == "s" and v is not None:
+                val = strings[int(v.text)]
+            elif c.get("t") == "inlineStr":
+                val = "".join(t_.text or "" for t_ in c.iter(ns + "t"))
+            else:
+                val = v.text if v is not None else ""
+            vals[idx - 1] = val
+        if vals:
+            rows.append([vals.get(i, "") for i in range(max(vals) + 1)])
+    return rows
+
+
+def _xtrackers(isin):
+    url = f"https://etf.dws.com/etfdata/export/DEU/DEU/excel/product/constituent/{isin}/"
+    raw = _fetch(url, timeout=20)
+    if raw[:2] != b"PK":
+        return None
+    rows = _xlsx_rows(raw)
+    hi = next((i for i, r_ in enumerate(rows) if "Name" in r_ and any("Weight" in str(x) for x in r_)), None)
+    if hi is None:
+        return None
+    head = rows[hi]
+    col = lambda n_: next((i for i, h in enumerate(head) if str(h).startswith(n_)), None)
+    cn, ci_, cc, cs, cw, ct = col("Name"), col("ISIN"), col("Country"), col("Industry"), col("Weight"), col("Type")
+    out = []
+    for r_ in rows[hi + 1:]:
+        g = lambda i: r_[i] if i is not None and i < len(r_) else ""
+        w = _num_any(g(cw))
+        if w is None or not g(cn):
+            continue
+        out.append({"name": g(cn), "w": w if abs(w) <= 1.5 else w / 100, "country": _country(g(cc)),
+                    "sector": _sector(g(cs)), "ticker": "", "isin": g(ci_), "kind": g(ct)})
+    return {"source": "Xtrackers", "url": f"https://etf.dws.com/de-de/{isin}/", "asof": None, "holdings": out}
+
+
+def _vg_query(query, variables=None):
+    body = json.dumps({"query": query, "variables": variables or {}}).encode()
+    return json.loads(_fetch("https://www.de.vanguard/gpx/graphql", data=body, timeout=20,
+                             headers={"Content-Type": "application/json", "x-consumer-id": "de0"}))
+
+
+def _vanguard(isin):
+    if time.time() - VG_MAP["t"] > 7 * 86400 or not VG_MAP["map"]:
+        mp = {}
+        for start in range(9000, 10000, 250):  # Fondsnummern der europäischen Vanguard-Fonds
+            d = _vg_query("query F($p:[String!]!){ funds(portIds:$p){ profile { portId identifiers { altId altIdValue } } } }",
+                          {"p": [str(i) for i in range(start, start + 250)]})
+            for f_ in (d.get("data") or {}).get("funds") or []:
+                pr = f_.get("profile") or {}
+                for i_ in pr.get("identifiers") or []:
+                    if i_.get("altId") == "ISIN" and i_.get("altIdValue"):
+                        mp[i_["altIdValue"]] = pr.get("portId")
+        VG_MAP.update(t=time.time(), map=mp)
+    pid = VG_MAP["map"].get(isin)
+    if not pid:
+        return None
+    d = _vg_query("query H($p:[String!]!){ borHoldings(portIds:$p){ holdings(limit:1500){ items { issuerName "
+                  "securityLongDescription gicsSectorDescription marketValuePercentage ticker securityType } totalHoldings } } }",
+                  {"p": [pid]})
+    hs = (((d.get("data") or {}).get("borHoldings") or [{}])[0].get("holdings") or {})
+    out = [{"name": x.get("issuerName") or x.get("securityLongDescription") or "", "w": (num(x.get("marketValuePercentage")) or 0) / 100,
+            "country": "", "sector": _sector(x.get("gicsSectorDescription")), "ticker": x.get("ticker") or "",
+            "isin": "", "kind": x.get("securityType") or ""} for x in hs.get("items") or []]
+    return {"source": "Vanguard", "url": f"https://www.de.vanguard/professionell/anlageprodukte/etf/{pid}",
+            "asof": None, "holdings": out, "total": int(num(hs.get("totalHoldings")) or len(out))}
+
+
+def _amundi(isin):
+    body = json.dumps({"context": {"countryCode": "DEU", "languageCode": "de", "userProfileName": "RETAIL"},
+                       "productIds": [isin], "productType": "PRODUCT",
+                       "composition": {"compositionFields": ["date", "type", "isin", "name", "weight", "sector",
+                                                             "countryOfRisk", "bbg"]}}).encode()
+    d = json.loads(_fetch("https://www.amundietf.de/mapi/ProductAPI/getProductsData", data=body, timeout=20,
+                          headers={"Content-Type": "application/json"}))
+    comp = ((d.get("products") or [{}])[0].get("composition") or {})
+    items = comp.get("compositionData") or []
+    if not items:
+        return None
+    out, asof = [], None
+    for it in items:
+        c = it.get("compositionCharacteristics") or {}
+        asof = asof or c.get("date")
+        out.append({"name": c.get("name") or "", "w": num(it.get("weight")) or num(c.get("weight")) or 0,
+                    "country": _country(c.get("countryOfRisk")), "sector": _sector(c.get("sector")),
+                    "ticker": (c.get("bbg") or "").split(" ")[0], "isin": c.get("isin") or "", "kind": c.get("type") or ""})
+    return {"source": "Amundi", "url": f"https://www.amundietf.de/de/privatanleger/products/{isin.lower()}",
+            "asof": asof, "holdings": out, "total": comp.get("totalNumberOfInstruments")}
+
+
+def _sec_json(url, timeout=15):
+    return json.loads(_fetch(url, headers=SEC_UA, timeout=timeout))
+
+
+def sec_fund_series(symbol):
+    """US-Fonds/ETF: Börsenkürzel -> (CIK, Series-ID) aus der SEC-Liste."""
+    hit = SEC_CACHE.get(("series", symbol))
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1]
+    d = _sec_json("https://www.sec.gov/files/company_tickers_mf.json", timeout=20)
+    res = next(((r_[0], r_[1]) for r_ in d.get("data") or [] if (r_[3] or "").upper() == symbol.upper()), None)
+    del d
+    SEC_CACHE[("series", symbol)] = (time.time(), res)
+    return res
+
+
+def _sec_nport(symbol):
+    ser = sec_fund_series(symbol)
+    if not ser:
+        return None
+    cik, series = ser
+    atom = _fetch(f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={series}&type=NPORT-P"
+                  "&dateb=&owner=include&count=3&output=atom", headers=SEC_UA, timeout=15).decode("utf-8", "replace")
+    href = re.search(r"<filing-href>([^<]+)</filing-href>", atom)
+    if not href:
+        return None
+    folder = href.group(1).rsplit("/", 1)[0]
+    req = urllib.request.Request(folder + "/primary_doc.xml", headers=SEC_UA)
+    top, agg_c, agg_k, n, asof = [], {}, {}, 0, None
+    with urllib.request.urlopen(req, timeout=40) as r:  # gestreamt: große Anleihefonds haben >10.000 Positionen
+        cur = None
+        for ev, el in ET.iterparse(r, events=("start", "end")):
+            tag = el.tag.rsplit("}", 1)[-1]
+            if ev == "start":
+                if tag == "invstOrSec":
+                    cur = {"name": "", "w": 0.0, "country": "", "isin": "", "kind": ""}
+                continue
+            if tag == "repPdDate" and not asof:
+                asof = el.text
+            elif cur is not None:
+                if tag == "name":
+                    cur["name"] = el.text or ""
+                elif tag == "isin":
+                    cur["isin"] = el.get("value") or ""
+                elif tag == "pctVal":
+                    cur["w"] = (num(el.text) or 0) / 100
+                elif tag == "invCountry":
+                    cur["country"] = _country(el.text)
+                elif tag == "assetCat":
+                    cur["kind"] = NPORT_ASSET.get(el.text or "", el.text or "")
+                elif tag == "invstOrSec":
+                    n += 1
+                    agg_c[cur["country"] or "Sonstige"] = agg_c.get(cur["country"] or "Sonstige", 0) + cur["w"]
+                    agg_k[cur["kind"] or "Sonstige"] = agg_k.get(cur["kind"] or "Sonstige", 0) + cur["w"]
+                    item = (cur["w"], n, cur)
+                    if len(top) < HOLDINGS_MAX:
+                        heapq.heappush(top, item)
+                    else:
+                        heapq.heappushpop(top, item)
+                    cur = None
+                    el.clear()
+    hs = [dict(x[2], sector="", ticker="") for x in sorted(top, key=lambda x: -x[0])]
+    return {"source": "SEC EDGAR (N-PORT)", "url": folder + "/", "asof": asof, "holdings": hs, "total": n,
+            "countries_all": agg_c, "kinds_all": agg_k, "delayed": True}
+
+
+def _shares(d):
+    tot = {}
+    for k, v in d.items():
+        if k:
+            tot[k] = tot.get(k, 0) + v
+    items = sorted(({"name": k, "weight": v} for k, v in tot.items() if abs(v) > 0.0001), key=lambda x: -x["weight"])
+    if len(items) > 14:  # lange Liste zusammenfassen
+        rest = sum(x["weight"] for x in items[13:])
+        items = items[:13] + [{"name": "Weitere", "weight": rest}]
+    return items
+
+
+def issuer_holdings(symbol, name, query=""):
+    """Vollständige Bestandsliste vom Anbieter bzw. aus SEC-Meldungen. None, wenn keine Quelle passt."""
+    hit = ISSUER_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    base, _, suf = symbol.partition(".")
+    us = not suf
+    issuer = _issuer_of(name)
+    isin = None if us else safe(lambda: etf_isin(symbol, query, name))
+    res = None
+    try:
+        if issuer == "iShares":
+            res = _ishares(isin, base, us)
+        elif issuer == "Xtrackers" and isin:
+            res = _xtrackers(isin)
+        elif issuer == "Vanguard" and isin:
+            res = _vanguard(isin)
+        elif issuer == "Amundi" and isin:
+            res = _amundi(isin)
+    except Exception as e:
+        LOG.warning("[ETF] Anbieterdaten %s (%s) nicht abrufbar: %s", symbol, issuer, e)
+    if not res and us:
+        res = safe(lambda: _sec_nport(symbol))
+    if not res or not res.get("holdings"):
+        ISSUER_CACHE[symbol] = (time.time(), None)
+        return None
+    hs = sorted(res["holdings"], key=lambda x: -x["w"])
+    by_country = res.get("countries_all") or _sum_by(hs, "country")  # SEC: über alle Positionen, sonst Liste
+    out = {"source": res["source"], "url": res["url"], "asof": res.get("asof"), "isin": isin,
+           "synthetic": bool(re.search(r"swap|synthet", (name or "").lower())),
+           "total": int(res.get("total") or len(hs)), "delayed": bool(res.get("delayed")),
+           "countries": _shares(by_country) if by_country else [],
+           "sectors": _shares(_sum_by(hs, "sector")),
+           "kinds": _shares(res.get("kinds_all") or {}),
+           # kompakt: [Name, Gewicht, Land, Branche, ISIN oder Kürzel]
+           "holdings": [[h["name"][:60], round(h["w"], 6), h["country"], h["sector"], h["isin"] or h["ticker"]]
+                        for h in hs[:HOLDINGS_MAX]]}
+    LOG.info("[ETF] %s: %d Positionen von %s", symbol, out["total"], out["source"])
+    ISSUER_CACHE[symbol] = (time.time(), out)
+    return out
+
+
+def _sum_by(hs, key):
+    d = {}
+    for h in hs:
+        if h.get(key):
+            d[h[key]] = d.get(h[key], 0) + h["w"]
+    return d
+
+
+# ---------------------------------------------------------------------------
+# SEC EDGAR für US-Aktien: Pflichtmeldungen, Insider-Meldungen, offizielle Jahreszahlen
+# ---------------------------------------------------------------------------
+SEC_FORMS = {"10-K": "Jahresbericht", "10-Q": "Quartalsbericht", "8-K": "Wichtiges Ereignis", "20-F": "Jahresbericht (Ausland)",
+             "6-K": "Zwischenmeldung (Ausland)", "DEF 14A": "Einladung Hauptversammlung", "S-1": "Börsenprospekt"}
+SEC_REVENUE = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
+               "RevenueFromContractWithCustomerIncludingAssessedTax")
+
+
+def sec_cik(symbol):
+    hit = SEC_CACHE.get("tickers")
+    if not hit or time.time() - hit[0] > 86400:
+        d = _sec_json("https://www.sec.gov/files/company_tickers.json", timeout=20)
+        hit = (time.time(), {v["ticker"].upper(): (int(v["cik_str"]), v["title"]) for v in d.values()})
+        SEC_CACHE["tickers"] = hit
+    return hit[1].get(symbol.upper().replace(".", "-"))
+
+
+def _sec_annual(cik, concept):
+    d = _sec_json(f"https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{concept}.json")
+    vals = {}
+    for unit, rows in (d.get("units") or {}).items():
+        if unit != "USD":
+            continue
+        for r_ in rows:
+            if r_.get("form") not in ("10-K", "20-F", "10-K/A") or not r_.get("start") or not r_.get("end"):
+                continue
+            days = (datetime.fromisoformat(r_["end"]) - datetime.fromisoformat(r_["start"])).days
+            if 350 <= days <= 380:
+                old = vals.get(r_["end"])
+                if not old or (r_.get("filed") or "") > old[1]:
+                    vals[r_["end"]] = (r_["val"], r_.get("filed") or "")
+    return {k: v[0] for k, v in vals.items()}
+
+
+def sec_annual(cik):
+    rev = {}
+    for c in SEC_REVENUE:
+        r_ = safe(lambda: _sec_annual(cik, c)) or {}
+        if r_ and (not rev or max(r_) > max(rev)):
+            rev = r_
+    ni = safe(lambda: _sec_annual(cik, "NetIncomeLoss")) or {}
+    op = safe(lambda: _sec_annual(cik, "OperatingIncomeLoss")) or {}
+    out = [{"end": e, "revenue": rev[e], "net_income": ni.get(e), "op_income": op.get(e)} for e in sorted(rev) if e in ni]
+    return out[-5:]
+
+
+def sec_company(symbol):
+    """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
+    if "." in symbol.replace("-", ".") and not re.fullmatch(r"[A-Z]+-[A-Z]", symbol):
+        return None
+    hit = SEC_CACHE.get(("co", symbol))
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]
+    m_ = sec_cik(symbol)
+    if not m_:
+        SEC_CACHE[("co", symbol)] = (time.time(), None)
+        return None
+    cik, title = m_
+    sub = _sec_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
+    rc = (sub.get("filings") or {}).get("recent") or {}
+    forms, dates, accs, docs = rc.get("form") or [], rc.get("filingDate") or [], rc.get("accessionNumber") or [], rc.get("primaryDocument") or []
+    del sub
+    filings, seen, since = [], {}, (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+    form4 = sum(1 for f_, d_ in zip(forms, dates) if f_ == "4" and d_ >= since)
+    for f_, d_, a_, p_ in zip(forms, dates, accs, docs):
+        if f_ not in SEC_FORMS or seen.get(f_, 0) >= (3 if f_ in ("8-K", "6-K") else 1):
+            continue
+        seen[f_] = seen.get(f_, 0) + 1
+        filings.append({"form": f_, "label": SEC_FORMS[f_], "date": d_,
+                        "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/{p_}"})
+        if len(filings) >= 7:
+            break
+    out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4,
+           "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=&dateb=&owner=include&count=40",
+           "annual": safe(lambda: sec_annual(cik)) or []}
+    SEC_CACHE[("co", symbol)] = (time.time(), out)
+    return out
+
+
 PROFILE_CACHE = {}
 # Yahoo-Börsenkürzel -> Länderkennung der ISIN und Bloomberg-Börsencode (Composite) für OpenFIGI
 SUFFIX_MARKET = {"": ("US", "US"), "DE": ("DE", "GR"), "F": ("DE", "GR"), "BE": ("DE", "GR"), "MU": ("DE", "GR"),
@@ -4209,7 +4736,7 @@ def analyze(query):
         return result
     symbol, t, info, alternatives = resolve(query)
     if info.get("quoteType") == "ETF":
-        result = analyze_etf(symbol, t, info, alternatives)
+        result = analyze_etf(symbol, t, info, alternatives, query)
         CACHE[key] = (time.time(), result)
         return result
     with ThreadPoolExecutor(max_workers=4) as ex:
@@ -4222,10 +4749,12 @@ def analyze(query):
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         fpeer = ex.submit(competitors, symbol, info, alternatives)
         fprof = ex.submit(company_profile, symbol, info, company)
+        fsec = ex.submit(sec_company, symbol) if info.get("quoteType") == "EQUITY" and "." not in symbol else None
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
         profile = safe(lambda: fprof.result(timeout=30))
+        sec_ = safe(lambda: fsec.result(timeout=30)) if fsec else None
     finnhub_enrich(m, symbol, alternatives)
     own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
                "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],
@@ -4299,6 +4828,7 @@ def analyze(query):
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
         "tech": m.get("tech"),
         "profile": profile,
+        "sec": sec_,
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],
@@ -5529,7 +6059,8 @@ def cache_rules():
             ("Erfolgsrechnung", INCOME_CACHE, 12 * 3600, 60), ("Profile", PROFILE_CACHE, 7 * 86400, 150),
             ("Wettbewerber", PEER_CACHE, 6 * 3600, 200), ("Termine", EVENT_CACHE, 6 * 3600, 100),
             ("Finnhub", FINNHUB_CACHE, 3600, 400), ("CoinGecko", CG_CACHE, 86400, 60),
-            ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50)]
+            ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50),
+            ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300)]
 
 
 def prune_caches():
