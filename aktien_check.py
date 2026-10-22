@@ -4492,6 +4492,22 @@ def screener_run():
             if not screener_step():
                 break
             st["done"] += 1
+            mb = release_memory()
+            if st["done"] % 10 == 0:
+                LOG.info("[Screener] %d von %d · Speicher %s MB", st["done"], st["target"], f"{mb:.0f}" if mb else "?")
+            if mb and mb > MEM_SOFT_MB:
+                safe(prune_caches)
+                CACHE.clear()
+                CHART_CACHE.clear()
+                time.sleep(20)
+                mb = release_memory()
+                LOG.warning("[Screener] Speicher knapp – aufgeräumt, jetzt %.0f MB", mb or 0)
+                if mb and mb > MEM_HARD_MB:
+                    st["stop"] = True
+                    st["mem_stop"] = True
+                    LOG.warning("[Screener] Abgebrochen: Speicher bleibt über %d MB – mit „Start“ geht es später weiter",
+                                MEM_HARD_MB)
+                    break
             for _ in range(SCREENER_PAUSE):
                 if st["stop"]:
                     break
@@ -4520,7 +4536,8 @@ def screener_start(user, mode="due", unis=None):
         names = ", ".join(SCREENER_UNIVERSES[k][0] for k in unis)
         if not due:
             return False, f"{names}: alle Werte sind aktuell (jünger als 20 Stunden) – „Alle neu bewerten“ erzwingt einen Durchgang."
-        st.update(running=True, stop=False, started=now, by=user, mode=mode, done=0, target=len(due), finished=None, unis=unis)
+        st.update(running=True, stop=False, started=now, by=user, mode=mode, done=0, target=len(due), finished=None, unis=unis,
+                  mem_stop=False)
         threading.Thread(target=screener_run, daemon=True).start()
         return True, f"Gestartet: {names} – {len(due)} Werte werden bewertet."
 
@@ -4540,12 +4557,58 @@ def screener_payload():
             "current": st["current"], "pause": SCREENER_PAUSE, "running": st["running"], "by": st["by"],
             "done": st["done"], "target": st["target"], "mode": st["mode"], "stopping": st["running"] and st["stop"],
             "finished": st["finished"], "due": len(screener_due("due")), "run_unis": st["unis"],
+            "mem_stop": st.get("mem_stop", False),
             "due_by": {k: len(screener_due("due", None, [k])) for k in SCREENER_UNIVERSES}}
 
 
 # ---------------------------------------------------------------------------
 # Zwischenspeicher begrenzen: abgelaufene Einträge löschen, Höchstzahl je Speicher (älteste zuerst raus)
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Arbeitsspeicher unter Linux (Render): glibc legt pro Thread eigene Speicherbereiche („Arenen“) an und gibt
+# freien Speicher kaum zurück – bei vielen Analysen wächst der Prozess so über 512 MB. Gegenmittel:
+# Arenen begrenzen, nach Arbeit aktiv zurückgeben (malloc_trim) und den Screener bei Knappheit bremsen.
+# ---------------------------------------------------------------------------
+MEM_SOFT_MB = 400        # ab hier räumt der Screener auf und pausiert
+MEM_HARD_MB = 450        # bleibt es darüber, stoppt der Screener geordnet (Limit des kostenlosen Servers: 512 MB)
+_LIBC = None
+
+
+def libc():
+    global _LIBC
+    if _LIBC is None:
+        try:
+            import ctypes
+            _LIBC = ctypes.CDLL("libc.so.6")
+        except Exception:
+            _LIBC = False  # Windows/macOS: nicht nötig
+    return _LIBC
+
+
+def limit_malloc_arenas(n=2):
+    lc = libc()
+    if lc:
+        safe(lambda: lc.mallopt(-8, n))  # M_ARENA_MAX
+
+
+def mem_mb():
+    """Belegter Arbeitsspeicher des Prozesses in MB (nur Linux, sonst None)."""
+    try:
+        with open("/proc/self/statm") as f:
+            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1e6
+    except Exception:
+        return None
+
+
+def release_memory():
+    import gc
+    gc.collect()
+    lc = libc()
+    if lc:
+        safe(lambda: lc.malloc_trim(0))
+    return mem_mb()
+
+
 def cache_rules():
     """(Name, Speicher, Lebensdauer in Sekunden, Höchstzahl Einträge) – Einträge sind (Zeitstempel, Daten)."""
     return [("Analysen", CACHE, 900, 40), ("Charts", CHART_CACHE, 12 * 3600, 120),
@@ -4573,8 +4636,7 @@ def prune_caches():
         removed += len(FIN_CUR_CACHE)
         FIN_CUR_CACHE.clear()
     if removed:
-        import gc
-        gc.collect()
+        release_memory()
     return removed
 
 
@@ -5412,6 +5474,7 @@ def main():
     if "--no-browser" not in sys.argv and not hosted:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
+        limit_malloc_arenas()
         threading.Thread(target=alert_loop, daemon=True).start()
         threading.Thread(target=history_flush_loop, daemon=True).start()
         srv.serve_forever()

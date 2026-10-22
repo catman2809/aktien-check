@@ -1649,7 +1649,9 @@ function renderScreener() {
       </div>`
       : `<p class="section-sub" style="margin-top:0">Der Screener bewertet nur, wenn du <b>Screening starten</b> drückst und einen Index auswählst – immer einer pro Durchgang.
         Die Werte werden nacheinander analysiert, danach stoppt er von selbst.
-        ${D.finished ? ` Letzter Durchgang beendet ${ago_(D.finished)}.` : ""} ${D.due ? "" : "Alle Werte sind aktuell."}</p>`}
+        ${D.finished ? ` Letzter Durchgang beendet ${ago_(D.finished)}.` : ""}
+        ${D.mem_stop ? `</p><div class="note">Der letzte Durchgang wurde angehalten, weil der Arbeitsspeicher des Servers knapp wurde.
+          Die bisher bewerteten Werte sind gespeichert – mit „Screening starten“ geht es bei den offenen Werten weiter.</div><p class="section-sub" style="margin:0">` : ""} ${D.due ? "" : "Alle Werte sind aktuell."}</p>`}
     <div class="scr-ctrl">
       <div class="seg" id="scruni"><button data-u="all" class="${SCR.uni === "all" ? "on" : ""}">Alle</button>${Object.entries(U).map(([k, u]) =>
         `<button data-u="${k}" class="${SCR.uni === k ? "on" : ""}">${esc(u.name)}<em>${u.done}/${u.total}</em></button>`).join("")}</div>

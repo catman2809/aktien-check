@@ -652,6 +652,29 @@ class TestScreenerStart(Isolated):
             a.SCREENER_STATE.update(running=False, stop=False)
 
 
+class TestScreenerMemoryGuard(Isolated):
+    def test_stops_when_memory_stays_high(self):
+        orig = (a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep)
+        a.SCREENER_UNIVERSES = {"t": ("Test", ["AAA", "BBB", "CCC"])}
+        a.SCREENER_PAUSE = 0
+        a.release_memory = lambda: 480.0            # Speicher bleibt über der harten Grenze
+        a.time.sleep = lambda s_: None
+        calls = []
+        a.analyze = lambda s_: (calls.append(s_), {"symbol": s_, "name": s_, "price": 1, "summary": {"adjective": "x"},
+                                                 "rating": {"label": "Buy", "group": "Kaufen", "score": 40}, "categories": [], "facts": {}})[1]
+        try:
+            self.assertTrue(a.screener_start("anna", "due", ["t"])[0])
+            for _ in range(100):
+                if not a.SCREENER_STATE["running"]:
+                    break
+                orig[4](0.02)
+            self.assertEqual(len(calls), 1)                         # nach dem ersten Wert geordnet gestoppt
+            self.assertTrue(a.screener_payload()["mem_stop"])
+        finally:
+            a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep = orig
+            a.SCREENER_STATE.update(running=False, stop=False, mem_stop=False)
+
+
 class TestForecastAndFairValue(unittest.TestCase):
     """Analystenprognosen, Forward-KGV und fairer Wert in drei Szenarien."""
     MAC = {"rf": 4.0}

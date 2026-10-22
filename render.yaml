@@ -10,5 +10,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: MALLOC_ARENA_MAX   # weniger Speicherbereiche pro Thread -> weniger Arbeitsspeicher (glibc)
+        value: "2"
       - key: APP_PASSWORD
         sync: false
