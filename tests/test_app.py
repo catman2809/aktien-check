@@ -675,6 +675,35 @@ class TestScreenerMemoryGuard(Isolated):
             a.SCREENER_STATE.update(running=False, stop=False, mem_stop=False)
 
 
+class TestTechnicals(unittest.TestCase):
+    @staticmethod
+    def ohlc(closes):
+        idx = pd.date_range("2024-01-01", periods=len(closes), freq="B")
+        c = pd.Series(closes, index=idx, dtype=float)
+        return pd.DataFrame({"Open": c.shift(1).fillna(c.iloc[0]), "High": c * 1.01, "Low": c * 0.99, "Close": c})
+
+    def test_trend_signals(self):
+        up = a.technicals(self.ohlc([100 * 1.004 ** i for i in range(400)]))
+        down = a.technicals(self.ohlc([100 * 0.996 ** i for i in range(400)]))
+        self.assertIn(up["frames"]["Tag"]["ma_sum"]["label"], ("Kaufen", "Starker Kauf"))
+        self.assertIn(down["frames"]["Tag"]["ma_sum"]["label"], ("Verkaufen", "Starker Verkauf"))
+        self.assertIn("Woche", up["frames"])
+
+    def test_double_bottom_detected(self):
+        import math
+        seg = lambda a_, b_, n: [a_ + (b_ - a_) * i / n for i in range(n)]
+        closes = seg(150, 120, 60) + seg(120, 100, 30) + seg(100, 115, 25) + seg(115, 100, 25) + seg(100, 108, 15)
+        closes = [c + math.sin(i) * 0.2 for i, c in enumerate(closes)]
+        names = [p_["name"] for p_ in a.chart_patterns(self.ohlc(closes))]
+        self.assertIn("Doppelboden", names)
+
+    def test_sideways_breakout(self):
+        import math
+        closes = [100 + 2 * math.sin(i / 3) for i in range(120)] + [104, 106, 108]
+        names = [p_["name"] for p_ in a.chart_patterns(self.ohlc(closes))]
+        self.assertIn("Ausbruch nach oben", names)
+
+
 class TestForecastAndFairValue(unittest.TestCase):
     """Analystenprognosen, Forward-KGV und fairer Wert in drei Szenarien."""
     MAC = {"rf": 4.0}

@@ -983,6 +983,204 @@ def expectations(m, t):
         m["insider"] = None  # keine Meldungen (z. B. außerhalb der USA) -> Finnhub probieren
 
 
+def _ind_frame(df):
+    """Indikatoren auf einem OHLC-DataFrame (Open/High/Low/Close)."""
+    import pandas as pd
+    c, h, l_ = df["Close"], df["High"], df["Low"]
+    out = {}
+    d = c.diff()
+    up, dn = d.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean(), (-d.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    out["rsi"] = 100 - 100 / (1 + up / dn.replace(0, float("nan")))
+    lo14, hi14 = l_.rolling(14).min(), h.rolling(14).max()
+    k = 100 * (c - lo14) / (hi14 - lo14).replace(0, float("nan"))
+    out["stoch"] = k.rolling(3).mean()
+    out["willr"] = -100 * (hi14 - c) / (hi14 - lo14).replace(0, float("nan"))
+    e12, e26 = c.ewm(span=12, adjust=False).mean(), c.ewm(span=26, adjust=False).mean()
+    out["macd"], out["macd_sig"] = e12 - e26, (e12 - e26).ewm(span=9, adjust=False).mean()
+    tp = (h + l_ + c) / 3
+    md = tp.rolling(20).apply(lambda x: (abs(x - x.mean())).mean(), raw=True)
+    out["cci"] = (tp - tp.rolling(20).mean()) / (0.015 * md.replace(0, float("nan")))
+    out["mom"] = c - c.shift(10)
+    tr = pd.concat([h - l_, (h - c.shift()).abs(), (l_ - c.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, adjust=False).mean()
+    upm, dnm = h.diff(), -l_.diff()
+    pdm = upm.where((upm > dnm) & (upm > 0), 0.0)
+    ndm = dnm.where((dnm > upm) & (dnm > 0), 0.0)
+    pdi = 100 * pdm.ewm(alpha=1 / 14, adjust=False).mean() / atr.replace(0, float("nan"))
+    ndi = 100 * ndm.ewm(alpha=1 / 14, adjust=False).mean() / atr.replace(0, float("nan"))
+    dx = 100 * (pdi - ndi).abs() / (pdi + ndi).replace(0, float("nan"))
+    out["adx"], out["pdi"], out["ndi"] = dx.ewm(alpha=1 / 14, adjust=False).mean(), pdi, ndi
+    for n in (10, 20, 50, 100, 200):
+        out[f"sma{n}"] = c.rolling(n).mean()
+        out[f"ema{n}"] = c.ewm(span=n, adjust=False).mean()
+    return out
+
+
+def tech_signals(df):
+    """Einzelsignale (Kaufen/Neutral/Verkaufen) und Gesamturteil für einen Zeitrahmen."""
+    n = len(df)
+    if n < 30:
+        return None
+    I = _ind_frame(df)
+    last = lambda k: num(I[k].iloc[-1]) if k in I else None
+    price = float(df["Close"].iloc[-1])
+    osc, mas = [], []
+
+    def add(lst, name, val, sig, fmt=1):
+        lst.append({"name": name, "value": None if val is None else round(val, fmt), "signal": sig})
+    v = last("rsi")
+    if v is not None:
+        add(osc, "RSI (14)", v, "Kaufen" if v < 30 else "Verkaufen" if v > 70 else "Neutral")
+    v = last("stoch")
+    if v is not None:
+        add(osc, "Stochastik (14, 3)", v, "Kaufen" if v < 20 else "Verkaufen" if v > 80 else "Neutral")
+    v, sgl = last("macd"), last("macd_sig")
+    if v is not None and sgl is not None:
+        add(osc, "MACD (12, 26, 9)", v, "Kaufen" if v > sgl else "Verkaufen", 3)
+    v, pdi, ndi = last("adx"), last("pdi"), last("ndi")
+    if v is not None and pdi is not None:
+        add(osc, "ADX (14)", v, ("Kaufen" if pdi > ndi else "Verkaufen") if v > 25 else "Neutral")
+    v = last("willr")
+    if v is not None:
+        add(osc, "Williams %R (14)", v, "Kaufen" if v < -80 else "Verkaufen" if v > -20 else "Neutral")
+    v = last("cci")
+    if v is not None:
+        add(osc, "CCI (20)", v, "Kaufen" if v < -100 else "Verkaufen" if v > 100 else "Neutral")
+    v = last("mom")
+    if v is not None:
+        add(osc, "Momentum (10)", v, "Kaufen" if v > 0 else "Verkaufen", 2)
+    for nn in (10, 20, 50, 100, 200):
+        if n >= nn + 5:
+            for kind in ("sma", "ema"):
+                mv = last(f"{kind}{nn}")
+                if mv:
+                    add(mas, f"{'GD' if kind == 'sma' else 'EMA'} {nn}", mv, "Kaufen" if price > mv else "Verkaufen", 2)
+
+    def verdict(lst):
+        b = sum(1 for x in lst if x["signal"] == "Kaufen")
+        s_ = sum(1 for x in lst if x["signal"] == "Verkaufen")
+        tot = len(lst) or 1
+        sc = (b - s_) / tot
+        lab = ("Starker Kauf" if sc >= 0.5 else "Kaufen" if sc >= 0.1 else "Starker Verkauf" if sc <= -0.5
+               else "Verkaufen" if sc <= -0.1 else "Neutral")
+        return {"label": lab, "score": round(sc, 2), "buy": b, "sell": s_, "neutral": tot - b - s_}
+    return {"osc": osc, "ma": mas, "osc_sum": verdict(osc), "ma_sum": verdict(mas), "sum": verdict(osc + mas),
+            "atr": num(((df["High"] - df["Low"]).rolling(14).mean()).iloc[-1])}
+
+
+def _pivots(c, w):
+    hi, lo = [], []
+    vals = c.values
+    for i in range(w, len(vals) - w):
+        win = vals[i - w:i + w + 1]
+        if vals[i] == win.max():
+            hi.append(i)
+        if vals[i] == win.min():
+            lo.append(i)
+    return hi, lo
+
+
+def chart_patterns(df):
+    """Einfache, regelbasierte Erkennung klassischer Chartmuster (nur Hinweise, keine Signale)."""
+    c = df["Close"].iloc[-260:]
+    n = len(c)
+    if n < 60:
+        return []
+    dates = [ts.strftime("%d.%m.%Y") for ts in c.index]
+    vals = c.values
+    last = float(vals[-1])
+    w = max(4, n // 40)
+    hi, lo = _pivots(c, w)
+    out = []
+
+    def add(name, kind, status, text, i0, i1):
+        out.append({"name": name, "kind": kind, "status": status, "text": text, "from": dates[i0], "to": dates[i1]})
+    # Doppeltop / Doppelboden (letzte zwei Hochs bzw. Tiefs)
+    if len(hi) >= 2:
+        a, b = hi[-2], hi[-1]
+        if b - a >= 12 and abs(vals[a] - vals[b]) / max(vals[a], vals[b]) < 0.03 and n - b < 60                 and last < max(vals[a], vals[b]) * 1.02:  # über den Hochs ausgebrochen -> Muster hinfällig
+            trough = float(vals[a:b].min())
+            if trough < min(vals[a], vals[b]) * 0.95:
+                conf = last < trough
+                add("Doppeltop", "bear", "bestätigt" if conf else "in Bildung",
+                    f"Zwei Hochs bei etwa {fnum((vals[a] + vals[b]) / 2, 2)}; Nackenlinie {fnum(trough, 2)}"
+                    + (" wurde unterschritten" if conf else " – erst ein Bruch darunter bestätigt das Muster"), a, b)
+    if len(lo) >= 2:
+        a, b = lo[-2], lo[-1]
+        if b - a >= 12 and abs(vals[a] - vals[b]) / max(vals[a], vals[b]) < 0.03 and n - b < 60                 and last > min(vals[a], vals[b]) * 0.98:  # unter die Tiefs gefallen -> Muster hinfällig
+            peak = float(vals[a:b].max())
+            if peak > max(vals[a], vals[b]) * 1.05:
+                conf = last > peak
+                add("Doppelboden", "bull", "bestätigt" if conf else "in Bildung",
+                    f"Zwei Tiefs bei etwa {fnum((vals[a] + vals[b]) / 2, 2)}; Nackenlinie {fnum(peak, 2)}"
+                    + (" wurde überschritten" if conf else " – erst ein Ausbruch darüber bestätigt das Muster"), a, b)
+    # Schulter-Kopf-Schulter (oben) und invers (unten)
+    if len(hi) >= 3:
+        l_, k_, r_ = hi[-3], hi[-2], hi[-1]
+        ls, hd, rs = vals[l_], vals[k_], vals[r_]
+        if hd > max(ls, rs) * 1.03 and abs(ls - rs) / max(ls, rs) < 0.05 and n - r_ < 60 and last < hd:
+            neck = (float(vals[l_:k_].min()) + float(vals[k_:r_].min())) / 2
+            conf = last < neck
+            add("Schulter-Kopf-Schulter", "bear", "bestätigt" if conf else "in Bildung",
+                f"Kopf bei {fnum(hd, 2)}, Schultern bei {fnum(ls, 2)} / {fnum(rs, 2)}; Nackenlinie {fnum(neck, 2)}"
+                + (" unterschritten – klassisches Umkehrsignal nach unten" if conf else ""), l_, r_)
+    if len(lo) >= 3:
+        l_, k_, r_ = lo[-3], lo[-2], lo[-1]
+        ls, hd, rs = vals[l_], vals[k_], vals[r_]
+        if hd < min(ls, rs) * 0.97 and abs(ls - rs) / max(ls, rs) < 0.05 and n - r_ < 60 and last > hd:
+            neck = (float(vals[l_:k_].max()) + float(vals[k_:r_].max())) / 2
+            conf = last > neck
+            add("Inverse Schulter-Kopf-Schulter", "bull", "bestätigt" if conf else "in Bildung",
+                f"Tiefster Punkt bei {fnum(hd, 2)}, Schultern bei {fnum(ls, 2)} / {fnum(rs, 2)}; Nackenlinie {fnum(neck, 2)}"
+                + (" überschritten – klassisches Umkehrsignal nach oben" if conf else ""), l_, r_)
+    # Dreiecke aus den Wendepunkten der letzten ~80 Handelstage
+    recent_hi = [i for i in hi if i >= n - 80][-4:]
+    recent_lo = [i for i in lo if i >= n - 80][-4:]
+    if len(recent_hi) >= 2 and len(recent_lo) >= 2:
+        import numpy as np
+        sh = np.polyfit(recent_hi, vals[recent_hi], 1)[0] / last * 20     # Steigung in % je 20 Tage
+        sl = np.polyfit(recent_lo, vals[recent_lo], 1)[0] / last * 20
+        i0 = min(recent_hi[0], recent_lo[0])
+        flat = 0.006
+        if abs(sh) < flat and sl > flat:
+            add("Aufsteigendes Dreieck", "bull", "in Bildung", "Hochs auf gleicher Höhe, steigende Tiefs – Ausbruch nach oben wahrscheinlicher", i0, n - 1)
+        elif sh < -flat and abs(sl) < flat:
+            add("Absteigendes Dreieck", "bear", "in Bildung", "Tiefs auf gleicher Höhe, fallende Hochs – Ausbruch nach unten wahrscheinlicher", i0, n - 1)
+        elif sh < -flat and sl > flat:
+            add("Symmetrisches Dreieck", "neutral", "in Bildung", "Hochs fallen, Tiefs steigen – die Spanne verengt sich, Ausbruchsrichtung offen", i0, n - 1)
+    # Seitwärtsphase und Ausbruch
+    box = vals[-45:-3]
+    if len(box) >= 30:
+        top, bot = float(box.max()), float(box.min())
+        if (top - bot) / bot < 0.10:
+            if last > top * 1.01:
+                add("Ausbruch nach oben", "bull", "bestätigt", f"Kurs verlässt die Seitwärtsspanne {fnum(bot, 2)}–{fnum(top, 2)} nach oben", n - 45, n - 1)
+            elif last < bot * 0.99:
+                add("Ausbruch nach unten", "bear", "bestätigt", f"Kurs verlässt die Seitwärtsspanne {fnum(bot, 2)}–{fnum(top, 2)} nach unten", n - 45, n - 1)
+            else:
+                add("Seitwärtsphase", "neutral", "in Bildung", f"Kurs pendelt seit rund zwei Monaten zwischen {fnum(bot, 2)} und {fnum(top, 2)}", n - 45, n - 1)
+    return out
+
+
+def technicals(hist):
+    """Technisches Gesamtsignal für Tag, Woche und Monat plus Chartmuster (aus Tageskursen mit OHLC)."""
+    if hist is None or getattr(hist, "empty", True) or not all(k in hist for k in ("Open", "High", "Low", "Close")):
+        return None
+    df = hist[["Open", "High", "Low", "Close"]].dropna()
+    df = df[df["Close"] > 0]
+    if len(df) < 40:
+        return None
+    df.index = df.index.tz_localize(None) if df.index.tz is not None else df.index
+    agg = {"Open": "first", "High": "max", "Low": "min", "Close": "last"}
+    frames = {"Tag": df.iloc[-400:], "Woche": df.resample("W").agg(agg).dropna(), "Monat": df.resample("ME").agg(agg).dropna()}
+    out = {"frames": {}, "patterns": safe(lambda: chart_patterns(df), []) or []}
+    for k, f in frames.items():
+        sig = safe(lambda: tech_signals(f))
+        if sig:
+            out["frames"][k] = sig
+    return out if out["frames"] else None
+
+
 def chart_extras(m, t, inc, bs, divs):
     """Daten für Bewertungschart, KGV-Verlauf, Bilanz, Dividendenhistorie und Aktionärsstruktur."""
     import pandas as pd
@@ -1117,6 +1315,7 @@ def gather(symbol, t, info):
                 info[key_] = num(info[key_]) * k
         g = info.get
     hist = safe(lambda: t.history(period="5y", auto_adjust=True))
+    m["tech"] = safe(lambda: technicals(hist))
     if hist is not None and not hist.empty:
         hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]  # laufender Tag ohne Schlusskurs
     divs = safe(lambda: t.dividends)
@@ -2875,6 +3074,11 @@ def chart_data(symbol, rng):
         prev_close = float(prev["Close"].iloc[-1]) if len(prev) else None
         h = h[[ts.date() == last_day for ts in h.index]]
     pts = [[int(ts.timestamp() * 1000), round(float(c), 4)] for ts, c in zip(h.index, h["Close"])]
+    ohlc = None
+    if all(k in h for k in ("Open", "High", "Low")):
+        ohlc = [[round(float(o), 4) if o == o else round(float(c), 4), round(float(hh), 4) if hh == hh else round(float(c), 4),
+                 round(float(ll), 4) if ll == ll else round(float(c), 4), round(float(c), 4)]
+                for o, hh, ll, c in zip(h["Open"], h["High"], h["Low"], h["Close"])]
     # Dividendenbereinigter Kurs (für die Gesamtrendite mit wieder angelegten Dividenden)
     adj = [round(float(a), 4) for a in h["Adj Close"]] if "Adj Close" in h and rng != "1d" else None
     if adj and all(abs(a_ - c_) <= 1e-4 * max(1.0, abs(c_)) for a_, c_ in zip(adj, h["Close"])):
@@ -2885,6 +3089,9 @@ def chart_data(symbol, rng):
             if adj:
                 adj[-1] = round(adj[-1] * last / pts[-1][1], 4)
             pts[-1][1] = round(last, 4)
+            if ohlc:  # Live-Kurs auch in die letzte Kerze übernehmen
+                o_, hh_, ll_, _ = ohlc[-1]
+                ohlc[-1] = [o_, round(max(hh_, last), 4), round(min(ll_, last), 4), round(last, 4)]
     divs = []
     if pts and rng != "1d":
         d = safe(lambda: t.dividends)
@@ -2909,7 +3116,7 @@ def chart_data(symbol, rng):
         sma200 = on_points(dc.rolling(200).mean()) if len(dc) >= 200 else None
     volume = [int(v) if v == v else 0 for v in h["Volume"]] if "Volume" in h else None
     base = prev_close if prev_close else (pts[0][1] if pts else None)
-    out = {"symbol": symbol, "range": rng, "points": pts, "base": base, "intraday": rng in ("1d", "5d", "1mo"),
+    out = {"symbol": symbol, "range": rng, "points": pts, "ohlc": ohlc if ohlc and len(ohlc) == len(pts) else None, "base": base, "intraday": rng in ("1d", "5d", "1mo"),
            "sma50": sma50, "sma200": sma200,
            "volume": volume if volume and any(volume) and len(volume) == len(pts) else None,
            "change": (pts[-1][1] / base - 1) if pts and base else None,
@@ -3514,6 +3721,7 @@ def analyze_crypto(cr):
         "facts": {k: m.get(k) for k in ("mcap", "rank", "vol24", "ath", "ath_change", "vol", "perf_1y", "perf_1m",
                                         "hi52", "lo52", "fg", "fg_class", "mayer")},
         "news": news, "notes": notes, "confidence": confidence, "events": [], "competitors": comp,
+        "tech": safe(lambda: technicals(hist)),
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
         "sources": ["Yahoo Finance", "CoinGecko", "alternative.me (Fear & Greed)", "Google News"],
     }
@@ -3729,6 +3937,7 @@ def analyze_etf(symbol, t, info, alternatives):
     if hist is not None and not hist.empty and len(hist) > 30:
         hist = hist[hist["Close"].notna() & (hist["Close"] > 0)]
         etf_price_metrics(m, hist)
+        m["tech"] = safe(lambda: technicals(hist.iloc[-1300:]))
         m["data_since"] = hist.index[0].strftime("%d.%m.%Y")
         divs = safe(lambda: t.dividends)
         if divs is not None and len(divs):
@@ -3804,7 +4013,7 @@ def analyze_etf(symbol, t, info, alternatives):
         "fundamentals": fundamentals,
         "facts": {k: m.get(k) for k in ("ter", "aum", "pe", "perf_1y", "cagr5", "vol", "dist", "top10", "hi52", "lo52")},
         "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"]},
-        "news": news, "notes": notes, "confidence": confidence, "events": [],
+        "news": news, "notes": notes, "confidence": confidence, "events": [], "tech": m.get("tech"),
         "competitors": {"peers": [], "source": "", "industry": ""}, "profile": None,
         "model": {"key": "etf", "label": "ETF-Modell", "text": notes[0]},
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
@@ -4060,6 +4269,7 @@ def analyze(query):
                                         "upside", "target", "beta", "hi52", "lo52", "n_analysts", "rec_mean",
                                         "ev_ebitda", "vol")} | ({"ev_ebitda": None} if m["is_financial"] else {}),
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
+        "tech": m.get("tech"),
         "profile": profile,
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),

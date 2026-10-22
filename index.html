@@ -360,6 +360,30 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 table.scr tr.scr-r{cursor:pointer}
 table.scr tr.scr-r:hover td{background:var(--surface-2)}
 table.scr td b{font-weight:600}
+.ch-top{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.chart-wrap .candles .cu{fill:var(--pos);stroke:var(--pos)} .chart-wrap .candles .cd{fill:var(--neg);stroke:var(--neg)}
+.chart-wrap .candles line{stroke-width:1}
+.chart-wrap .vprof rect{fill:var(--text-3);opacity:.18} .chart-wrap .vprof rect.poc{opacity:.4}
+.cp-list{width:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:12px}
+.cp{padding:2px 8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
+.cp.bull{color:var(--pos)} .cp.bear{color:var(--neg)} .cp small{color:var(--text-3)}
+.tech-card{margin-top:16px;padding:20px 24px}
+.tech-sum{font-size:24px;font-weight:700;letter-spacing:-.02em;margin:2px 0}
+.tc-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0 6px}
+.tc-o{border:1px solid var(--border);border-radius:10px;padding:8px 12px;display:flex;flex-direction:column}
+.tc-o.on{border-color:var(--accent)} .tc-o small{color:var(--text-3);font-size:11.5px} .tc-o b{font-size:14px}
+.tg{margin:10px 0 14px} .tg-track{position:relative;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--neg),var(--neu),var(--pos));opacity:.8}
+.tg-track span{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--text);border:3px solid var(--surface);transform:translate(-50%,-50%)}
+.tg-lab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-3);margin-top:4px}
+.tt-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.tt-h{display:flex;justify-content:space-between;font-size:14px;margin-bottom:2px}
+.tt-r{display:grid;grid-template-columns:1fr auto 84px;gap:10px;font-size:13px;padding:5px 0;border-top:1px solid var(--border)}
+.tt-r .sig{text-align:right;font-weight:600}
+.pat{margin-top:14px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.pat-r{display:flex;flex-direction:column;padding:8px 12px;border-radius:10px;background:var(--surface-2);border-left:3px solid var(--text-3)}
+.pat-r.bull{border-left-color:var(--pos)} .pat-r.bear{border-left-color:var(--neg)}
+.pat-n{font-weight:600} .pat-s{font-weight:500;color:var(--text-3);margin-left:6px} .pat-s.ok{color:var(--accent)}
+@media (max-width:640px){.tt-grid{grid-template-columns:1fr}.tech-card{padding:16px}.ch-top{justify-content:flex-start}}
 #ch-osc .osc{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
 .osc-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:13px}
 .osc-ax{fill:var(--text-3);font-size:11px}
@@ -785,7 +809,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -1441,6 +1465,21 @@ const GLOSSARY = [
   ["Unterstützung", "Unterstützung / Widerstand", "Kursniveaus, an denen die Aktie früher mehrfach gedreht hat. Unterstützungen liegen unter dem Kurs (dort fanden sich Käufer), Widerstände darüber (dort wurde verkauft).", ["Unterstützung", "Widerstand"]],
   ["Normal-KGV", "Normal-KGV", "Das KGV, zu dem die Aktie üblicherweise bewertet wird (Median der eigenen Historie). Gewinn × Normal-KGV ergibt die „faire Linie“ im Bewertungschart.", ["Normal-KGV"]],
   ["Dividendensicherheit", "Dividendensicherheit", "Einschätzung, wie gut die Dividende abgesichert ist: Ausschüttungsquote, Deckung durch den Free Cashflow, Jahre ohne Kürzung und Verschuldung.", ["Dividendensicherheit"]],
+  ["Kerzenchart", "Kerzenchart (Candlesticks)", "Jede Kerze zeigt Eröffnung, Hoch, Tief und Schluss eines Zeitraums. Grün: Schluss über Eröffnung, rot: darunter. Die dünnen Dochte zeigen Hoch und Tief.", ["Kerzen", "Kerzenmuster", "Candlestick"]],
+  ["Hammer", "Hammer / Shooting Star", "Kerze mit kleinem Körper und langem Docht. Nach einem Rückgang (Hammer, Docht unten) deutet sie auf eine Wende nach oben, nach einem Anstieg (Shooting Star, Docht oben) nach unten.", ["Hammer", "Shooting Star"]],
+  ["Engulfing", "Engulfing-Muster", "Eine Kerze „umschließt“ den Körper der vorherigen in Gegenrichtung – ein klassisches Umkehrsignal (bullisch nach Rückgang, bärisch nach Anstieg).", ["Engulfing", "Bullisches Engulfing", "Bärisches Engulfing"]],
+  ["Doji", "Doji", "Kerze, bei der Eröffnung und Schluss fast gleich sind – Käufer und Verkäufer halten sich die Waage, oft vor einer Richtungsentscheidung.", ["Doji"]],
+  ["Morning Star", "Morning Star / Evening Star", "Drei-Kerzen-Umkehrmuster: große Kerze, kleine Zwischenkerze, große Gegenkerze. Morning Star nach Rückgang (bullisch), Evening Star nach Anstieg (bärisch).", ["Morning Star", "Evening Star"]],
+  ["Ichimoku", "Ichimoku-Wolke", "Japanisches Komplettsystem: Tenkan- und Kijun-Linie zeigen den kurz- und mittelfristigen Trend, die Wolke Unterstützung bzw. Widerstand. Kurs über der Wolke = Aufwärtstrend.", ["Ichimoku"]],
+  ["ADX", "ADX (Average Directional Index)", "Misst die Stärke eines Trends, nicht seine Richtung. Über 25 liegt ein Trend vor, unter 20 eher eine Seitwärtsphase. +DI über −DI = Aufwärtstrend.", ["ADX"]],
+  ["Parabolic SAR", "Parabolic SAR", "Trendfolge-Punkte: unter dem Kurs im Aufwärtstrend, darüber im Abwärtstrend. Ein Seitenwechsel gilt als Trendwende; oft als nachgezogener Stop-Loss genutzt.", ["Parabolic SAR"]],
+  ["EMA", "EMA (exponentieller Durchschnitt)", "Gleitender Durchschnitt, der neuere Kurse stärker gewichtet und daher schneller reagiert als der einfache Durchschnitt (GD).", ["EMA 20", "EMA"]],
+  ["OBV", "OBV (On-Balance-Volume)", "Summiert das Volumen an steigenden Tagen und zieht es an fallenden ab. Steigt der OBV mit dem Kurs, ist der Trend vom Volumen getragen.", ["OBV", "On-Balance-Volume"]],
+  ["Volumenprofil", "Volumenprofil", "Zeigt waagerecht, bei welchen Kursen am meisten gehandelt wurde. Solche Zonen wirken oft als Unterstützung oder Widerstand.", ["Volumenprofil"]],
+  ["Stochastik", "Stochastik / Williams %R / CCI", "Oszillatoren, die anzeigen, wo der Kurs innerhalb seiner jüngsten Spanne liegt. Extreme Werte deuten auf überkauft bzw. überverkauft hin.", ["Stochastik", "Williams %R", "CCI"]],
+  ["Doppeltop", "Doppeltop / Doppelboden", "Zwei Hochs (bzw. Tiefs) auf ähnlicher Höhe. Erst der Bruch der „Nackenlinie“ dazwischen bestätigt die erwartete Umkehr.", ["Doppeltop", "Doppelboden"]],
+  ["Schulter-Kopf-Schulter", "Schulter-Kopf-Schulter", "Drei Hochs, das mittlere am höchsten – ein klassisches Umkehrmuster nach unten, bestätigt durch den Bruch der Nackenlinie. Die inverse Form gilt als Umkehr nach oben.", ["Schulter-Kopf-Schulter", "Inverse Schulter-Kopf-Schulter"]],
+  ["Dreieck", "Dreiecksformation", "Hochs und Tiefs laufen aufeinander zu. Aufsteigend (flache Hochs, steigende Tiefs) gilt als bullisch, absteigend als bärisch, symmetrisch als offen.", ["Aufsteigendes Dreieck", "Absteigendes Dreieck", "Symmetrisches Dreieck"]],
   ["Reverse-DCF", "Reverse-DCF", "Rechnet rückwärts: Wie stark müsste der Free Cashflow 10 Jahre lang wachsen, damit der heutige Kurs gerechtfertigt ist? Liegt das deutlich über dem realistisch Erwartbaren, ist viel Optimismus eingepreist.", ["Reverse-DCF"]],
   ["Diskontsatz", "Diskontsatz", "Zins, mit dem künftige Zahlungen auf heute abgezinst werden – entspricht der Renditeerwartung der Anleger (hier: Zinsniveau plus Risikoaufschlag).", ["Diskontsatz", "Eigenkapitalkosten"]],
   ["CAGR", "CAGR", "Durchschnittliches jährliches Wachstum über mehrere Jahre (Compound Annual Growth Rate).", ["CAGR"]],
@@ -1489,7 +1528,7 @@ const GL_INDEX = (() => {
 })();
 function glossarize(root) {
   if (!root) return;
-  const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat, .fv-ass li, .fc-row span:first-child, .fv-head .stamp");
+  const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat, .fv-ass li, .fc-row span:first-child, .fv-head .stamp, .tt-r span:first-child, .pat-n");
   scopes.forEach(el => {
     const seen = new Set();
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -1760,6 +1799,43 @@ function renderScreener() {
   $("#scrq").oninput = e => { SCR.q = e.target.value; const pos = e.target.selectionStart; renderScreener();
     const q = $("#scrq"); q.focus(); q.setSelectionRange(pos, pos); };
   document.querySelectorAll(".scr-r").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
+}
+
+/* Technische Analyse: Gesamtsignal je Zeitrahmen, Einzelindikatoren, Chartmuster */
+const TC = {frame: "Tag"};
+const SIG_COL = {"Starker Kauf": "var(--pos)", "Kaufen": "var(--pos)", "Neutral": "var(--neu)", "Verkaufen": "var(--neg)", "Starker Verkauf": "var(--neg)"};
+function techCard(d) {
+  const T = d.tech;
+  if (!T || !T.frames || !Object.keys(T.frames).length) return "";
+  return `<section class="card tech-card" id="technik" aria-label="Technische Analyse"><div id="tech-body"></div></section>`;
+}
+function initTechCard(d) {
+  const box = $("#tech-body"); if (!box) return;
+  const T = d.tech, frames = Object.keys(T.frames);
+  if (!frames.includes(TC.frame)) TC.frame = frames[0];
+  const gauge = s_ => { const pos = ((s_.score + 1) / 2 * 100).toFixed(1);
+    return `<div class="tg"><div class="tg-track"><span style="left:${pos}%"></span></div><div class="tg-lab"><span>Verkaufen</span><span>Neutral</span><span>Kaufen</span></div></div>`; };
+  const table = (title, rows, sum) => `<div class="tt"><div class="tt-h"><b>${title}</b><span style="color:${SIG_COL[sum.label]}">${sum.label}</span></div>
+    <div class="stamp" style="margin-bottom:4px">Kaufen ${sum.buy} · Neutral ${sum.neutral} · Verkaufen ${sum.sell}</div>
+    ${rows.map(r => `<div class="tt-r"><span>${esc(r.name)}</span><span class="num">${r.value == null ? "–" : nf(r.value, Math.abs(r.value) < 10 ? 2 : 1)}</span><span class="sig" style="color:${SIG_COL[r.signal]}">${r.signal}</span></div>`).join("")}</div>`;
+  const render_ = () => {
+    const F = T.frames[TC.frame];
+    box.innerHTML = `<div class="chart-head"><div><div class="eyebrow">Technische Analyse</div>
+        <div class="tech-sum" style="color:${SIG_COL[F.sum.label]}">${F.sum.label}</div>
+        <div class="stamp">${F.sum.buy} Kauf- · ${F.sum.neutral} neutrale · ${F.sum.sell} Verkaufssignale aus ${F.sum.buy + F.sum.neutral + F.sum.sell} Indikatoren</div></div>
+        <div class="seg" id="tc-seg">${frames.map(f => `<button data-f="${f}" class="${f === TC.frame ? "on" : ""}">${f === "Tag" ? "Kurzfristig (Tag)" : f === "Woche" ? "Mittelfristig (Woche)" : "Langfristig (Monat)"}</button>`).join("")}</div></div>
+      <div class="tc-overview">${frames.map(f => `<div class="tc-o ${f === TC.frame ? "on" : ""}"><small>${f === "Tag" ? "Tag" : f === "Woche" ? "Woche" : "Monat"}</small><b style="color:${SIG_COL[T.frames[f].sum.label]}">${T.frames[f].sum.label}</b></div>`).join("")}</div>
+      ${gauge(F.sum)}
+      <div class="tt-grid">${table("Oszillatoren", F.osc, F.osc_sum)}${table("Gleitende Durchschnitte", F.ma, F.ma_sum)}</div>
+      ${(T.patterns || []).length ? `<div class="pat"><b>Chartmuster (Hinweise)</b>${T.patterns.map(p_ => `<div class="pat-r ${p_.kind}">
+          <span class="pat-n">${esc(p_.name)} <small class="pat-s ${p_.status === "bestätigt" ? "ok" : ""}">${esc(p_.status)}</small></span>
+          <span class="stamp">${esc(p_.text)} · ${esc(p_.from)} – ${esc(p_.to)}</span></div>`).join("")}</div>`
+        : `<div class="pat stamp">Derzeit kein klassisches Chartmuster erkannt.</div>`}
+      <p class="stamp" style="margin:10px 0 0">Signale nach festen Regeln (z. B. RSI unter 30 = Kaufen, Kurs über Durchschnitt = Kaufen). Chartmuster werden automatisch erkannt und sind nur Hinweise –
+        die technische Analyse fließt nicht zusätzlich in die Gesamtempfehlung ein (dort zählt die Kategorie „Kursentwicklung und Charttechnik“).</p>`;
+    box.querySelectorAll("#tc-seg button").forEach(b => b.onclick = () => { TC.frame = b.dataset.f; render_(); glossarize(box); });
+  };
+  render_();
 }
 
 /* Stärken & Warnsignale */
@@ -2107,7 +2183,9 @@ function meter(score) {
 
 /* Kurschart (SVG, ohne externe Bibliothek) */
 const CHART = {sym: null, range: "1y", data: {}, ro: null, tr: false,
-  ind: {sma50: false, sma200: false, vol: false, boll: false, levels: false, rsi: false, macd: false}};
+  ind: {sma50: false, sma200: false, vol: false, boll: false, levels: false, rsi: false, macd: false,
+        ema20: false, ichi: false, psar: false, vprof: false, adx: false, obv: false}, type: "line"};
+try { CHART.type = localStorage.getItem("ac-chart-type") === "candle" ? "candle" : "line"; } catch (e) {}
 try {
   CHART.range = localStorage.getItem("ac-chart-range") || "1y";
   CHART.tr = localStorage.getItem("ac-chart-tr") === "1";
@@ -2183,14 +2261,106 @@ function srLevels(c) {
   const below = cl.filter(x => x.v < last * 0.995).sort((a, b) => b.v - a.v), above = cl.filter(x => x.v > last * 1.005).sort((a, b) => a.v - b.v);
   return {sup: below[0]?.v ?? null, res: above[0]?.v ?? null};
 }
+function ichimoku(h, l) {
+  const mid = (n, i) => i < n - 1 ? null : (Math.max(...h.slice(i - n + 1, i + 1)) + Math.min(...l.slice(i - n + 1, i + 1))) / 2;
+  const tenkan = h.map((_, i) => mid(9, i)), kijun = h.map((_, i) => mid(26, i));
+  // Wolke: Span A/B werden 26 Perioden nach vorn verschoben -> am Punkt i gilt der Wert von i-26
+  const a = h.map((_, i) => i >= 26 && tenkan[i - 26] != null && kijun[i - 26] != null ? (tenkan[i - 26] + kijun[i - 26]) / 2 : null);
+  const b = h.map((_, i) => i >= 26 ? mid(52, i - 26) : null);
+  return {tenkan, kijun, a, b};
+}
+function parabolicSar(h, l, step = 0.02, max = 0.2) {
+  const n = h.length, out = new Array(n).fill(null);
+  if (n < 3) return out;
+  let up = h[1] > h[0], af = step, ep = up ? h[0] : l[0], sar = up ? l[0] : h[0];
+  for (let i = 1; i < n; i++) {
+    sar = sar + af * (ep - sar);
+    if (up) {
+      sar = Math.min(sar, l[i - 1], l[Math.max(0, i - 2)]);
+      if (l[i] < sar) { up = false; sar = ep; ep = l[i]; af = step; }
+      else if (h[i] > ep) { ep = h[i]; af = Math.min(max, af + step); }
+    } else {
+      sar = Math.max(sar, h[i - 1], h[Math.max(0, i - 2)]);
+      if (h[i] > sar) { up = true; sar = ep; ep = h[i]; af = step; }
+      else if (l[i] < ep) { ep = l[i]; af = Math.min(max, af + step); }
+    }
+    out[i] = sar;
+  }
+  return out;
+}
+function volumeProfile(c, v, bins) {
+  const lo = Math.min(...c), hi = Math.max(...c), w = (hi - lo) / bins || 1;
+  const out = Array.from({length: bins}, (_, k) => ({lo: lo + k * w, hi: lo + (k + 1) * w, vol: 0}));
+  c.forEach((p, i) => { out[Math.min(bins - 1, Math.floor((p - lo) / w))].vol += v[i] || 0; });
+  const mx = out.reduce((a, b) => b.vol > a.vol ? b : a, out[0]); mx.poc = true;
+  return out;
+}
+function adxSeries(h, l, c, n = 14) {
+  const len = c.length, adx = new Array(len).fill(null), pdi = new Array(len).fill(null), ndi = new Array(len).fill(null);
+  let tr_ = 0, p_ = 0, m_ = 0, dxs = [], adxv = null;
+  for (let i = 1; i < len; i++) {
+    const tr = Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
+    const upm = h[i] - h[i - 1], dnm = l[i - 1] - l[i];
+    const pdm = upm > dnm && upm > 0 ? upm : 0, ndm = dnm > upm && dnm > 0 ? dnm : 0;
+    if (i <= n) { tr_ += tr; p_ += pdm; m_ += ndm; if (i < n) continue; }
+    else { tr_ = tr_ - tr_ / n + tr; p_ = p_ - p_ / n + pdm; m_ = m_ - m_ / n + ndm; }
+    const P_ = tr_ ? 100 * p_ / tr_ : 0, N_ = tr_ ? 100 * m_ / tr_ : 0, dx = P_ + N_ ? 100 * Math.abs(P_ - N_) / (P_ + N_) : 0;
+    pdi[i] = P_; ndi[i] = N_;
+    if (adxv == null) { dxs.push(dx); if (dxs.length === n) adxv = dxs.reduce((a, b) => a + b, 0) / n; }
+    else adxv = (adxv * (n - 1) + dx) / n;
+    adx[i] = adxv;
+  }
+  return {adx, pdi, ndi};
+}
+function obvSeries(c, v) { const out = [0]; for (let i = 1; i < c.length; i++) out.push(out[i - 1] + (c[i] > c[i - 1] ? v[i] : c[i] < c[i - 1] ? -v[i] : 0)); return out; }
+function candlePatterns(o) {
+  // Klassische Kerzenmuster mit Trendkontext (Hammer nur nach Rückgang usw.)
+  const out = [], n = o.length;
+  const body = k => Math.abs(o[k][3] - o[k][0]), rng = k => (o[k][1] - o[k][2]) || 1e-9;
+  const upper = k => o[k][1] - Math.max(o[k][0], o[k][3]), lower = k => Math.min(o[k][0], o[k][3]) - o[k][2];
+  const bullC = k => o[k][3] > o[k][0], bearC = k => o[k][3] < o[k][0];
+  const trend = k => k >= 5 ? (o[k - 1][3] - o[k - 5][3]) / o[k - 5][3] : 0;
+  for (let i = 2; i < n; i++) {
+    const tr = trend(i);
+    if (lower(i) >= 2 * body(i) && upper(i) <= body(i) * 0.6 && body(i) / rng(i) < 0.4 && tr < -0.02) out.push({i, name: "Hammer", kind: "bull"});
+    else if (upper(i) >= 2 * body(i) && lower(i) <= body(i) * 0.6 && body(i) / rng(i) < 0.4 && tr > 0.02) out.push({i, name: "Shooting Star", kind: "bear"});
+    else if (bearC(i - 1) && bullC(i) && o[i][3] >= o[i - 1][0] && o[i][0] <= o[i - 1][3] && body(i) > body(i - 1) && tr < -0.01) out.push({i, name: "Bullisches Engulfing", kind: "bull"});
+    else if (bullC(i - 1) && bearC(i) && o[i][0] >= o[i - 1][3] && o[i][3] <= o[i - 1][0] && body(i) > body(i - 1) && tr > 0.01) out.push({i, name: "Bärisches Engulfing", kind: "bear"});
+    else if (bearC(i - 2) && body(i - 1) < body(i - 2) * 0.35 && bullC(i) && o[i][3] > (o[i - 2][0] + o[i - 2][3]) / 2 && tr < -0.02) out.push({i, name: "Morning Star", kind: "bull"});
+    else if (bullC(i - 2) && body(i - 1) < body(i - 2) * 0.35 && bearC(i) && o[i][3] < (o[i - 2][0] + o[i - 2][3]) / 2 && tr > 0.02) out.push({i, name: "Evening Star", kind: "bear"});
+    else if (i >= n - 3 && body(i) / rng(i) < 0.08) out.push({i, name: "Doji (Unentschlossenheit)", kind: "neutral"});
+  }
+  return out;
+}
 function drawOsc(P, D) {
   const box = $("#ch-osc"); if (!box) return;
-  const show = [CHART.ind.rsi && P.length >= 35 ? "rsi" : null, CHART.ind.macd && P.length >= 35 ? "macd" : null].filter(Boolean);
+  const show = [CHART.ind.rsi && P.length >= 35 ? "rsi" : null, CHART.ind.macd && P.length >= 35 ? "macd" : null,
+                CHART.ind.adx && P.length >= 35 ? "adx" : null, CHART.ind.obv && P.length >= 35 && D.volume ? "obv" : null].filter(Boolean);
   if (!show.length) { box.innerHTML = ""; return; }
   const c = P.map(p => p[1]), W = $("#ch-wrap").clientWidth, H = 86, ml = 4, mr = 66, pw = W - ml - mr, n = c.length;
   const X = i => ml + (i / (n - 1)) * pw;
   const path = (arr, Y) => { let d = "", pen = false; arr.forEach((v, i) => { if (v == null || isNaN(v)) { pen = false; return; } d += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; }); return d; };
+  const OH = D.ohlc && D.ohlc.length === P.length ? D.ohlc : null;
   box.innerHTML = show.map(k => {
+    if (k === "adx") {
+      const hh = OH ? OH.map(o => o[1]) : c, ll = OH ? OH.map(o => o[2]) : c, A = adxSeries(hh, ll, c);
+      const Y = v => 6 + (1 - v / 60) * (H - 12), a_ = A.adx[n - 1], up = A.pdi[n - 1] > A.ndi[n - 1];
+      return `<div class="osc"><div class="osc-h"><b>ADX (14)</b> <span class="num" style="color:${a_ > 25 ? (up ? "var(--pos)" : "var(--neg)") : "var(--text-2)"}">${nf(a_, 0)}</span>
+        <span class="stamp">${a_ > 25 ? `starker ${up ? "Aufwärts" : "Abwärts"}trend` : a_ < 20 ? "kein klarer Trend (seitwärts)" : "Trend im Aufbau"} · über 25 = Trend, unter 20 = seitwärts</span></div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
+        ${[20, 25, 40].map(v => `<line x1="${ml}" x2="${ml + pw}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--border)" ${v === 25 ? 'stroke-dasharray="3 4"' : ""}/><text x="${W - 4}" y="${Y(v) + 4}" text-anchor="end" class="osc-ax">${v}</text>`).join("")}
+        <path d="${path(A.pdi.map(v => v == null ? null : Math.min(v, 60)), Y)}" fill="none" stroke="var(--pos)" stroke-width="1" opacity=".7"/>
+        <path d="${path(A.ndi.map(v => v == null ? null : Math.min(v, 60)), Y)}" fill="none" stroke="var(--neg)" stroke-width="1" opacity=".7"/>
+        <path d="${path(A.adx.map(v => v == null ? null : Math.min(v, 60)), Y)}" fill="none" stroke="var(--accent)" stroke-width="1.8"/></svg></div>`;
+    }
+    if (k === "obv") {
+      const O = obvSeries(c, D.volume), lo = Math.min(...O), hi = Math.max(...O), Y = v => 6 + (1 - (v - lo) / ((hi - lo) || 1)) * (H - 12);
+      const ch = O[n - 1] - O[Math.max(0, n - 21)], pr = c[n - 1] - c[Math.max(0, n - 21)];
+      const txt = ch > 0 && pr > 0 ? "Volumen bestätigt den Anstieg" : ch < 0 && pr < 0 ? "Volumen bestätigt den Rückgang"
+        : ch > 0 ? "Volumen steigt trotz fallender Kurse (mögliche Bodenbildung)" : "Volumen sinkt trotz steigender Kurse (Warnsignal)";
+      return `<div class="osc"><div class="osc-h"><b>OBV (On-Balance-Volume)</b> <span class="stamp">${txt}</span></div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px"><path d="${path(O, Y)}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg></div>`;
+    }
     if (k === "rsi") {
       const r = rsiSeries(c), Y = v => 6 + (1 - v / 100) * (H - 12), lastV = r[r.length - 1];
       return `<div class="osc"><div class="osc-h"><b>RSI (14)</b> <span class="num" style="color:${lastV > 70 ? "var(--neg)" : lastV < 30 ? "var(--pos)" : "var(--text-2)"}">${nf(lastV, 0)}</span>
@@ -2230,8 +2400,9 @@ function drawChart() {
   const showVol = CHART.ind.vol && D.volume;
   document.querySelectorAll("[data-ind]").forEach(b => {
     const k = b.dataset.ind, nEnough = P.length >= 35;
-    const avail = k === "vol" ? !!D.volume : k === "boll" || k === "levels" ? nEnough && !pct
-      : k === "rsi" || k === "macd" ? nEnough : !!D[k] && !pct;
+    const avail = k === "vol" ? !!D.volume : ["boll", "levels", "ema20", "ichi", "psar"].includes(k) ? nEnough && !pct
+      : k === "vprof" ? nEnough && !pct && !!D.volume : k === "rsi" || k === "macd" || k === "adx" ? nEnough
+      : k === "obv" ? nEnough && !!D.volume : !!D[k] && !pct;
     b.disabled = !avail;
     b.setAttribute("aria-pressed", String(!!CHART.ind[k] && avail));
     b.title = !avail && k !== "vol" && pct ? "In der Gesamtrendite-Ansicht nicht verfügbar" : "";
@@ -2246,9 +2417,21 @@ function drawChart() {
   const ph = H - m.t - m.b - volH - gap;
   const showBoll = CHART.ind.boll && !pct && P.length >= 35, showLev = CHART.ind.levels && !pct && P.length >= 35;
   const boll = showBoll ? bollinger(P.map(p => p[1]), 20, 2) : null;
+  const OH = D.ohlc && D.ohlc.length === P.length ? D.ohlc : null;
+  const candle = CHART.type === "candle" && OH && !pct;
+  document.querySelectorAll("#ch-type button").forEach(b => { b.classList.toggle("on", b.dataset.t === (candle ? "candle" : "line")); b.disabled = b.dataset.t === "candle" && (!OH || pct); });
+  const closes = P.map(p => p[1]), highs = OH ? OH.map(o => o[1]) : closes, lows = OH ? OH.map(o => o[2]) : closes;
+  const many = P.length >= 35 && !pct;
+  const ema20 = CHART.ind.ema20 && many ? ema(closes, 20).map((v, i) => i < 19 ? null : v) : null;
+  const ichi = CHART.ind.ichi && many ? ichimoku(highs, lows) : null;
+  const psar = CHART.ind.psar && many ? parabolicSar(highs, lows) : null;
+  const vprof = CHART.ind.vprof && many && D.volume ? volumeProfile(closes, D.volume, 24) : null;
+  const cpat = candle ? candlePatterns(OH) : [];
   const lev = showLev ? srLevels(P.map(p => p[1])) : null;
   const smaVals = [...(showS50 ? D.sma50 : []), ...(showS200 ? D.sma200 : []),
-                   ...(boll ? [...boll.up, ...boll.lo] : []), ...(lev ? [lev.sup, lev.res] : [])].filter(v => v != null);
+                   ...(boll ? [...boll.up, ...boll.lo] : []), ...(lev ? [lev.sup, lev.res] : []),
+                   ...(candle ? [...highs, ...lows] : []), ...(ema20 || []), ...(ichi ? [...ichi.a, ...ichi.b, ...ichi.tenkan, ...ichi.kijun] : []),
+                   ...(psar || [])].filter(v => v != null);
   const all = [...priceV, ...(trV || []), ...smaVals, ...(D.range === "1d" && D.base ? [D.base] : []), ...(pct ? [0] : [])];
   let lo = Math.min(...all), hi = Math.max(...all);
   const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 0.01;
@@ -2309,7 +2492,13 @@ function drawChart() {
       ${xIdx.map((i, k) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === xIdx.length - 1 ? "end" : "middle"}">${esc(fmtTime(P[i][0], D.range))}</text>`).join("")}</g>
     ${D.range === "1d" && D.base ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(D.base).toFixed(1)}" y2="${Y(D.base).toFixed(1)}"/>` : ""}
     ${pct ? `<line class="baseline" x1="${m.l}" x2="${m.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>` : ""}
-    <path d="${area}" fill="url(#${gid})"/>
+    ${vprof ? (() => { const mx = Math.max(...vprof.map(b => b.vol)) || 1; const bh = Math.max(2, Math.abs(Y(vprof[0].lo) - Y(vprof[0].hi)) - 1);
+        return `<g class="vprof">${vprof.map(b => `<rect x="${(m.l + pw - b.vol / mx * pw * 0.22).toFixed(1)}" y="${(Y(b.hi)).toFixed(1)}" width="${(b.vol / mx * pw * 0.22).toFixed(1)}" height="${bh.toFixed(1)}" ${b.poc ? 'class="poc"' : ""}/>`).join("")}</g>`; })() : ""}
+    ${ichi ? (() => { const up = [], dn = []; ichi.a.forEach((v, i) => { if (v != null && ichi.b[i] != null) { up.push(`${X(i).toFixed(1)},${Y(Math.max(v, ichi.b[i])).toFixed(1)}`); dn.push(`${X(i).toFixed(1)},${Y(Math.min(v, ichi.b[i])).toFixed(1)}`); } });
+        return (up.length ? `<path d="M${up.join("L")}L${dn.reverse().join("L")}Z" fill="var(--sma200)" opacity=".10"/>` : "")
+          + `<path d="${smaPath(ichi.a)}" fill="none" stroke="var(--pos)" stroke-width="1" opacity=".6"/><path d="${smaPath(ichi.b)}" fill="none" stroke="var(--neg)" stroke-width="1" opacity=".6"/>
+             <path d="${smaPath(ichi.tenkan)}" fill="none" stroke="var(--sma200)" stroke-width="1.2"/><path d="${smaPath(ichi.kijun)}" fill="none" stroke="var(--sma50)" stroke-width="1.2"/>`; })() : ""}
+    ${candle ? "" : `<path d="${area}" fill="url(#${gid})"/>`}
     ${pct ? `<path d="${path(priceV)}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
     ${boll ? `<path d="${(() => { const pts = []; boll.up.forEach((v, i) => { if (v != null) pts.push(`${X(i).toFixed(1)},${Y(v).toFixed(1)}`); });
         const lo = []; boll.lo.forEach((v, i) => { if (v != null) lo.push(`${X(i).toFixed(1)},${Y(v).toFixed(1)}`); });
@@ -2322,7 +2511,15 @@ function drawChart() {
        <text x="${m.l + 4}" y="${(Y(lev[k]) - 4).toFixed(1)}" class="endlbl" fill="${c}">${l} ${nf(lev[k], lev[k] < 10 ? 2 : 0)}</text>`).join("") : ""}
     ${showS200 ? `<path d="${smaPath(D.sma200)}" fill="none" stroke="var(--sma200)" stroke-width="1.75" stroke-dasharray="7 3" stroke-linejoin="round"/>` : ""}
     ${showS50 ? `<path d="${smaPath(D.sma50)}" fill="none" stroke="var(--sma50)" stroke-width="1.75" stroke-linejoin="round"/>` : ""}
-    <path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${candle ? (() => { const cw = Math.max(1, Math.min(14, pw / n * 0.7));
+        return `<g class="candles">${OH.map((o, i) => { const up = o[3] >= o[0], x = X(i), yo = Y(o[0]), yc = Y(o[3]);
+          return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${Y(o[1]).toFixed(1)}" y2="${Y(o[2]).toFixed(1)}" class="${up ? "cu" : "cd"}"/>`
+            + `<rect x="${(x - cw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1, Math.abs(yc - yo)).toFixed(1)}" class="${up ? "cu" : "cd"}"/>`; }).join("")}</g>`; })()
+      : `<path d="${line}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`}
+    ${ema20 ? `<path d="${smaPath(ema20)}" fill="none" stroke="#2ba3a3" stroke-width="1.6"/>` : ""}
+    ${psar ? psar.map((v, i) => v == null ? "" : `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="1.8" fill="${v > closes[i] ? "var(--neg)" : "var(--pos)"}"/>`).join("") : ""}
+    ${cpat.map(c_ => { const x = X(c_.i), bull = c_.kind === "bull", y = bull ? Y(lows[c_.i]) + 6 : Y(highs[c_.i]) - 6;
+      return `<path d="M${x - 5},${bull ? y + 8 : y - 8}L${x + 5},${bull ? y + 8 : y - 8}L${x},${y}Z" fill="${bull ? "var(--pos)" : c_.kind === "bear" ? "var(--neg)" : "var(--text-3)"}"><title>${esc(c_.name)}</title></path>`; }).join("")}
     ${showVol ? `<g class="vol">${volBars}</g><text class="vlabel" x="${W - 4}" y="${(vTop + 9).toFixed(1)}" text-anchor="end">${fmtVol(vMax)}</text>
       <text class="vlabel" x="${W - 4}" y="${(vTop + volH).toFixed(1)}" text-anchor="end">Vol.</text>` : ""}
     ${W > 480 && showS50 ? endLabel(D.sma50, "var(--sma50)", "50") : ""}
@@ -2345,12 +2542,21 @@ function drawChart() {
     + (showS200 ? `<span><i class="dash sma200"></i>GD 200 Tage</span>` : "")
     + (showVol ? `<span><i style="border:0;height:8px;width:10px;background:var(--text-3);opacity:.6"></i>Handelsvolumen</span>` : "")
     + (boll ? `<span style="color:var(--accent)"><i></i><span style="color:var(--text-2)">Bollinger-Bänder (20, 2σ)</span></span>` : "")
-    + (lev ? `<span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Unterstützung/Widerstand (aus Wendepunkten)</span></span>` : "");
+    + (lev ? `<span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Unterstützung/Widerstand (aus Wendepunkten)</span></span>` : "")
+    + (ema20 ? `<span style="color:#2ba3a3"><i></i><span style="color:var(--text-2)">EMA 20</span></span>` : "")
+    + (ichi ? `<span style="color:var(--sma200)"><i></i><span style="color:var(--text-2)">Ichimoku: Tenkan (violett), Kijun (orange), Wolke</span></span>` : "")
+    + (psar ? `<span><i style="border:0;width:6px;height:6px;border-radius:50%;background:var(--pos)"></i>Parabolic SAR (grün = Aufwärtstrend)</span>` : "")
+    + (vprof ? `<span><i style="border:0;width:10px;height:8px;background:var(--text-3);opacity:.5"></i>Volumenprofil (dunkel = meistgehandelter Kurs)</span>` : "")
+    + (candle ? `<span><i style="border:0;width:8px;height:10px;background:var(--pos)"></i><i style="border:0;width:8px;height:10px;background:var(--neg)"></i>Kerzen (Eröffnung, Hoch, Tief, Schluss)</span>` : "");
+  const cpRecent = cpat.slice(-4).reverse();
+  const cpTxt = candle ? (cpRecent.length ? `<div class="cp-list"><b>Kerzenmuster zuletzt:</b> ${cpRecent.map(c_ =>
+      `<span class="cp ${c_.kind}">${esc(c_.name)} <small>${esc(fmtTime(P[c_.i][0], D.range, true))}</small></span>`).join("")}</div>`
+    : `<div class="cp-list stamp">Keine markanten Kerzenmuster in diesem Zeitraum.</div>`) : "";
   const divTxt = divs.length ? `<span><i class="div"></i>Dividende · ${divs.length} ${divs.length === 1 ? "Zahlung" : "Zahlungen"}, zusammen ${nf(divSum)} ${esc(D.currency)} je Aktie</span>` : "";
   const note = D.range === "1d" && D.base ? `Gestrichelt: Schlusskurs Vortag ${nf(D.base)} ${esc(D.currency)}`
     : D.range === "max" ? `Daten ab ${new Date(P[0][0]).toLocaleDateString("de-DE", {month: "long", year: "numeric"})}`
     : pct ? "Dividenden zum Auszahlungstag wieder angelegt" : "";
-  $("#ch-foot").innerHTML = `<div class="legend">${legend}${divTxt}</div><span>${note}</span>`;
+  $("#ch-foot").innerHTML = `<div class="legend">${legend}${divTxt}</div><span>${note}</span>${cpTxt}`;
   drawOsc(P, D);
   const hit = $("#ch-hit"), hov = $("#ch-hover"), tip = $("#ch-tip");
   const snap = Math.max(1, Math.round(n / 60));  // Dividenden-Markierung leichter treffen
@@ -2370,7 +2576,8 @@ function drawChart() {
                    showVol ? `<span style="display:block">Volumen: ${fmtVol(D.volume[i])}</span>` : ""].join("");
     tip.innerHTML = pct
       ? `<b>${pc(trV[i], 1, true)} inkl. Div.</b><span>Kurs ${nf(P[i][1])} ${esc(D.currency)} (${pc(priceV[i], 1, true)}) · ${esc(when)}</span>${extra}${dv}`
-      : `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(when)}</span>${extra}${dv}`;
+      : `<b>${nf(P[i][1])} ${esc(D.currency)}</b><span>${esc(when)}</span>${OH ? `<span style="display:block">E ${nf(OH[i][0])} · H ${nf(OH[i][1])} · T ${nf(OH[i][2])}</span>` : ""}${extra}${dv}
+         ${cpat.filter(c_ => c_.i === i).map(c_ => `<span style="display:block;font-weight:600;color:${c_.kind === "bull" ? "var(--pos)" : c_.kind === "bear" ? "var(--neg)" : "inherit"}">${esc(c_.name)}</span>`).join("")}`;
     if (showVol) wrap.querySelectorAll(".vol rect").forEach(r => r.classList.toggle("on", +r.dataset.i === i));
     tip.style.display = "block";
     const tw = tip.offsetWidth;
@@ -2409,6 +2616,11 @@ async function loadChart(rng) {
 function initChart(sym) {
   CHART.sym = sym; CHART.data = {};
   document.querySelectorAll("#ch-seg button").forEach(b => b.onclick = () => loadChart(b.dataset.r));
+  document.querySelectorAll("#ch-type button").forEach(b => b.onclick = () => {
+    CHART.type = b.dataset.t;
+    try { localStorage.setItem("ac-chart-type", CHART.type); } catch (e) {}
+    drawChart();
+  });
   document.querySelectorAll("[data-ind]").forEach(b => b.onclick = () => {
     CHART.ind[b.dataset.ind] = !CHART.ind[b.dataset.ind];
     try { localStorage.setItem("ac-chart-ind", JSON.stringify(CHART.ind)); } catch (e) {}
@@ -2825,6 +3037,8 @@ function render(d) {
   const nu = document.querySelector('#subnav a[href="#ueber"]');
   if (nu) nu.style.display = etf || crypto ? "none" : "";
   ["#fairerwert", "#analysten", "#bilanz"].forEach(h => { const a_ = document.querySelector(`#subnav a[href="${h}"]`); if (a_) a_.style.display = etf || crypto ? "none" : ""; });
+  const nt_ = document.querySelector('#subnav a[href="#technik"]');
+  if (nt_) nt_.style.display = d.tech && d.tech.frames && Object.keys(d.tech.frames).length ? "" : "none";
   $("#subnav").style.display = "block";
 
   $("#out").innerHTML = `
@@ -2885,8 +3099,9 @@ function render(d) {
         <div class="chart-val num" id="ch-val">–</div>
         <div class="chart-chg num" id="ch-chg"></div></div>
       <div class="chart-ctrl">
+        <div class="ch-top"><div class="seg" id="ch-type"><button data-t="line">Linie</button><button data-t="candle">Kerzen</button></div>
         <div class="seg" id="ch-seg">${[["1d", "Tag"], ["5d", "Woche"], ["1mo", "Monat"], ["1y", "Jahr"], ["5y", "5 Jahre"], ["max", "Max"]]
-          .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div>
+          .map(([v, t]) => `<button data-r="${v}">${t}</button>`).join("")}</div></div>
         <label class="toggle" id="ch-trl"><input type="checkbox" id="ch-tr"><span class="sw"></span>inkl. Dividenden (Gesamtrendite)</label>
         <div class="ind-row" role="group" aria-label="Indikatoren">
           <button class="chip-btn" data-ind="sma50" aria-pressed="false" style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">GD 50</span></button>
@@ -2896,6 +3111,12 @@ function render(d) {
           <button class="chip-btn" data-ind="levels" aria-pressed="false" style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Unterstützung/Widerstand</span></button>
           <button class="chip-btn" data-ind="rsi" aria-pressed="false" style="color:var(--accent)"><i></i><span style="color:var(--text-2)">RSI</span></button>
           <button class="chip-btn" data-ind="macd" aria-pressed="false" style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">MACD</span></button>
+          <button class="chip-btn" data-ind="ema20" aria-pressed="false" style="color:#2ba3a3"><i></i><span style="color:var(--text-2)">EMA 20</span></button>
+          <button class="chip-btn" data-ind="ichi" aria-pressed="false" style="color:var(--sma200)"><i></i><span style="color:var(--text-2)">Ichimoku</span></button>
+          <button class="chip-btn" data-ind="psar" aria-pressed="false" style="color:var(--text-2)"><i style="border:0;width:6px;height:6px;border-radius:50%;background:currentColor"></i><span>Parabolic SAR</span></button>
+          <button class="chip-btn" data-ind="vprof" aria-pressed="false" style="color:var(--text-3)"><i style="border:0;width:10px;height:8px;background:currentColor;opacity:.6"></i><span style="color:var(--text-2)">Volumenprofil</span></button>
+          <button class="chip-btn" data-ind="adx" aria-pressed="false" style="color:var(--accent)"><i></i><span style="color:var(--text-2)">ADX</span></button>
+          <button class="chip-btn" data-ind="obv" aria-pressed="false" style="color:var(--accent)"><i></i><span style="color:var(--text-2)">OBV</span></button>
         </div>
       </div>
     </div>
@@ -2903,6 +3124,8 @@ function render(d) {
     <div id="ch-osc"></div>
     <div class="chart-foot" id="ch-foot"></div>
   </section>
+
+  ${techCard(d)}
 
   ${crypto || etf ? "" : `<section class="card chart-card" id="erfolg" aria-label="Erfolgsrechnung">
     <div class="chart-head">
@@ -3069,6 +3292,7 @@ function render(d) {
   document.querySelectorAll(".alts button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.s; run(b.dataset.s); });
   initChart(d.symbol);
   initValChart(d);
+  initTechCard(d);
   glossarize($("#out"));
   if (!crypto && !etf) initIncome(d.symbol);
   document.querySelectorAll("table.peers tr.peer").forEach(tr => tr.onclick = () => { $("#q").value = tr.dataset.s; run(tr.dataset.s); });
