@@ -393,6 +393,18 @@ class TestHTTP(Isolated):
         self.assertEqual(st, 200)
         self.assertEqual(self.login(anna, "anna", "anna-start-1"), 303)
         self.assertEqual(self.call(anna, "/api/admin/users")[0], 403)
+        # Abo: Benutzer fragt an, nur der Admin kann freischalten
+        a.ntfy_send = lambda *x, **k: True
+        self.assertEqual(json.loads(self.call(anna, "/api/subscription")[2])["state"], "inaktiv")
+        self.assertEqual(json.loads(self.call(anna, "/api/subscription", {"action": "request"})[2])["state"], "angefragt")
+        self.assertEqual(self.call(anna, "/api/admin/subscription", {"username": "anna", "action": "extend"})[0], 403)
+        self.assertEqual(self.call(adm, "/api/admin/subscription", {"username": "anna", "action": "extend", "months": 12})[0], 200)
+        st_sub = json.loads(self.call(anna, "/api/subscription")[2])
+        self.assertEqual(st_sub["state"], "aktiv")
+        self.assertGreater(st_sub["paid_until"], time.time() + 360 * 86400)
+        dash = json.loads(self.call(adm, "/api/admin/dashboard")[2])
+        self.assertEqual(dash["subs"]["active"], 1)
+        self.assertEqual(next(u_ for u_ in dash["users"] if u_["name"] == "anna")["sub"]["state"], "aktiv")
         self.assertEqual(self.call(anna, "/api/admin/dashboard")[0], 403)          # Dashboard nur für Admins
         self.assertEqual(self.call(anna, "/api/admin/system", {"action": "save"})[0], 403)
         st_, _h, body_ = self.call(adm, "/api/admin/dashboard")

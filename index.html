@@ -436,6 +436,18 @@ table.scr td b{font-weight:600}
 .ho-top span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.ck-grid{grid-template-columns:1fr;gap:12px}.ck-card{padding:14px 16px}}
 @media print{#ch-osc{display:none}}
+.sub-status{font-size:14.5px}
+.sub-info{padding:10px 12px;border-radius:10px;background:var(--accent-soft);font-size:13.5px}
+.sub-info p{margin:4px 0 0;color:var(--text-2);white-space:normal}
+.sub-cell{display:flex;flex-direction:column;gap:3px;min-width:170px}
+.sub-pill{align-self:flex-start;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--surface-2);border:1px solid var(--border)}
+.sub-pill.aktiv{color:var(--pos);border-color:var(--pos-line);background:var(--pos-soft)}
+.sub-pill.angefragt{color:var(--accent);border-color:var(--accent)}
+.sub-pill.gekündigt{color:var(--neu);border-color:var(--neu-line);background:var(--neu-soft)}
+.sub-pill.abgelaufen{color:var(--neg);border-color:var(--neg-line);background:var(--neg-soft)}
+.sub-btns{display:flex;gap:4px;flex-wrap:wrap}
+.btn.xs{height:26px;padding:0 8px;font-size:12px;border-radius:7px}
+.adm-ta{width:100%;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:8px 10px;font:inherit;font-size:13.5px;resize:vertical;margin-top:6px}
 .adm-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:12px}
 .adm-k{padding:12px 14px;display:flex;flex-direction:column;gap:2px}
 .adm-k small{color:var(--text-3);font-size:12px} .adm-k b{font-size:22px;letter-spacing:-.02em}
@@ -1267,6 +1279,7 @@ async function openAccount() {
       <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="pw-save">Passwort ändern</button></div>
       <div class="form-msg" id="pw-msg"></div>
       <small class="stamp">Andere Geräte werden dabei abgemeldet, dieses bleibt angemeldet.</small></div>
+    ${!ME.admin ? `<div class="sec" id="sub-sec"><h4>Abo – 2 € pro Monat</h4><div id="sub-box" class="stamp">Lade …</div></div>` : ""}
     ${ME.admin ? `<div class="sec"><h4>Administration</h4><button class="btn primary" id="adm-open">Admin-Dashboard öffnen</button></div>` : ""}
     ${ME.admin ? `<div class="sec"><h4>Benutzer verwalten</h4><div id="users-list" class="stamp">Lade …</div>
       <h4 style="margin-top:18px">Neuen Benutzer anlegen</h4>
@@ -1281,6 +1294,7 @@ async function openAccount() {
   bg.onclick = e => { if (e.target === bg) closeModal(); };
   $("#acct-close").onclick = closeModal;
   const ao_ = $("#adm-open"); if (ao_) ao_.onclick = () => { closeModal(); showAdmin(); };
+  if ($("#sub-box")) loadSub();
   const msg = (id, text, ok) => { const m = $(id); m.textContent = text; m.className = "form-msg " + (ok ? "ok" : "err"); };
   $("#pw-save").onclick = async () => {
     try {
@@ -2061,6 +2075,42 @@ function healthSection(d) {
     <div class="an-grid">${bal}${div}${hold}</div>`;
 }
 
+/* Abo (manuelle Zahlung) */
+const SUB_LABEL = {aktiv: "aktiv", gekündigt: "gekündigt", angefragt: "angefragt", abgelaufen: "abgelaufen", inaktiv: "nicht aktiv"};
+const subDate = ts => ts ? new Date(ts * 1000).toLocaleDateString("de-DE") : "–";
+async function loadSub() {
+  const box = $("#sub-box"); if (!box) return;
+  let S;
+  try { S = await api("/api/subscription"); } catch (e) { box.textContent = "Abo-Status nicht verfügbar."; return; }
+  renderSub(S);
+}
+function renderSub(S) {
+  const box = $("#sub-box"); if (!box) return;
+  const status = S.state === "aktiv" ? `<b style="color:var(--pos)">Aktiv</b> bis ${subDate(S.paid_until)}`
+    : S.state === "gekündigt" ? `<b style="color:var(--neu)">Gekündigt</b> – läuft noch bis ${subDate(S.paid_until)}`
+    : S.state === "angefragt" ? `<b style="color:var(--accent)">Angefragt</b> am ${subDate(S.requested)} – wartet auf Zahlungseingang`
+    : S.state === "abgelaufen" ? `<b style="color:var(--neg)">Abgelaufen</b> am ${subDate(S.paid_until)}` : `<b>Nicht aktiv</b>`;
+  const info = `<div class="sub-info"><b>So bezahlst du</b><p>${esc(S.payment_info).replace(/\n/g, "<br>")}</p></div>`;
+  box.className = "";
+  box.innerHTML = `<div class="sub-status">${status}</div>
+    <p class="stamp" style="margin:6px 0 10px">Mit ${S.price} € pro Monat unterstützt du den Betrieb von Aktien-Check. Derzeit bleiben alle Funktionen für alle nutzbar.</p>
+    ${S.state === "angefragt" || S.state === "inaktiv" || S.state === "abgelaufen" ? info : ""}
+    <div class="modal-actions" style="justify-content:flex-start;margin-top:10px">
+      ${S.state === "inaktiv" || S.state === "abgelaufen" ? `<button class="btn primary" id="sub-req">Abo für ${S.price} € / Monat anfragen</button>` : ""}
+      ${S.state === "angefragt" ? `<button class="btn" id="sub-cancel">Anfrage zurückziehen</button>` : ""}
+      ${S.state === "aktiv" ? `<button class="btn" id="sub-cancel">Abo kündigen</button>` : ""}
+    </div><div class="form-msg" id="sub-msg"></div>`;
+  const act = async (a_, txt) => {
+    try { const r = await api("/api/subscription", {action: a_}); renderSub(r); const m = $("#sub-msg"); m.textContent = txt; m.className = "form-msg ok"; }
+    catch (e) { const m = $("#sub-msg"); m.textContent = e.message; m.className = "form-msg err"; }
+  };
+  const rq = $("#sub-req"); if (rq) rq.onclick = () => act("request", "Anfrage gesendet – der Administrator wurde benachrichtigt.");
+  const cn = $("#sub-cancel"); if (cn) cn.onclick = () => {
+    if (S.state === "aktiv" && !confirm(`Abo kündigen? Es läuft noch bis ${subDate(S.paid_until)} und verlängert sich danach nicht.`)) return;
+    act("cancel", S.state === "aktiv" ? "Gekündigt – das Abo läuft bis zum Ende des bezahlten Zeitraums." : "Anfrage zurückgezogen.");
+  };
+}
+
 /* Admin-Dashboard */
 let admTimer = null, admDiag = null;
 async function showAdmin() {
@@ -2100,6 +2150,8 @@ function renderAdmin(D) {
       ${kpi("Analysen heute", K.analyses_today)}
       ${kpi("Analysen 7 Tage", K.analyses_7d)}
       ${kpi("Aktive Preisalarme", K.alerts)}
+      ${kpi("Aktive Abos", D.subs.active, `${D.subs.revenue_month} € pro Monat`, D.subs.active ? "var(--pos)" : null)}
+      ${kpi("Offene Abo-Anfragen", D.subs.requested, D.subs.requested ? "Zahlung prüfen und freischalten" : "keine", D.subs.requested ? "var(--accent)" : null)}
       ${kpi("Arbeitsspeicher", K.memory_mb ? `${K.memory_mb} MB` : "–", S.hosted ? "von 512 MB" : "lokal (kein Limit)",
             memPct == null || !S.hosted ? null : memPct > 0.85 ? "var(--neg)" : memPct > 0.7 ? "var(--neu)" : "var(--pos)")}
       ${kpi("Läuft seit", dur(K.uptime_s), "seit " + dt(S.started))}
@@ -2116,11 +2168,21 @@ function renderAdmin(D) {
           : `<div class="stamp">Noch keine Analysen gezählt.</div>`}</div>
 
       <div class="card pad adm-wide"><h3>Benutzer</h3>
-        <div class="peer-scroll"><table class="trk adm-t"><thead><tr><th>Name</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzter Login</th><th>Analysen 30 T.</th><th>Watchlist</th><th>Alarme</th><th>Signale</th><th>Wochenbericht</th></tr></thead>
+        <div class="peer-scroll"><table class="trk adm-t"><thead><tr><th>Name</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzter Login</th><th>Analysen 30 T.</th><th>Watchlist</th><th>Alarme</th><th>Signale</th><th>Wochenbericht</th><th>Abo (${D.subs.price} €/Monat)</th></tr></thead>
         <tbody>${D.users.map(u_ => `<tr><td><b>${esc(u_.name)}</b></td><td>${u_.admin ? "Admin" : "Benutzer"}</td><td>${rel(u_.last_seen)}</td><td>${dt(u_.last_login)}</td>
           <td class="num">${u_.analyses_30d}</td><td class="num">${u_.watchlist}</td><td class="num">${u_.alerts}</td><td class="num">${u_.signals}</td>
-          <td>${u_.report ? `an${u_.report_last ? ` · zuletzt ${new Date(u_.report_last).toLocaleDateString("de-DE")}` : ""}` : "aus"}</td></tr>`).join("")}</tbody></table></div>
+          <td>${u_.report ? `an${u_.report_last ? ` · zuletzt ${new Date(u_.report_last).toLocaleDateString("de-DE")}` : ""}` : "aus"}</td>
+          <td>${u_.sub ? `<div class="sub-cell"><span class="sub-pill ${u_.sub.state}">${SUB_LABEL[u_.sub.state] || u_.sub.state}</span>
+              <small class="stamp">${u_.sub.active ? "bis " + subDate(u_.sub.paid_until) : u_.sub.state === "angefragt" ? "seit " + subDate(u_.sub.requested) : u_.sub.paid_until ? "bis " + subDate(u_.sub.paid_until) : ""}</small>
+              <span class="sub-btns"><button class="btn xs" data-sub="extend" data-m="1" data-u="${esc(u_.name)}">+1 Monat</button><button class="btn xs" data-sub="extend" data-m="12" data-u="${esc(u_.name)}">+12 Monate</button>
+              ${u_.sub.active ? `<button class="btn xs danger" data-sub="end" data-u="${esc(u_.name)}">Beenden</button>` : ""}</span></div>` : `<span class="stamp">Admin – kein Abo</span>`}</td></tr>`).join("")}</tbody></table></div>
         <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="admusers">Benutzer verwalten</button></div></div>
+
+      <div class="card pad"><h3>Abo-Einstellungen <span class="stamp">${D.subs.price} € pro Monat · manuelle Zahlung</span></h3>
+        <label class="stamp" for="adm-payinfo">Zahlungsanleitung, die Benutzer nach der Anfrage sehen (z. B. Bankverbindung oder PayPal-Link):</label>
+        <textarea id="adm-payinfo" class="adm-ta" rows="5">${esc(D.subs.payment_info)}</textarea>
+        <div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" id="adm-paysave">Speichern</button></div>
+        <p class="stamp" style="margin:6px 0 0">Ablauf: Benutzer fragt im Konto-Menü an → du bekommst eine Push-Nachricht → nach Zahlungseingang hier in der Benutzertabelle „+1 Monat“ bzw. „+12 Monate“ klicken.</p></div>
 
       <div class="card pad"><h3>Screener <span class="stamp">${Sc.rated} von ${Sc.total} bewertet</span></h3>
         <div class="adm-row"><span>Status</span><b style="color:${Sc.running ? "var(--accent)" : "inherit"}">${Sc.running ? `läuft: ${Sc.done} von ${Sc.target}` : Sc.mem_stop ? "wegen Speicher angehalten" : "bereit"}</b></div>
@@ -2160,6 +2222,18 @@ function renderAdmin(D) {
   $("#admback").onclick = () => { clearTimeout(admTimer); goHome(); };
   $("#admref").onclick = () => loadAdmin();
   $("#admusers").onclick = () => openAccount();
+  $("#adm-paysave").onclick = async () => {
+    try { const r = await api("/api/admin/subscription", {payment_info: $("#adm-payinfo").value}); toast(r.message); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }
+  };
+  document.querySelectorAll("[data-sub]").forEach(b => b.onclick = async () => {
+    const name = b.dataset.u, a_ = b.dataset.sub;
+    if (a_ === "end" && !confirm(`Abo von ${name} sofort beenden?`)) return;
+    b.disabled = true;
+    try { await api("/api/admin/subscription", {username: name, action: a_, months: +b.dataset.m || 1});
+      toast(a_ === "end" ? `Abo von ${name} beendet` : `Abo von ${name} um ${b.dataset.m} ${b.dataset.m === "1" ? "Monat" : "Monate"} verlängert`); loadAdmin(); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); b.disabled = false; }
+  });
   $("#admscr").onclick = () => { clearTimeout(admTimer); showScreener(); };
   document.querySelectorAll(".adm-sym").forEach(a_ => a_.onclick = e => { e.preventDefault(); clearTimeout(admTimer); $("#q").value = a_.dataset.q; run(a_.dataset.q); });
   $("#admdiag").onclick = async e => {

@@ -4737,6 +4737,84 @@ def track_payload(user, everyone=False):
 # ---------------------------------------------------------------------------
 # Admin-Dashboard: Nutzungsstatistik, Systemzustand, Datenquellen
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Abo (2 € pro Monat, manuelle Zahlung): Benutzer fragt an, Admin schaltet nach Zahlungseingang frei
+# ---------------------------------------------------------------------------
+SUB_PRICE_EUR = 2
+DEFAULT_PAYMENT_INFO = ("Bitte überweise 2 € pro Monat (oder 24 € für ein Jahr) und gib deinen Benutzernamen als "
+                        "Verwendungszweck an. Der Administrator schaltet dein Abo nach Zahlungseingang frei.")
+
+
+def sub_status(sp):
+    sub = sp.get("sub") or {}
+    now = time.time()
+    until = sub.get("paid_until") or 0
+    if until > now:
+        state = "gekündigt" if sub.get("cancel_requested") else "aktiv"   # gekündigt: läuft bis zum Ende weiter
+    elif sub.get("requested"):
+        state = "angefragt"
+    else:
+        state = "abgelaufen" if until else "inaktiv"
+    return {"state": state, "active": until > now, "paid_until": until or None, "requested": sub.get("requested"),
+            "cancel_requested": sub.get("cancel_requested"), "price": SUB_PRICE_EUR,
+            "history": (sub.get("history") or [])[-12:]}
+
+
+def payment_info():
+    return (STORE.load().get("settings") or {}).get("payment_info") or DEFAULT_PAYMENT_INFO
+
+
+def sub_user_action(user, action):
+    sp = user_space(user)
+    with STORE.lock:
+        sub = sp.setdefault("sub", {})
+        if action == "request":
+            sub["requested"] = int(time.time())
+            sub.pop("cancel_requested", None)
+        elif action == "cancel":
+            sub["cancel_requested"] = int(time.time())
+            sub.pop("requested", None)
+        else:
+            raise ValueError("unbekannte Aktion")
+        STORE.dirty = True
+    save_async()
+    LOG.info("[Abo] %s: %s", user, "angefragt" if action == "request" else "Kündigung")
+    admin_topics = {user_space(u_)["topic"] for u_, acc in users().items() if acc.get("admin")}
+    for tp in admin_topics:  # Admin per Push informieren
+        safe(lambda: ntfy_send("💶 Abo " + ("angefragt" if action == "request" else "gekündigt"),
+                               f"{user} hat das Abo ({SUB_PRICE_EUR} €/Monat) " + ("angefragt – bitte Zahlungseingang prüfen und im Admin-Dashboard freischalten."
+                                                                                  if action == "request" else "gekündigt."),
+                               tags=["moneybag"], priority=3, topic=tp))
+    return sub_status(sp)
+
+
+def sub_admin_action(admin, name, action, months=1):
+    if name not in users():
+        raise ValueError("Diesen Benutzer gibt es nicht.")
+    sp = user_space(name)
+    with STORE.lock:
+        sub = sp.setdefault("sub", {})
+        now = time.time()
+        if action == "extend":
+            months = int(months) if str(months).isdigit() and int(months) in (1, 3, 6, 12) else 1
+            base = max(now, sub.get("paid_until") or 0)
+            sub["paid_until"] = int(base + months * 30.44 * 86400)
+            sub.pop("requested", None)
+            sub.pop("cancel_requested", None)
+            sub.setdefault("history", []).append({"t": int(now), "action": f"+{months} Monat(e)", "by": admin,
+                                                  "amount": months * SUB_PRICE_EUR})
+        elif action == "end":
+            sub["paid_until"] = int(now) - 1 if (sub.get("paid_until") or 0) > now else sub.get("paid_until")
+            sub.pop("requested", None)
+            sub.setdefault("history", []).append({"t": int(now), "action": "beendet", "by": admin})
+        else:
+            raise ValueError("unbekannte Aktion")
+        STORE.dirty = True
+    save_async()
+    LOG.info("[Abo] %s: %s für %s", admin, action, name)
+    return sub_status(sp)
+
+
 def record_usage(user, symbol):
     """Zählt Analysen je Tag, Benutzer und Wert (für das Admin-Dashboard; 90 Tage)."""
     data = STORE.load()
@@ -4801,7 +4879,8 @@ def admin_dashboard():
                           "watchlist": len(sp.get("watchlist", [])), "alerts": len(sp.get("alerts", {})),
                           "signals": len(sp.get("signals", [])), "analyses_30d": used,
                           "report": (sp.get("report") or {}).get("enabled", True),
-                          "report_last": (sp.get("report") or {}).get("last")})
+                          "report_last": (sp.get("report") or {}).get("last"),
+                          "sub": None if acc.get("admin") else sub_status(sp)})
         alerts_total = sum(len(sp.get("alerts", {})) for sp in data["u"].values())
         top = sorted((st.get("symbols") or {}).items(), key=lambda kv: -kv[1])[:12]
     scr = screener_payload()
@@ -4811,7 +4890,11 @@ def admin_dashboard():
     warn = [x for x in logs if x["level"] in ("WARNING", "ERROR", "CRITICAL")][-40:][::-1]
     recent = logs[-30:][::-1]
     mem = mem_mb()
+    subs_active = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["active"])
+    subs_open = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["state"] == "angefragt")
     return {
+        "subs": {"active": subs_active, "requested": subs_open, "revenue_month": subs_active * SUB_PRICE_EUR,
+                 "price": SUB_PRICE_EUR, "payment_info": payment_info()},
         "kpi": {"users": len(accs), "analyses_today": (st["days"].get(today) or {}).get("analyses", 0),
                 "analyses_7d": week, "alerts": alerts_total, "memory_mb": round(mem) if mem else None,
                 "uptime_s": int(now - START_TIME), "warnings": len(warn)},
@@ -5735,6 +5818,22 @@ class Handler(BaseHTTPRequestHandler):
                         acc["pw"], acc["ver"] = hash_pw(new), int(acc.get("ver", 0)) + 1  # andere Geräte abmelden
                     STORE.save()
                     return self.send_json({"ok": True}, cookie=self.cookie(make_session_token(user), SESSION_DAYS * 86400))
+                if u.path == "/api/subscription":
+                    return self.send_json({**sub_user_action(user, body.get("action")), "payment_info": payment_info()})
+                if u.path == "/api/admin/subscription":
+                    if not self.is_admin():
+                        return self.send_json({"error": "Nur für Administratoren"}, 403)
+                    if body.get("payment_info") is not None:
+                        txt = str(body.get("payment_info") or "").strip()[:1500]
+                        data_ = STORE.load()
+                        with STORE.lock:
+                            data_.setdefault("settings", {})["payment_info"] = txt
+                            STORE.dirty = True
+                        save_async()
+                        return self.send_json({"ok": True, "message": "Zahlungsanleitung gespeichert"})
+                    st_ = sub_admin_action(user, str(body.get("username") or "").strip().lower(), body.get("action"),
+                                           body.get("months", 1))
+                    return self.send_json({"ok": True, "sub": st_})
                 if u.path == "/api/admin/system":
                     if not self.is_admin():
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
@@ -5964,6 +6063,10 @@ class Handler(BaseHTTPRequestHandler):
                 sp_["last_seen"] = int(time.time())
                 STORE.dirty = True
             return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
+        if u.path == "/api/subscription":
+            acc_ = users().get(user) or {}
+            return self.send_json({**sub_status(user_space(user)), "admin": bool(acc_.get("admin")) or not app_password(),
+                                   "payment_info": payment_info()})
         if u.path == "/api/admin/dashboard":
             if not self.is_admin():
                 return self.send_json({"error": "Nur für Administratoren"}, 403)
