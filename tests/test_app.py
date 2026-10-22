@@ -384,7 +384,52 @@ class TestHTTP(Isolated):
         self.assertEqual(self.login(op, "admin", "falsch"), 401)
         self.assertEqual(self.login(op, "admin", "test-admin-pass"), 303)
         st, _, b = self.call(op, "/api/me")
-        self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True, "unread": 0})
+        self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True, "unread": 0,
+                                         "maintenance": {"on": False, "text": ""}})
+
+    def test_lock_maintenance_backup_restore(self):
+        adm, anna = self.client(), self.client()
+        self.login(adm, "admin", "test-admin-pass")
+        self.call(adm, "/api/admin/users", {"action": "create", "username": "anna", "password": "anna-start-1"})
+        self.assertEqual(self.login(anna, "anna", "anna-start-1"), 303)
+        self.assertEqual(self.call(anna, "/api/watchlist")[0], 200)
+        # Sperren: Sitzung endet, Anmeldung zeigt Sperrhinweis
+        self.assertEqual(self.call(adm, "/api/admin/users", {"action": "lock", "username": "anna"})[0], 200)
+        self.assertEqual(self.call(anna, "/api/watchlist")[0], 401)
+        st, _, b_ = self.call(anna, "/login", form={"username": "anna", "password": "anna-start-1", "next": "/"})
+        self.assertEqual(st, 403)
+        self.assertIn("gesperrt", b_.decode("utf-8"))
+        self.assertEqual(self.call(adm, "/api/admin/users", {"action": "lock", "username": "admin"})[0], 400)
+        self.call(adm, "/api/admin/users", {"action": "unlock", "username": "anna"})
+        self.assertEqual(self.login(anna, "anna", "anna-start-1"), 303)
+        # Wartungsmodus: Benutzer gesperrt, Admin nicht
+        self.assertEqual(self.call(anna, "/api/admin/maintenance", {"on": True})[0], 403)
+        self.call(adm, "/api/admin/maintenance", {"on": True, "text": "Update läuft"})
+        st, _, b_ = self.call(anna, "/api/watchlist")
+        self.assertEqual((st, json.loads(b_)["text"]), (503, "Update läuft"))
+        self.assertEqual(self.call(anna, "/api/watchlist", {"items": []})[0], 503)
+        self.assertTrue(json.loads(self.call(anna, "/api/me")[2])["maintenance"]["on"])
+        self.assertEqual(self.call(adm, "/api/watchlist")[0], 200)
+        self.call(adm, "/api/admin/maintenance", {"on": False})
+        self.assertEqual(self.call(anna, "/api/watchlist")[0], 200)
+        # Backup herunterladen, Daten ändern, wiederherstellen
+        self.assertEqual(self.call(anna, "/api/admin/backup")[0], 403)
+        st, hd, raw = self.call(adm, "/api/admin/backup")
+        self.assertEqual(st, 200)
+        self.assertIn("attachment", hd["Content-Disposition"])
+        bk = json.loads(raw)
+        self.assertEqual((bk["format"], bk["users"]), ("aktien-check-backup", 2))
+        self.assertEqual(self.call(anna, "/api/admin/restore", bk)[0], 403)
+        self.call(adm, "/api/admin/users", {"action": "delete", "username": "anna"})
+        self.assertNotIn("anna", a.users())
+        self.assertEqual(self.call(adm, "/api/admin/restore", {"format": "x"})[0], 400)
+        st, _, b_ = self.call(adm, "/api/admin/restore", bk)
+        self.assertEqual(st, 200, b_)
+        self.assertIn("anna", a.users())
+        # Betriebsdaten im Dashboard
+        D = json.loads(self.call(adm, "/api/admin/dashboard")[2])
+        self.assertIn("perf", D["ops"])
+        self.assertFalse(D["ops"]["maintenance"]["on"])
 
     def test_users_watchlist_and_permissions(self):
         adm, anna = self.client(), self.client()
@@ -818,3 +863,31 @@ class TestForecastAndFairValue(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestOps(Isolated):
+    def test_restart_reason_and_perf(self):
+        o = a.ops()
+        o.update({"alive": a.START_TIME - 3600, "commit": a.ops().get("commit") or "lokal", "mem_last": 480})
+        o["commit"] = (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal"
+        a.note_startup()
+        self.assertIn("Speicherüberlauf", a.ops()["restarts"][-1]["reason"])
+        o["mem_last"] = 200
+        o["alive"] = a.START_TIME - 3600
+        a.note_startup()
+        self.assertIn("eingeschlafen", a.ops()["restarts"][-1]["reason"])
+        o["commit"] = "alt1234"
+        a.note_startup()
+        self.assertIn("Update", a.ops()["restarts"][-1]["reason"])
+        a.record_analysis("SAP", "SAP.DE", 4.0, True)
+        a.record_analysis("SAP", "SAP.DE", 8.0, True)
+        a.record_analysis("xyzq", "", 1.0, False, "nicht gefunden")
+        a.record_analysis("xyzq", "", 1.0, False, "nicht gefunden")
+        p_ = a.analysis_perf()
+        self.assertEqual((p_["d7"]["n"], p_["d7"]["fail"]), (4, 2))
+        self.assertAlmostEqual(p_["d7"]["avg"], 6.0)
+        self.assertEqual(p_["failing"][0]["n"], 2)
+        self.assertEqual(p_["slowest"][0]["secs"], 8.0)
+        for i in range(20):
+            a.ops_tick(i)
+        self.assertEqual(len(a.ops()["mem"]), 2 if a.mem_mb() else 0)

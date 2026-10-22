@@ -4554,7 +4554,7 @@ def users():
 
 def authenticate(username, password):
     acc = users().get(username)
-    if not acc or not password:
+    if not acc or not password or acc.get("locked"):
         return False
     if username == "admin" and app_password() and hmac.compare_digest(password.encode("utf-8"), app_password().encode("utf-8")):
         return True  # APP_PASSWORD bleibt als Notfallzugang für den Admin gültig
@@ -4919,6 +4919,156 @@ def check_sub_reminders():
     return len(due)
 
 
+OPS_MEM_KEEP = 7 * 24 * 6        # 7 Tage à 10 Minuten
+OPS_RESTARTS_KEEP = 60
+OPS_ANALYSES_KEEP = 400
+BACKUP_DESCRIPTION = "aktien-check backup (verschlüsselt)"
+BACKUP_EVERY = 7 * 86400
+
+
+def ops():
+    data = STORE.load()
+    with STORE.lock:
+        o = data.setdefault("ops", {})
+        o.setdefault("mem", [])
+        o.setdefault("restarts", [])
+        o.setdefault("analyses", [])
+        return o
+
+
+def note_startup():
+    """Beim Start: Neustart mit vermutetem Grund festhalten (aus dem zuletzt gespeicherten Lebenszeichen)."""
+    o = ops()
+    commit = (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal"
+    alive, prev_commit, prev_mem = o.get("alive"), o.get("commit"), o.get("mem_last")
+    if not alive:
+        reason = "erster Start mit Protokollierung"
+    elif prev_commit and prev_commit != commit:
+        reason = "Update auf neue Version"
+    elif prev_mem and prev_mem > MEM_HARD_MB:
+        reason = f"vermutlich Speicherüberlauf (zuletzt {prev_mem:.0f} MB)"
+    elif START_TIME - alive > 15 * 60:
+        reason = "Server war eingeschlafen (keine Aufrufe)"
+    else:
+        reason = "Neustart durch den Hoster"
+    with STORE.lock:
+        o["restarts"].append({"t": int(START_TIME), "reason": reason, "commit": commit,
+                              "down_s": int(START_TIME - alive) if alive else None})
+        del o["restarts"][:-OPS_RESTARTS_KEEP]
+        o["commit"], o["alive"] = commit, int(time.time())
+        STORE.dirty = True
+    LOG.info("[Start] Grund: %s", reason)
+
+
+def ops_tick(n):
+    """Jede Minute aus der Speicherschleife: Lebenszeichen alle 5, Speicherprobe alle 10 Minuten."""
+    if n % 5:
+        return
+    o = ops()
+    mb = mem_mb()
+    with STORE.lock:
+        o["alive"], o["mem_last"] = int(time.time()), round(mb, 1) if mb else None
+        if n % 10 == 0 and mb:
+            o["mem"].append([int(time.time()), round(mb)])
+            del o["mem"][:-OPS_MEM_KEEP]
+        STORE.dirty = True
+
+
+def record_analysis(query, symbol, secs, ok, error=""):
+    o = ops()
+    with STORE.lock:
+        o["analyses"].append([int(time.time()), (symbol or query or "")[:20], round(secs, 1), bool(ok), (error or "")[:120]])
+        del o["analyses"][:-OPS_ANALYSES_KEEP]
+        STORE.dirty = True
+
+
+def analysis_perf():
+    a_ = list(ops()["analyses"])
+    now = time.time()
+    def stats(rows):
+        ok = sorted(r[2] for r in rows if r[3])
+        return {"n": len(rows), "ok": len(ok), "fail": len(rows) - len(ok),
+                "fail_rate": (len(rows) - len(ok)) / len(rows) if rows else None,
+                "avg": sum(ok) / len(ok) if ok else None, "median": ok[len(ok) // 2] if ok else None,
+                "p90": ok[int(len(ok) * 0.9)] if ok else None}
+    d1 = [r for r in a_ if now - r[0] < 86400]
+    d7 = [r for r in a_ if now - r[0] < 7 * 86400]
+    slow = sorted((r for r in d7 if r[3]), key=lambda r: -r[2])[:6]
+    fails = {}
+    for r in d7:
+        if not r[3]:
+            f_ = fails.setdefault(r[1], {"symbol": r[1], "n": 0, "error": r[4], "t": r[0]})
+            f_["n"] += 1
+            f_["error"], f_["t"] = r[4], r[0]
+    return {"d1": stats(d1), "d7": stats(d7), "slowest": [{"t": r[0], "symbol": r[1], "secs": r[2]} for r in slow],
+            "failing": sorted(fails.values(), key=lambda x: -x["n"])[:8],
+            "recent": [{"t": r[0], "symbol": r[1], "secs": r[2], "ok": r[3]} for r in a_[-40:]]}
+
+
+def backup_payload():
+    """Kompletter Datenbestand als Backup-Datei (mit STORE_KEY verschlüsselt)."""
+    data = STORE.load()
+    with STORE.lock:
+        content = json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+    key = store_key()
+    return {"format": "aktien-check-backup", "version": 1, "created": int(time.time()), "encrypted": bool(key),
+            "users": len(data.get("users") or {}), "payload": encrypt_text(content, key) if key else content}
+
+
+def restore_backup(obj):
+    """Spielt ein Backup ein. Prüft Format und Schlüssel, bevor der aktuelle Bestand ersetzt wird."""
+    if not isinstance(obj, dict) or obj.get("format") != "aktien-check-backup":
+        raise ValueError("Das ist keine Aktien-Check-Backup-Datei.")
+    text, _enc = decrypt_text(obj.get("payload") or "", store_key())
+    data = json.loads(text)
+    if not isinstance(data, dict) or not isinstance(data.get("users"), dict) or not isinstance(data.get("u"), dict):
+        raise ValueError("Die Backup-Datei ist unvollständig oder beschädigt.")
+    if not data["users"]:
+        raise ValueError("Das Backup enthält keine Benutzerkonten – Wiederherstellung abgebrochen.")
+    if STORE.locked:
+        raise ValueError("Der Speicher ist gesperrt (Lesefehler) – bitte zuerst das Speicherproblem beheben.")
+    with STORE.lock:
+        STORE.data = data
+        STORE.dirty = True
+    STORE.save()
+    for _n, c, _t, _m in cache_rules():
+        c.clear()
+    return {"users": len(data["users"]), "created": obj.get("created")}
+
+
+def backup_to_gist():
+    """Backup in ein eigenes, privates Gist (GitHub hebt jede Version im Verlauf auf)."""
+    if not github_token():
+        raise ValueError("Kein GITHUB_TOKEN – automatisches Backup nur online möglich. Nutze den Download.")
+    content = json.dumps(backup_payload(), ensure_ascii=False)
+    files = {"aktien-check-backup.json": {"content": content}}
+    o = ops()
+    gid = o.get("backup_gist")
+    if gid:
+        try:
+            gh_api("PATCH", f"/gists/{gid}", {"files": files})
+        except Exception:
+            gid = None
+    if not gid:
+        g = gh_api("POST", "/gists", {"description": BACKUP_DESCRIPTION, "public": False, "files": files})
+        gid = g["id"]
+    with STORE.lock:
+        o["backup_gist"], o["backup_last"], o["backup_kb"] = gid, int(time.time()), round(len(content) / 1024)
+        STORE.dirty = True
+    LOG.info("[Backup] Gist aktualisiert (%d KB)", len(content) // 1024)
+    return {"kb": round(len(content) / 1024), "t": int(time.time())}
+
+
+def backup_due():
+    o = ops()
+    if github_token() and time.time() - (o.get("backup_last") or 0) > BACKUP_EVERY:
+        safe(backup_to_gist)
+
+
+def maintenance():
+    return (STORE.load().get("settings") or {}).get("maintenance") or {"on": False, "text": ""}
+
+
 def record_usage(user, symbol):
     """Zählt Analysen je Tag, Benutzer und Wert (für das Admin-Dashboard; 90 Tage)."""
     data = STORE.load()
@@ -4978,7 +5128,7 @@ def admin_dashboard():
         for name, acc in sorted(accs.items()):
             sp = data["u"].get(name, {})
             used = sum((st["days"].get(d) or {}).get("users", {}).get(name, 0) for d in days)
-            ulist.append({"name": name, "admin": bool(acc.get("admin")), "created": acc.get("created"),
+            ulist.append({"name": name, "admin": bool(acc.get("admin")), "locked": bool(acc.get("locked")), "created": acc.get("created"),
                           "last_login": acc.get("last_login"), "last_seen": sp.get("last_seen"),
                           "watchlist": len(sp.get("watchlist", [])), "alerts": len(sp.get("alerts", {})),
                           "signals": len(sp.get("signals", [])), "analyses_30d": used,
@@ -4997,7 +5147,15 @@ def admin_dashboard():
     subs_active = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["active"])
     subs_open = sum(1 for u_ in ulist if u_.get("sub") and u_["sub"]["state"] == "angefragt")
     threads = admin_threads()
+    o = ops()
+    with STORE.lock:
+        mem_hist = list(o["mem"])
+        restarts = list(o["restarts"])[-25:][::-1]
+        backup = {"last": o.get("backup_last"), "kb": o.get("backup_kb"), "gist": bool(o.get("backup_gist")),
+                  "auto": bool(github_token()), "every_days": BACKUP_EVERY // 86400}
     return {
+        "ops": {"mem": mem_hist, "restarts": restarts, "perf": analysis_perf(), "backup": backup,
+                "maintenance": maintenance()},
         "messages": {"threads": threads, "unread": sum(t_["unread"] for t_ in threads)},
         "subs": {"active": subs_active, "requested": subs_open, "revenue_month": subs_active * SUB_PRICE_EUR,
                  "price": SUB_PRICE_EUR, "payment_info": payment_info()},
@@ -5383,8 +5541,14 @@ def prune_caches():
 
 
 def history_flush_loop():
+    n = 0
+    safe(note_startup)
     while True:
         time.sleep(60)
+        n += 1
+        safe(lambda: ops_tick(n))
+        if n % 60 == 0:
+            safe(backup_due)
         if STORE.dirty:
             safe(STORE.save)
         n = safe(prune_caches) or 0
@@ -5731,7 +5895,7 @@ def session_user(token):
         if int(exp) < time.time() or not hmac.compare_digest(sig, good):
             return None
         acc = users().get(user)
-        return user if acc and int(acc.get("ver", 0)) == int(ver) else None
+        return user if acc and not acc.get("locked") and int(acc.get("ver", 0)) == int(ver) else None
     except Exception:
         return None
 
@@ -5875,8 +6039,8 @@ class Handler(BaseHTTPRequestHandler):
         proto = self.headers.get("X-Forwarded-Proto", "http")
         return f"{proto}://{host}" if host else ""
 
-    def json_body(self):
-        length = min(int(self.headers.get("Content-Length") or 0), 16384)
+    def json_body(self, limit=16384):
+        length = min(int(self.headers.get("Content-Length") or 0), limit)
         try:
             return json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
@@ -5904,8 +6068,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if "application/json" not in self.headers.get("Content-Type", ""):
                 return self.send(415, json.dumps({"error": "JSON erwartet"}), "application/json")
-            body = self.json_body()
+            if u.path == "/api/admin/restore" and not self.is_admin():
+                return self.send_json({"error": "Nur für Administratoren"}, 403)
+            body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 16384)
             user = self.current_user()
+            if maintenance().get("on") and not self.is_admin():
+                return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
             try:
                 if u.path == "/api/watchlist":
                     with STORE.lock:
@@ -5952,6 +6120,22 @@ class Handler(BaseHTTPRequestHandler):
                     st_ = sub_admin_action(user, str(body.get("username") or "").strip().lower(), body.get("action"),
                                            body.get("months", 1))
                     return self.send_json({"ok": True, "sub": st_})
+                if u.path == "/api/admin/restore":
+                    res_ = restore_backup(body)
+                    LOG.warning("[Backup] Wiederherstellung durch %s (%d Benutzer)", user, res_["users"])
+                    return self.send_json({"ok": True, "message": f"Backup eingespielt – {res_['users']} Benutzer"})
+                if u.path == "/api/admin/maintenance":
+                    if not self.is_admin():
+                        return self.send_json({"error": "Nur für Administratoren"}, 403)
+                    data_ = STORE.load()
+                    with STORE.lock:
+                        data_.setdefault("settings", {})["maintenance"] = {"on": bool(body.get("on")),
+                                                                          "text": str(body.get("text") or "")[:500], "by": user,
+                                                                          "since": int(time.time())}
+                        STORE.dirty = True
+                    STORE.save()
+                    LOG.warning("[Admin] %s: Wartungsmodus %s", user, "AN" if body.get("on") else "aus")
+                    return self.send_json({"ok": True, "maintenance": maintenance()})
                 if u.path == "/api/admin/system":
                     if not self.is_admin():
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
@@ -5990,6 +6174,9 @@ class Handler(BaseHTTPRequestHandler):
                     if act == "save":
                         STORE.save()
                         return self.send_json({"ok": True, "message": "Speicher gesichert"})
+                    if act == "backup_gist":
+                        r_ = backup_to_gist()
+                        return self.send_json({"ok": True, "message": f"Backup gespeichert ({r_['kb']} KB) – GitHub hebt jede Version auf"})
                     if act == "check_alerts":
                         n = len(run_alert_checks() or [])
                         return self.send_json({"ok": True, "message": f"Alarme geprüft – {n} ausgelöst"})
@@ -6063,13 +6250,16 @@ class Handler(BaseHTTPRequestHandler):
         LOG.warning("[Login] fehlgeschlagen: Benutzer %r, IP %s", username[:40], ip)
         note_failure(ip)
         time.sleep(1)  # bremst Durchprobieren
+        acc_ = users().get(username) or {}
+        if acc_.get("locked") and acc_.get("pw") and check_pw(given, acc_["pw"]):
+            return self.login_page("Dieses Konto ist vorübergehend gesperrt. Bitte wende dich an den Administrator.", nxt, 403, username)
         return self.login_page("Benutzername oder Passwort falsch.", nxt, 401, username)
 
     def admin_list(self):
         out = []
         for name, acc in sorted(users().items()):
             sp = STORE.load()["u"].get(name, {})
-            out.append({"name": name, "admin": bool(acc.get("admin")), "created": acc.get("created"),
+            out.append({"name": name, "admin": bool(acc.get("admin")), "locked": bool(acc.get("locked")), "created": acc.get("created"),
                         "last_login": acc.get("last_login"), "alerts": len(sp.get("alerts", {})),
                         "watchlist": len(sp.get("watchlist", []))})
         return {"users": out, "me": self.current_user()}
@@ -6108,6 +6298,12 @@ class Handler(BaseHTTPRequestHandler):
                 if name == me or name == "admin":
                     raise ValueError("Die eigenen Admin-Rechte können nicht geändert werden.")
                 accs[name]["admin"] = not accs[name].get("admin")
+            elif action in ("lock", "unlock"):
+                if name == me or name == "admin":
+                    raise ValueError("Dieses Konto kann nicht gesperrt werden.")
+                accs[name]["locked"] = action == "lock"
+                if action == "lock":  # laufende Sitzungen beenden
+                    accs[name]["ver"] = int(accs[name].get("ver", 0)) + 1
             else:
                 raise ValueError("Unbekannte Aktion")
         STORE.save()
@@ -6178,6 +6374,20 @@ class Handler(BaseHTTPRequestHandler):
                     out[name] = f"{type(e).__name__}: {e}"[:300]
             return self.send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
         user = self.current_user()
+        if u.path.startswith("/api/") and u.path != "/api/me" and maintenance().get("on") and not self.is_admin():
+            return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
+        if u.path == "/api/admin/backup":
+            if not self.is_admin():
+                return self.send_json({"error": "Nur für Administratoren"}, 403)
+            data_ = json.dumps(backup_payload(), ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="aktien-check-backup-{datetime.now():%Y-%m-%d}.json"')
+            self.send_header("Content-Length", str(len(data_)))
+            self.end_headers()
+            self.wfile.write(data_)
+            LOG.info("[Backup] Download durch %s", user)
+            return
         if u.path == "/api/me":
             sp_ = user_space(user)
             if time.time() - (sp_.get("last_seen") or 0) > 300:
@@ -6185,7 +6395,8 @@ class Handler(BaseHTTPRequestHandler):
                 STORE.dirty = True
             adm_ = self.is_admin()
             unread_ = sum(t_["unread"] for t_ in admin_threads()) if adm_ else unread_for_user(user)
-            return self.send_json({"user": user, "admin": adm_, "multi": bool(app_password()), "unread": unread_})
+            return self.send_json({"user": user, "admin": adm_, "multi": bool(app_password()), "unread": unread_,
+                                   "maintenance": maintenance()})
         if u.path == "/api/messages":
             return self.send_json({"messages": thread_payload(user, False)})
         if u.path == "/api/admin/messages":
@@ -6260,14 +6471,19 @@ class Handler(BaseHTTPRequestHandler):
                 res = analyze(q)
                 res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
                 safe(lambda: record_usage(user, res["symbol"]))
+                safe(lambda: record_analysis(q, res["symbol"], time.time() - t0, True))
                 LOG.info("[Analyse] %s -> %s · %s (%+.1f) · %.1f s · %s", q, res["symbol"], res["rating"]["label"],
                          res["rating"]["score"], time.time() - t0, user)
                 return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
             except ValueError as e:
                 LOG.warning("[Analyse] %s nicht möglich: %s", q, e)
+                err_ = str(e)
+                safe(lambda: record_analysis(q, "", time.time() - t0, False, err_))
                 return self.send(404, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
             except Exception as e:
                 LOG.exception("[Analyse] %s abgebrochen nach %.1f s", q, time.time() - t0)
+                err_ = f"{type(e).__name__}: {e}"
+                safe(lambda: record_analysis(q, "", time.time() - t0, False, err_))
                 return self.send(500, json.dumps({"error": f"Fehler bei der Analyse: {e}"}, ensure_ascii=False),
                                  "application/json")
         self.send(404, "Not found", "text/plain")
