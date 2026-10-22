@@ -393,6 +393,11 @@ class TestHTTP(Isolated):
         self.assertEqual(st, 200)
         self.assertEqual(self.login(anna, "anna", "anna-start-1"), 303)
         self.assertEqual(self.call(anna, "/api/admin/users")[0], 403)
+        self.assertEqual(self.call(anna, "/api/admin/dashboard")[0], 403)          # Dashboard nur für Admins
+        self.assertEqual(self.call(anna, "/api/admin/system", {"action": "save"})[0], 403)
+        st_, _h, body_ = self.call(adm, "/api/admin/dashboard")
+        self.assertEqual(st_, 200)
+        self.assertIn("kpi", json.loads(body_))
         self.assertEqual(self.call(anna, "/api/watchlist", "x=1", ctype="text/plain")[0], 415)
         self.call(anna, "/api/watchlist", {"items": [{"symbol": "ALV.DE"}]})
         self.assertEqual([x["symbol"] for x in json.loads(self.call(anna, "/api/watchlist")[2])["items"]], ["ALV.DE"])
@@ -654,7 +659,8 @@ class TestScreenerStart(Isolated):
 
 class TestScreenerMemoryGuard(Isolated):
     def test_stops_when_memory_stays_high(self):
-        orig = (a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep)
+        orig = (a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep, a.MEM_GUARD)
+        a.MEM_GUARD = True
         a.SCREENER_UNIVERSES = {"t": ("Test", ["AAA", "BBB", "CCC"])}
         a.SCREENER_PAUSE = 0
         a.release_memory = lambda: 480.0            # Speicher bleibt über der harten Grenze
@@ -671,7 +677,7 @@ class TestScreenerMemoryGuard(Isolated):
             self.assertEqual(len(calls), 1)                         # nach dem ersten Wert geordnet gestoppt
             self.assertTrue(a.screener_payload()["mem_stop"])
         finally:
-            a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep = orig
+            a.analyze, a.SCREENER_UNIVERSES, a.SCREENER_PAUSE, a.release_memory, a.time.sleep, a.MEM_GUARD = orig
             a.SCREENER_STATE.update(running=False, stop=False, mem_stop=False)
 
 

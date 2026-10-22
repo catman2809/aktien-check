@@ -41,6 +41,20 @@ if not LOG.handlers:
     LOG.addHandler(_h)
     LOG.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
     LOG.propagate = False
+START_TIME = time.time()
+from collections import deque  # noqa: E402
+LOG_BUFFER = deque(maxlen=400)
+
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            LOG_BUFFER.append({"t": int(record.created), "level": record.levelname, "msg": record.getMessage()[:400]})
+        except Exception:
+            pass
+
+
+LOG.addHandler(_BufferHandler())
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -4720,6 +4734,104 @@ def track_payload(user, everyone=False):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Admin-Dashboard: Nutzungsstatistik, Systemzustand, Datenquellen
+# ---------------------------------------------------------------------------
+def record_usage(user, symbol):
+    """Zählt Analysen je Tag, Benutzer und Wert (für das Admin-Dashboard; 90 Tage)."""
+    data = STORE.load()
+    day = datetime.now().strftime("%Y-%m-%d")
+    with STORE.lock:
+        st = data.setdefault("stats", {"days": {}, "symbols": {}})
+        d = st["days"].setdefault(day, {"analyses": 0, "users": {}})
+        d["analyses"] += 1
+        d["users"][user] = d["users"].get(user, 0) + 1
+        st["symbols"][symbol] = st["symbols"].get(symbol, 0) + 1
+        for old in sorted(st["days"])[:-90]:
+            st["days"].pop(old, None)
+        if len(st["symbols"]) > 500:  # seltene Werte verwerfen
+            for k in sorted(st["symbols"], key=st["symbols"].get)[:100]:
+                st["symbols"].pop(k, None)
+        STORE.dirty = True
+
+
+def data_source_checks(sym="SAP.DE"):
+    """Erreichbarkeit und Antwortzeit der Datenquellen."""
+    checks = {
+        "Yahoo · Kursdaten": lambda: f"{len(yf.Ticker(sym).history(period='5d'))} Tage",
+        "Yahoo · Unternehmensdaten": lambda: "Kurs " + str(current_price(yf.Ticker(sym).info)),
+        "Yahoo · Bilanzen": lambda: f"{len(yf.Ticker(sym).quarterly_income_stmt.columns)} Quartale",
+        "Yahoo · Analystenschätzungen": lambda: f"{len(yf.Ticker(sym).earnings_estimate)} Zeilen",
+        "Yahoo · Suche": lambda: f"{len(search_symbols(sym))} Treffer",
+        "Google News": lambda: f"{len(google_news(sym, 'en'))} Meldungen",
+        "Finnhub": lambda: (f"{len(finnhub('stock/recommendation', symbol=sym.split('.')[0]) or [])} Perioden"
+                            if finnhub_key() else "kein Schlüssel"),
+        "CoinGecko": lambda: f"{len(cg_markets('eur') or [])} Coins",
+        "Wikidata": lambda: "ok" if wikidata_company("SAP", "SAP", "DE") else "keine Antwort",
+        "ntfy.sh": lambda: str(urllib.request.urlopen(urllib.request.Request("https://ntfy.sh/v1/health", headers=UA), timeout=8).status),
+    }
+    out = []
+    for name, fn in checks.items():
+        t0 = time.time()
+        try:
+            val = fn()
+            ok = not any(x in str(val) for x in ("None", "kein", "keine", " 0 "))
+            out.append({"name": name, "ok": ok, "detail": str(val)[:120], "ms": int((time.time() - t0) * 1000)})
+        except Exception as e:
+            out.append({"name": name, "ok": False, "detail": f"{type(e).__name__}: {e}"[:160], "ms": int((time.time() - t0) * 1000)})
+    return out
+
+
+def admin_dashboard():
+    data = STORE.load()
+    now = time.time()
+    st = data.get("stats") or {"days": {}, "symbols": {}}
+    today = datetime.now().strftime("%Y-%m-%d")
+    days = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(29, -1, -1)]
+    per_day = [{"day": d, "n": (st["days"].get(d) or {}).get("analyses", 0)} for d in days]
+    week = sum(x["n"] for x in per_day[-7:])
+    accs = users()
+    ulist = []
+    with STORE.lock:
+        for name, acc in sorted(accs.items()):
+            sp = data["u"].get(name, {})
+            used = sum((st["days"].get(d) or {}).get("users", {}).get(name, 0) for d in days)
+            ulist.append({"name": name, "admin": bool(acc.get("admin")), "created": acc.get("created"),
+                          "last_login": acc.get("last_login"), "last_seen": sp.get("last_seen"),
+                          "watchlist": len(sp.get("watchlist", [])), "alerts": len(sp.get("alerts", {})),
+                          "signals": len(sp.get("signals", [])), "analyses_30d": used,
+                          "report": (sp.get("report") or {}).get("enabled", True),
+                          "report_last": (sp.get("report") or {}).get("last")})
+        alerts_total = sum(len(sp.get("alerts", {})) for sp in data["u"].values())
+        top = sorted((st.get("symbols") or {}).items(), key=lambda kv: -kv[1])[:12]
+    scr = screener_payload()
+    sst = SCREENER_STATE
+    caches = [{"name": n, "entries": len(c), "max": mx} for n, c, _t, mx in cache_rules()]
+    logs = list(LOG_BUFFER)
+    warn = [x for x in logs if x["level"] in ("WARNING", "ERROR", "CRITICAL")][-40:][::-1]
+    recent = logs[-30:][::-1]
+    mem = mem_mb()
+    return {
+        "kpi": {"users": len(accs), "analyses_today": (st["days"].get(today) or {}).get("analyses", 0),
+                "analyses_7d": week, "alerts": alerts_total, "memory_mb": round(mem) if mem else None,
+                "uptime_s": int(now - START_TIME), "warnings": len(warn)},
+        "per_day": per_day, "top_symbols": [{"symbol": k, "n": v} for k, v in top], "users": ulist,
+        "screener": {"running": sst["running"], "done": sst["done"], "target": sst["target"], "by": sst["by"],
+                     "unis": sst.get("unis") or [], "finished": sst["finished"], "mem_stop": sst.get("mem_stop", False),
+                     "rated": len(scr["rows"]), "total": scr["total"], "fresh": scr["fresh"],
+                     "universes": scr["universes"],
+                     "failed": sorted(k for k, v in screener_store().items() if v.get("failed") and not v.get("label"))[:30]},
+        "caches": caches, "warnings": warn, "recent": recent,
+        "system": {"python": sys.version.split()[0], "yfinance": getattr(yf, "__version__", "?"),
+                   "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal",
+                   "hosted": "RENDER" in os.environ, "storage": STORE.backend, "encrypted": STORE.encrypted,
+                   "persistent": STORE.persistent, "store_error": STORE.error, "finnhub": bool(finnhub_key()),
+                   "last_check": data.get("last_check"), "started": int(START_TIME),
+                   "memory_soft": MEM_SOFT_MB, "memory_hard": MEM_HARD_MB,
+                   "store_kb": round(len(json.dumps(data, default=str)) / 1024)},
+    }
+
+
 def clean_watchlist(items):
     out, seen = [], set()
     for it in items if isinstance(items, list) else []:
@@ -4914,7 +5026,7 @@ def screener_run():
             if not screener_step():
                 break
             st["done"] += 1
-            mb = release_memory()
+            mb = release_memory() if MEM_GUARD else None
             if st["done"] % 10 == 0:
                 LOG.info("[Screener] %d von %d · Speicher %s MB", st["done"], st["target"], f"{mb:.0f}" if mb else "?")
             if mb and mb > MEM_SOFT_MB:
@@ -4993,6 +5105,7 @@ def screener_payload():
 # ---------------------------------------------------------------------------
 MEM_SOFT_MB = 400        # ab hier räumt der Screener auf und pausiert
 MEM_HARD_MB = 450        # bleibt es darüber, stoppt der Screener geordnet (Limit des kostenlosen Servers: 512 MB)
+MEM_GUARD = os.name != "nt"  # Speicherbremse nur auf dem Linux-Server (lokal unter Windows gibt es kein 512-MB-Limit)
 _LIBC = None
 
 
@@ -5019,7 +5132,25 @@ def mem_mb():
         with open("/proc/self/statm") as f:
             return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1e6
     except Exception:
-        return None
+        pass
+    if os.name == "nt":  # lokal unter Windows (nur für die Anzeige im Admin-Dashboard)
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+
+            class PMC(ctypes.Structure):
+                _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD), ("Peak", ctypes.c_size_t),
+                            ("WorkingSetSize", ctypes.c_size_t)] + [(f"x{i}", ctypes.c_size_t) for i in range(6)]
+            k32, psapi = ctypes.windll.kernel32, ctypes.windll.psapi
+            k32.GetCurrentProcess.restype = wt.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.POINTER(PMC), wt.DWORD]
+            pmc = PMC()
+            pmc.cb = ctypes.sizeof(PMC)
+            if psapi.GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+                return pmc.WorkingSetSize / 1e6
+        except Exception:
+            return None
+    return None
 
 
 def release_memory():
@@ -5604,6 +5735,26 @@ class Handler(BaseHTTPRequestHandler):
                         acc["pw"], acc["ver"] = hash_pw(new), int(acc.get("ver", 0)) + 1  # andere Geräte abmelden
                     STORE.save()
                     return self.send_json({"ok": True}, cookie=self.cookie(make_session_token(user), SESSION_DAYS * 86400))
+                if u.path == "/api/admin/system":
+                    if not self.is_admin():
+                        return self.send_json({"error": "Nur für Administratoren"}, 403)
+                    act = body.get("action")
+                    LOG.info("[Admin] %s: System-Aktion %s", user, act)
+                    if act == "diag":
+                        return self.send(200, json.dumps({"checks": data_source_checks(str(body.get("symbol") or "SAP.DE")[:15])},
+                                                         ensure_ascii=False), "application/json; charset=utf-8")
+                    if act == "clear_cache":
+                        for _n, c, _t, _m in cache_rules():
+                            c.clear()
+                        mb = release_memory()
+                        return self.send_json({"ok": True, "message": "Zwischenspeicher geleert" + (f" – Speicher jetzt {mb:.0f} MB" if mb else "")})
+                    if act == "save":
+                        STORE.save()
+                        return self.send_json({"ok": True, "message": "Speicher gesichert"})
+                    if act == "check_alerts":
+                        n = len(run_alert_checks() or [])
+                        return self.send_json({"ok": True, "message": f"Alarme geprüft – {n} ausgelöst"})
+                    return self.send_json({"error": "unbekannte Aktion"}, 400)
                 if u.path == "/api/admin/users":
                     if not self.is_admin():
                         return self.send_json({"error": "Nur für Administratoren"}, 403)
@@ -5786,7 +5937,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
         user = self.current_user()
         if u.path == "/api/me":
+            sp_ = user_space(user)
+            if time.time() - (sp_.get("last_seen") or 0) > 300:
+                sp_["last_seen"] = int(time.time())
+                STORE.dirty = True
             return self.send_json({"user": user, "admin": self.is_admin(), "multi": bool(app_password())})
+        if u.path == "/api/admin/dashboard":
+            if not self.is_admin():
+                return self.send_json({"error": "Nur für Administratoren"}, 403)
+            return self.send(200, json.dumps(json_safe(admin_dashboard()), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
         if u.path == "/api/screener":
@@ -5839,6 +5998,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 res = analyze(q)
                 res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
+                safe(lambda: record_usage(user, res["symbol"]))
                 LOG.info("[Analyse] %s -> %s · %s (%+.1f) · %.1f s · %s", q, res["symbol"], res["rating"]["label"],
                          res["rating"]["score"], time.time() - t0, user)
                 return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")

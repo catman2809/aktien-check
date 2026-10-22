@@ -436,6 +436,28 @@ table.scr td b{font-weight:600}
 .ho-top span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.ck-grid{grid-template-columns:1fr;gap:12px}.ck-card{padding:14px 16px}}
 @media print{#ch-osc{display:none}}
+.adm-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.adm-k{padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.adm-k small{color:var(--text-3);font-size:12px} .adm-k b{font-size:22px;letter-spacing:-.02em}
+.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.adm-grid h3{margin:0 0 10px;font-size:15px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.adm-wide{grid-column:1/-1}
+.adm-bars{display:flex;gap:3px;align-items:flex-end;height:120px}
+.adm-bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.adm-bar i{display:block;width:100%;min-height:1px;background:var(--accent);border-radius:3px 3px 0 0;opacity:.8}
+.adm-bar small{font-size:10px;color:var(--text-3);margin-top:3px}
+.adm-row{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;padding:6px 0;border-top:1px solid var(--border)}
+.adm-row:first-of-type{border-top:0}
+.adm-row a{color:var(--accent);text-decoration:none;font-weight:600}
+.adm-uni{display:grid;grid-template-columns:110px 1fr 60px;gap:10px;align-items:center;font-size:13px;margin:6px 0}
+.adm-ub{height:8px;background:var(--track);border-radius:4px;overflow:hidden} .adm-ub i{display:block;height:100%;background:var(--accent)}
+.adm-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px} .adm-dot.ok{background:var(--pos)} .adm-dot.no{background:var(--neg)}
+.adm-t td{font-size:13px}
+.adm-log{display:flex;flex-direction:column;gap:2px;max-height:340px;overflow:auto;font-size:12.5px}
+.adm-l{display:grid;grid-template-columns:96px 64px 1fr;gap:8px;padding:5px 8px;border-radius:6px;background:var(--surface-2)}
+.adm-l.warning b{color:var(--neu)} .adm-l.error b,.adm-l.critical b{color:var(--neg)} .adm-l.info b{color:var(--text-3)}
+.adm-l span:last-child{overflow-wrap:anywhere}
+@media (max-width:640px){.adm-l{grid-template-columns:1fr}.adm-uni{grid-template-columns:90px 1fr 50px}}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -895,6 +917,8 @@ async function initAccount() {
   if (location.protocol === "file:") return;
   try { ME = await api("/api/me"); } catch (e) { return; }
   WL_KEY = "ac-watchlist:" + ME.user;
+  if (ME.admin && document.querySelector(".welcome") && !document.querySelector("#admopen")) welcome();  // Admin-Kachel nachreichen
+  if (ME.admin && location.search.includes("view=admin")) showAdmin();
   // Einmalige Übernahme der bisherigen Geräte-Watchlist in das Konto
   let legacy = [];
   try { legacy = JSON.parse(localStorage.getItem("ac-watchlist")) || []; } catch (e) {}
@@ -1243,6 +1267,7 @@ async function openAccount() {
       <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="pw-save">Passwort ändern</button></div>
       <div class="form-msg" id="pw-msg"></div>
       <small class="stamp">Andere Geräte werden dabei abgemeldet, dieses bleibt angemeldet.</small></div>
+    ${ME.admin ? `<div class="sec"><h4>Administration</h4><button class="btn primary" id="adm-open">Admin-Dashboard öffnen</button></div>` : ""}
     ${ME.admin ? `<div class="sec"><h4>Benutzer verwalten</h4><div id="users-list" class="stamp">Lade …</div>
       <h4 style="margin-top:18px">Neuen Benutzer anlegen</h4>
       <div class="field"><label for="nu-name">Benutzername</label><input id="nu-name" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="z. B. anna"></div>
@@ -1255,6 +1280,7 @@ async function openAccount() {
   document.body.appendChild(bg);
   bg.onclick = e => { if (e.target === bg) closeModal(); };
   $("#acct-close").onclick = closeModal;
+  const ao_ = $("#adm-open"); if (ao_) ao_.onclick = () => { closeModal(); showAdmin(); };
   const msg = (id, text, ok) => { const m = $(id); m.textContent = text; m.className = "form-msg " + (ok ? "ok" : "err"); };
   $("#pw-save").onclick = async () => {
     try {
@@ -1425,8 +1451,11 @@ function welcome() {
       <div><b>Glossar</b><span>KGV, ROIC, Piotroski, TER … alle Fachbegriffe kurz erklärt. In jeder Analyse lassen sich die Begriffe auch direkt antippen.</span></div>
       <button class="btn" id="glopen">Glossar öffnen</button>
     </div>
+    ${ME?.admin ? `<div class="trk-teaser card"><div><b>Admin-Dashboard</b><span>Nutzung, Benutzer, Screener, Datenquellen, Speicher und Fehlermeldungen auf einen Blick.</span></div>
+      <button class="btn" id="admopen">Dashboard öffnen</button></div>` : ""}
     ${pushGuide()}
     </section>`;
+  const ad_ = $("#admopen"); if (ad_) ad_.onclick = () => showAdmin();
   $("#trkopen").onclick = () => showTrack();
   $("#scropen").onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
@@ -2032,6 +2061,125 @@ function healthSection(d) {
     <div class="an-grid">${bal}${div}${hold}</div>`;
 }
 
+/* Admin-Dashboard */
+let admTimer = null, admDiag = null;
+async function showAdmin() {
+  runId++; wlView = false;
+  $("#subnav").style.display = "none";
+  navTo("?view=admin");
+  window.scrollTo({top: 0});
+  if (!ME?.admin) { $("#out").innerHTML = `<div class="card pad">Das Admin-Dashboard ist nur für Administratoren sichtbar.</div>`; return; }
+  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Admin-Dashboard …</b></div>`;
+  await loadAdmin();
+}
+async function loadAdmin() {
+  clearTimeout(admTimer);
+  if (!location.search.includes("view=admin")) return;
+  let D;
+  try { D = await api("/api/admin/dashboard"); } catch (e) {
+    if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Dashboard nicht verfügbar: ${esc(e.message)}</div>`; return; }
+  if (!location.search.includes("view=admin")) return;
+  renderAdmin(D);
+  admTimer = setTimeout(loadAdmin, 30000);
+}
+function renderAdmin(D) {
+  const K = D.kpi, S = D.system, Sc = D.screener;
+  const dur = s_ => { const d = Math.floor(s_ / 86400), h = Math.floor(s_ % 86400 / 3600), m_ = Math.floor(s_ % 3600 / 60); return d ? `${d} T. ${h} Std.` : h ? `${h} Std. ${m_} Min.` : `${m_} Min.`; };
+  const dt = ts => ts ? new Date(ts * 1000).toLocaleString("de-DE", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"}) : "–";
+  const rel = ts => { if (!ts) return "–"; const h = (Date.now() / 1000 - ts) / 3600; return h < 1 ? "vor " + Math.max(1, Math.round(h * 60)) + " Min." : h < 48 ? `vor ${Math.round(h)} Std.` : `vor ${Math.round(h / 24)} T.`; };
+  const memPct = K.memory_mb ? K.memory_mb / 512 : null;
+  const kpi = (lab, val, sub, tone) => `<div class="card adm-k"><small>${lab}</small><b class="num" ${tone ? `style="color:${tone}"` : ""}>${val}</b>${sub ? `<span class="stamp">${sub}</span>` : ""}</div>`;
+  const mx = Math.max(1, ...D.per_day.map(x => x.n));
+  $("#out").innerHTML = `
+    <div class="wl-head">
+      <div><div class="eyebrow">Nur für Administratoren · aktualisiert sich alle 30 Sekunden</div><h1>Admin-Dashboard</h1></div>
+      <div class="wl-actions"><button class="btn" id="admref">Aktualisieren</button><button class="btn" id="admback">Zur Startseite</button></div>
+    </div>
+    <div class="adm-kpis">
+      ${kpi("Benutzer", K.users)}
+      ${kpi("Analysen heute", K.analyses_today)}
+      ${kpi("Analysen 7 Tage", K.analyses_7d)}
+      ${kpi("Aktive Preisalarme", K.alerts)}
+      ${kpi("Arbeitsspeicher", K.memory_mb ? `${K.memory_mb} MB` : "–", S.hosted ? "von 512 MB" : "lokal (kein Limit)",
+            memPct == null || !S.hosted ? null : memPct > 0.85 ? "var(--neg)" : memPct > 0.7 ? "var(--neu)" : "var(--pos)")}
+      ${kpi("Läuft seit", dur(K.uptime_s), "seit " + dt(S.started))}
+      ${kpi("Warnungen & Fehler", K.warnings, "seit dem Start", K.warnings ? "var(--neu)" : "var(--pos)")}
+    </div>
+
+    <div class="adm-grid">
+      <div class="card pad adm-wide"><h3>Analysen pro Tag <span class="stamp">letzte 30 Tage · ${D.per_day.reduce((a, x) => a + x.n, 0)} gesamt</span></h3>
+        <div class="adm-bars">${D.per_day.map(x => `<div class="adm-bar" title="${new Date(x.day).toLocaleDateString("de-DE")}: ${x.n} Analysen">
+          <i style="height:${x.n / mx * 100}%"></i><small>${x.day.slice(8)}</small></div>`).join("")}</div></div>
+
+      <div class="card pad"><h3>Meistanalysierte Werte</h3>
+        ${D.top_symbols.length ? D.top_symbols.map((x, i) => `<div class="adm-row"><span>${i + 1}. <a href="?q=${encodeURIComponent(x.symbol)}" class="adm-sym" data-q="${esc(x.symbol)}">${esc(x.symbol)}</a></span><b class="num">${x.n}</b></div>`).join("")
+          : `<div class="stamp">Noch keine Analysen gezählt.</div>`}</div>
+
+      <div class="card pad adm-wide"><h3>Benutzer</h3>
+        <div class="peer-scroll"><table class="trk adm-t"><thead><tr><th>Name</th><th>Rolle</th><th>Zuletzt aktiv</th><th>Letzter Login</th><th>Analysen 30 T.</th><th>Watchlist</th><th>Alarme</th><th>Signale</th><th>Wochenbericht</th></tr></thead>
+        <tbody>${D.users.map(u_ => `<tr><td><b>${esc(u_.name)}</b></td><td>${u_.admin ? "Admin" : "Benutzer"}</td><td>${rel(u_.last_seen)}</td><td>${dt(u_.last_login)}</td>
+          <td class="num">${u_.analyses_30d}</td><td class="num">${u_.watchlist}</td><td class="num">${u_.alerts}</td><td class="num">${u_.signals}</td>
+          <td>${u_.report ? `an${u_.report_last ? ` · zuletzt ${new Date(u_.report_last).toLocaleDateString("de-DE")}` : ""}` : "aus"}</td></tr>`).join("")}</tbody></table></div>
+        <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="admusers">Benutzer verwalten</button></div></div>
+
+      <div class="card pad"><h3>Screener <span class="stamp">${Sc.rated} von ${Sc.total} bewertet</span></h3>
+        <div class="adm-row"><span>Status</span><b style="color:${Sc.running ? "var(--accent)" : "inherit"}">${Sc.running ? `läuft: ${Sc.done} von ${Sc.target}` : Sc.mem_stop ? "wegen Speicher angehalten" : "bereit"}</b></div>
+        ${Sc.running ? `<div class="scr-prog" style="margin:6px 0"><i style="width:${Sc.target ? Sc.done / Sc.target * 100 : 0}%"></i></div>` : ""}
+        <div class="adm-row"><span>Letzter Durchgang</span><b>${Sc.finished ? dt(Sc.finished) : "–"}${Sc.by ? ` · ${esc(Sc.by)}` : ""}</b></div>
+        <div class="adm-row"><span>Aktuell (jünger als 20 Std.)</span><b class="num">${Sc.fresh}</b></div>
+        ${Object.values(Sc.universes).map(u_ => `<div class="adm-uni"><span>${esc(u_.name)}</span><span class="adm-ub"><i style="width:${u_.total ? u_.done / u_.total * 100 : 0}%"></i></span><span class="num stamp">${u_.done}/${u_.total}</span></div>`).join("")}
+        ${Sc.failed.length ? `<div class="stamp" style="margin-top:8px">Nicht bewertbar: ${esc(Sc.failed.join(", "))}</div>` : ""}
+        <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="admscr">Screener öffnen</button></div></div>
+
+      <div class="card pad"><h3>Datenquellen</h3>
+        <div id="adm-diag">${admDiag ? admDiag : `<div class="stamp">Prüft, ob Yahoo, Google News, Finnhub, CoinGecko, Wikidata und ntfy erreichbar sind (dauert etwa 10–20 Sekunden).</div>`}</div>
+        <div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" id="admdiag">Jetzt prüfen</button></div></div>
+
+      <div class="card pad"><h3>System</h3>
+        ${[["Version (Commit)", S.commit], ["Python / yfinance", `${S.python} / ${S.yfinance}`],
+           ["Speicher", `${S.storage === "gist" ? "GitHub-Gist" : "Datei"}${S.encrypted ? " · verschlüsselt" : ""}${S.persistent ? "" : " · NICHT dauerhaft"}`],
+           ["Datenbestand", `${S.store_kb} KB`], ["Finnhub", S.finnhub ? "aktiv" : "kein Schlüssel"],
+           ["Letzte Alarmprüfung", S.last_check ? rel(S.last_check) : "–"],
+           ["Speicherbremse Screener", `${S.memory_soft} / ${S.memory_hard} MB`]].map(([k, v]) => `<div class="adm-row"><span>${k}</span><b>${esc(String(v))}</b></div>`).join("")}
+        ${S.store_error ? `<div class="note" style="margin-top:8px">${esc(S.store_error)}</div>` : ""}
+        <div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">
+          <button class="btn" data-act="clear_cache">Zwischenspeicher leeren</button>
+          <button class="btn" data-act="save">Jetzt speichern</button>
+          <button class="btn" data-act="check_alerts">Alarme prüfen</button></div></div>
+
+      <div class="card pad"><h3>Zwischenspeicher</h3>
+        ${D.caches.map(c => `<div class="adm-uni"><span>${esc(c.name)}</span><span class="adm-ub"><i style="width:${Math.min(100, c.entries / c.max * 100)}%"></i></span><span class="num stamp">${c.entries}/${c.max}</span></div>`).join("")}</div>
+
+      <div class="card pad adm-wide"><h3>Warnungen & Fehler <span class="stamp">seit dem Start, neueste zuerst</span></h3>
+        ${D.warnings.length ? `<div class="adm-log">${D.warnings.map(l => `<div class="adm-l ${l.level.toLowerCase()}"><span class="num">${dt(l.t)}</span><b>${l.level === "WARNING" ? "Warnung" : "Fehler"}</b><span>${esc(l.msg)}</span></div>`).join("")}</div>`
+          : `<div class="stamp">Keine Warnungen oder Fehler seit dem Start. ✓</div>`}
+        <details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">Letzte Ereignisse (${D.recent.length})</summary>
+          <div class="adm-log" style="margin-top:8px">${D.recent.map(l => `<div class="adm-l ${l.level.toLowerCase()}"><span class="num">${dt(l.t)}</span><b>${l.level}</b><span>${esc(l.msg)}</span></div>`).join("")}</div></details></div>
+    </div>`;
+  $("#admback").onclick = () => { clearTimeout(admTimer); goHome(); };
+  $("#admref").onclick = () => loadAdmin();
+  $("#admusers").onclick = () => openAccount();
+  $("#admscr").onclick = () => { clearTimeout(admTimer); showScreener(); };
+  document.querySelectorAll(".adm-sym").forEach(a_ => a_.onclick = e => { e.preventDefault(); clearTimeout(admTimer); $("#q").value = a_.dataset.q; run(a_.dataset.q); });
+  $("#admdiag").onclick = async e => {
+    e.target.disabled = true; e.target.textContent = "Prüfe …";
+    $("#adm-diag").innerHTML = `<div class="stamp">Prüfe Datenquellen …</div>`;
+    try {
+      const r = await api("/api/admin/system", {action: "diag"});
+      admDiag = r.checks.map(c => `<div class="adm-row"><span><span class="adm-dot ${c.ok ? "ok" : "no"}"></span>${esc(c.name)}</span><span class="stamp" title="${esc(c.detail)}">${esc(c.detail.slice(0, 40))} · ${c.ms} ms</span></div>`).join("")
+        + `<div class="stamp" style="margin-top:6px">Geprüft ${new Date().toLocaleTimeString("de-DE")}</div>`;
+      $("#adm-diag").innerHTML = admDiag;
+    } catch (err) { $("#adm-diag").innerHTML = `<div class="stamp">Prüfung fehlgeschlagen: ${esc(err.message)}</div>`; }
+    e.target.disabled = false; e.target.textContent = "Jetzt prüfen";
+  };
+  document.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { const r = await api("/api/admin/system", {action: b.dataset.act}); toast(r.message || "Erledigt"); loadAdmin(); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }
+    b.disabled = false;
+  });
+}
+
 /* Trefferquote der eigenen Empfehlungen */
 let trkScope = "me";
 const GROUP_COL = {Kaufen: "var(--pos)", Halten: "var(--neu)", Verkaufen: "var(--neg)"};
@@ -2138,6 +2286,7 @@ function route() {
   else if (ps.get("view") === "trefferquote") showTrack();
   else if (ps.get("view") === "glossar") showGlossary();
   else if (ps.get("view") === "screener") showScreener();
+  else if (ps.get("view") === "admin") showAdmin();
   else if (pre) { $("#q").value = pre; run(pre); }
   else { runId++; $("#q").value = ""; welcome(); }
 }
