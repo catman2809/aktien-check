@@ -3818,8 +3818,20 @@ def etf_data(m, t, info):
     m["max_sector"] = m["sectors"][0] if m["sectors"] else None
     ac = safe(lambda: fd.asset_classes) if fd is not None else None
     m["assets"] = {"Aktien": num((ac or {}).get("stockPosition")), "Anleihen": num((ac or {}).get("bondPosition")),
-                   "Cash": num((ac or {}).get("cashPosition")), "Sonstiges": num((ac or {}).get("otherPosition"))}
+                   "Cash": num((ac or {}).get("cashPosition")),
+                   "Sonstiges": sum(num((ac or {}).get(k_)) or 0 for k_ in ("otherPosition", "preferredPosition", "convertiblePosition")) or None}
     m["bond_etf"] = (m["assets"]["Anleihen"] or 0) > 0.5
+    m["ratings"], m["gov_share"], m["duration"], m["maturity"] = [], None, None, None
+    if m["bond_etf"] and fd is not None:  # Bonität und Laufzeit der Anleihen
+        br = safe(lambda: fd.bond_ratings) or {}
+        m["ratings"] = [{"name": lab, "weight": num(br.get(k_))} for k_, lab in
+                        (("aaa", "AAA"), ("aa", "AA"), ("a", "A"), ("bbb", "BBB"), ("bb", "BB"), ("b", "B"),
+                         ("below_b", "unter B"), ("other", "ohne Rating")) if num(br.get(k_))]
+        m["gov_share"] = num(br.get("us_government")) or None
+        bh = safe(lambda: fd.bond_holdings)
+        if bh is not None and m["symbol"] in bh:
+            m["duration"] = num(safe(lambda: bh[m["symbol"]].get("Duration")))
+            m["maturity"] = num(safe(lambda: bh[m["symbol"]].get("Maturity")))
     eq = safe(lambda: fd.equity_holdings) if fd is not None else None
     m["pe"] = m["pb"] = None
     if eq is not None and m["symbol"] in eq:
@@ -4026,7 +4038,9 @@ def analyze_etf(symbol, t, info, alternatives):
         "macro": {"score": 0.0, "weight": 0.0, "reasons": ["Makro fließt bei ETFs über Rendite und Risiko ein"]},
         "fundamentals": fundamentals,
         "facts": {k: m.get(k) for k in ("ter", "aum", "pe", "perf_1y", "cagr5", "vol", "dist", "top10", "hi52", "lo52")},
-        "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"]},
+        "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"],
+                "ratings": m["ratings"], "gov_share": m["gov_share"], "duration": m["duration"], "maturity": m["maturity"],
+                "pe": m["pe"], "pb": m["pb"], "bond": m["bond_etf"]},
         "news": news, "notes": notes, "confidence": confidence, "events": [], "tech": m.get("tech"),
         "competitors": {"peers": [], "source": "", "industry": ""}, "profile": None,
         "model": {"key": "etf", "label": "ETF-Modell", "text": notes[0]},

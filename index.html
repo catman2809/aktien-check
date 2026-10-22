@@ -290,6 +290,13 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-bar{height:8px;background:var(--track);border-radius:4px;overflow:hidden}
 .etf-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
 .etf-w{text-align:right;color:var(--text-2)}
+.etf-wide{grid-column:1/-1}
+.etf-stack{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
+.etf-stack i{display:block;height:100%;min-width:2px}
+.etf-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:13px;color:var(--text-2)}
+.etf-legend b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.etf-kv{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:13px;color:var(--text-2)}
+.etf-kv b{color:var(--text)}
 @media (max-width:760px){.etf-grid{grid-template-columns:1fr}}
 .report-box{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
 .report-box b{display:block;font-size:14px;margin-bottom:2px}
@@ -3490,19 +3497,34 @@ document.addEventListener("click", e => {
 
 function etfSection(d) {
   const E = d.etf || {};
-  const top = E.top || [], sec = E.sectors || [];
+  const top = E.top || [], sec = E.sectors || [], rat = E.ratings || [];
+  const AC = [["Aktien", "var(--inc-rev)"], ["Anleihen", "var(--inc-ni)"], ["Cash", "var(--text-3)"], ["Sonstiges", "var(--inc-mar)"]];
+  const assets = AC.map(([k, c]) => ({name: k, color: c, w: (E.assets || {})[k] || 0})).filter(x => x.w >= 0.0005);
   const head = `<h2 class="section" id="konkurrenz">Zusammensetzung</h2>
-    <p class="section-sub">Größte Positionen und Branchenmix des ETFs${E.family ? " · Anbieter " + esc(E.family) : ""}.</p>`;
-  if (!top.length && !sec.length) return head + `<div class="card empty">Die Zusammensetzung war nicht abrufbar.</div>`;
-  const maxT = Math.max(...top.map(x => x.weight), 0.01), maxS = Math.max(...sec.map(x => x.weight), 0.01);
+    <p class="section-sub">Woraus der ETF besteht: Anlageklassen, größte Positionen und Branchen${E.bond ? ", Bonität der Anleihen" : ""}${E.family ? " · Anbieter " + esc(E.family) : ""}.</p>`;
+  if (!top.length && !sec.length && !assets.length && !rat.length) return head + `<div class="card empty">Die Zusammensetzung war nicht abrufbar.</div>`;
+  const maxT = Math.max(...top.map(x => x.weight), 0.01), maxS = Math.max(...sec.map(x => x.weight), 0.01), maxR = Math.max(...rat.map(x => x.weight), 0.01);
   const bar = (w, max) => `<span class="etf-bar"><i style="width:${Math.max(2, w / max * 100)}%"></i></span>`;
+  const row = (name, w, max) => `<div class="etf-row"><span class="etf-name">${name}</span>${bar(w, max)}<span class="num etf-w">${pc(w, 1)}</span></div>`;
+  const stack = (parts, label) => `<div class="etf-stack" role="img" aria-label="${esc(label)}">${parts.map(p_ =>
+      `<i style="width:${p_.w * 100}%;background:${p_.color}" title="${esc(p_.name)}: ${pc(p_.w, 1)}"></i>`).join("")}</div>
+    <div class="etf-legend">${parts.map(p_ => `<span><b style="background:${p_.color}"></b>${esc(p_.name)} <span class="num">${pc(p_.w, 1)}</span></span>`).join("")}</div>`;
+  const topSum = top.reduce((a, x) => a + x.weight, 0);
+  const topLab = top.length === 1 ? "Größte Position" : `Top ${top.length} Positionen`;
+  const assetsCard = assets.length ? `<div class="card pad etf-wide"><h3>Anlageklassen</h3>${stack(assets, "Aufteilung nach Anlageklassen")}
+    ${top.length ? `<div class="stamp" style="margin:12px 0 4px">Konzentration: ${top.length === 1 ? "Die größte Position macht" : `Die ${top.length} größten Positionen machen`} ${pc(topSum, 1)} aus${topSum < 0.98 ? `, die übrigen Positionen ${pc(1 - topSum, 1)}` : ""}.</div>
+      ${stack([{name: top.length === 1 ? "größte Position" : `Top ${top.length}`, w: Math.min(1, topSum), color: "var(--accent)"}, {name: "übrige Positionen", w: Math.max(0, 1 - topSum), color: "var(--track)"}], "Anteil der größten Positionen")}` : ""}
+    ${E.pe || E.pb ? `<div class="etf-kv">${E.pe ? `<span>KGV der Bestände <b class="num">${nf(E.pe, 1)}</b></span>` : ""}${E.pb ? `<span>Kurs-Buchwert <b class="num">${nf(E.pb, 2)}</b></span>` : ""}</div>` : ""}</div>` : "";
+  const bondCard = E.bond && (rat.length || E.duration) ? `<div class="card pad"><h3>Anleihen: Bonität & Laufzeit</h3>
+    ${rat.map(x => row(esc(x.name), x.weight, maxR)).join("")}
+    <div class="etf-kv">${E.duration != null ? `<span>Duration <b class="num">${nf(E.duration, 1)} J.</b></span>` : ""}${E.maturity != null ? `<span>Ø Restlaufzeit <b class="num">${nf(E.maturity, 1)} J.</b></span>` : ""}${E.gov_share ? `<span>Staatsanleihen <b class="num">${pc(E.gov_share, 0)}</b></span>` : ""}</div>
+    <div class="stamp" style="margin-top:6px">Duration = wie stark der Kurs auf Zinsänderungen reagiert: etwa −${E.duration != null ? nf(E.duration, 1) : "x"} % je Prozentpunkt Zinsanstieg.</div></div>` : "";
   return head + `<div class="etf-grid">
-    ${top.length ? `<div class="card pad"><h3>Top ${top.length} Positionen</h3>${top.map(x => `<div class="etf-row">
-      <span class="etf-name"><a href="?q=${encodeURIComponent(x.symbol)}" data-q="${esc(x.symbol)}" class="etf-link">${esc(x.name)}</a></span>
-      ${bar(x.weight, maxT)}<span class="num etf-w">${pc(x.weight, 1)}</span></div>`).join("")}
-      <div class="stamp" style="margin-top:8px">Zusammen ${pc(top.reduce((a, x) => a + x.weight, 0), 1)} des Fonds</div></div>` : ""}
-    ${sec.length ? `<div class="card pad"><h3>Branchen</h3>${sec.map(x => `<div class="etf-row">
-      <span class="etf-name">${esc(x.name)}</span>${bar(x.weight, maxS)}<span class="num etf-w">${pc(x.weight, 1)}</span></div>`).join("")}</div>` : ""}
+    ${assetsCard}
+    ${top.length ? `<div class="card pad"><h3>${topLab}</h3>${top.map(x => row(`<a href="?q=${encodeURIComponent(x.symbol)}" data-q="${esc(x.symbol)}" class="etf-link">${esc(x.name)}</a>`, x.weight, maxT)).join("")}
+      <div class="stamp" style="margin-top:8px">Zusammen ${pc(topSum, 1)} des Fonds · Name antippen für die Einzelanalyse</div></div>` : ""}
+    ${sec.length ? `<div class="card pad"><h3>Branchen</h3>${sec.map(x => row(esc(x.name), x.weight, maxS)).join("")}</div>` : ""}
+    ${bondCard}
   </div>`;
 }
 document.addEventListener("click", e => {
