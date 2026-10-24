@@ -182,6 +182,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 @media (max-width:860px){.cats{grid-template-columns:1fr}}
 .cat{display:flex;flex-direction:column}
 .cat-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.cat-head > div{min-width:0;overflow-wrap:anywhere}
 .cat-adj{font-size:22px;font-weight:700;letter-spacing:-.015em;margin:4px 0 0;line-height:1.25}
 .tone{font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
 .tone.pos{background:var(--pos-soft);color:var(--pos)} .tone.neu{background:var(--neu-soft);color:var(--neu)} .tone.neg{background:var(--neg-soft);color:var(--neg)}
@@ -282,7 +283,8 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-empty{padding:40px 24px;text-align:center;color:var(--text-2)}
 .wl-empty b{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
 .wl-preview{margin-top:36px;text-align:left}
-.etf-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
+.etf-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px}
+.etf-grid > *{min-width:0}
 .etf-grid h3{margin:0 0 10px;font-size:15px}
 .etf-row{display:grid;grid-template-columns:minmax(0,1fr) 90px 52px;gap:10px;align-items:center;padding:5px 0;font-size:13.5px}
 .etf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -300,7 +302,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-legend b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 .etf-kv{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:13px;color:var(--text-2)}
 .etf-kv b{color:var(--text)}
-@media (max-width:760px){.etf-grid{grid-template-columns:1fr}}
+@media (max-width:760px){.etf-grid{grid-template-columns:minmax(0,1fr)}}
 .report-box{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
 .report-box b{display:block;font-size:14px;margin-bottom:2px}
 .report-box .stamp{display:block;max-width:560px}
@@ -513,7 +515,8 @@ tr.u-locked td{opacity:.65}
 .adm-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:12px}
 .adm-k{padding:12px 14px;display:flex;flex-direction:column;gap:2px}
 .adm-k small{color:var(--text-3);font-size:12px} .adm-k b{font-size:22px;letter-spacing:-.02em}
-.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.adm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px}
+.adm-grid > *{min-width:0}
 .adm-grid h3{margin:0 0 10px;font-size:15px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .adm-wide{grid-column:1/-1}
 .adm-bars{display:flex;gap:3px;align-items:flex-end;height:120px}
@@ -766,7 +769,8 @@ table.peers .neg{color:var(--neg)}
 .guide-head svg{flex:none;width:40px;height:40px;padding:10px;border-radius:11px;background:var(--accent-soft);color:var(--accent)}
 .guide-head h2{font-size:17px;margin:0 0 4px}
 .guide-head p{margin:0;font-size:14px;color:var(--text-2)}
-.guide-grid{display:grid;grid-template-columns:1fr;gap:18px;margin-top:18px}
+.guide-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;margin-top:18px}
+.guide-grid > *{min-width:0}
 .guide-grid > div + div{padding-top:16px;border-top:1px solid var(--border)}
 .guide h3{font-size:14px;margin:0 0 6px}
 .guide ol{margin:0;padding-left:20px;font-size:14px;color:var(--text-2);line-height:1.65}
@@ -871,6 +875,13 @@ table.peers .neg{color:var(--neg)}
   .brand>div:last-child{display:none} .topbar .container{gap:10px} .pad{padding:18px}
   .search button{padding:0 12px} .v-meta{grid-template-columns:1fr}
   .v-label{font-size:32px} .co-name{font-size:22px} .price-box{text-align:left}
+}
+/* Handy: größere Tipp-Flächen (am Ende, damit es die Grundregeln überschreibt) */
+@media (max-width:600px){
+  .alts button{min-height:34px;padding:5px 11px}
+  .chip-btn{height:34px}
+  .more{padding:8px 0;margin-top:0}
+  .btn.xs{height:32px;padding:0 10px}
 }
 </style>
 </head>
@@ -2019,7 +2030,7 @@ function drawValChart() {
   const epsAll = [...v.eps.map(e => [toTs(e[0]), e[1], false]), ...(v.est || []).map(e => [toTs(e[0]), e[1], true])];
   const t1 = Math.max(P[P.length - 1][0], ...epsAll.map(e => e[0]));
   const X = t => m.l + (t - t0) / (t1 - t0) * pw;
-  const yrs = [...new Set(P.map(p => new Date(p[0]).getFullYear()))];
+  const yrs = [...new Set(P.map(p => new Date(p[0]).getFullYear()))].filter(y => new Date(y, 0, 1).getTime() >= t0);
   const axisX = yrs.filter((y, i) => i % Math.ceil(yrs.length / (W < 420 ? 4 : 7)) === 0)
     .map(y => `<text x="${X(new Date(y, 0, 1).getTime()).toFixed(1)}" y="${H - 6}" text-anchor="middle">${y}</text>`).join("");
   if (VC.mode === "pe") {
@@ -3470,8 +3481,8 @@ function secSection(d) {
       ${S.filings.map(f => `<div class="adm-row"><span><a href="${esc(f.url)}" target="_blank" rel="noopener"><b>${esc(f.form)}</b></a> <span class="stamp">${esc(f.label)}</span></span><span class="num stamp">${date(f.date)}</span></div>`).join("") || `<div class="stamp">Keine Meldungen gefunden.</div>`}
       <div class="adm-row"><span>Insider-Meldungen (Form 4), letzte 90 Tage</span><b class="num">${S.form4_90d}</b></div></div>
     ${A.length ? `<div class="card pad"><h3>Jahreszahlen laut Geschäftsbericht <span class="stamp">Mrd. USD</span></h3>
-      <table class="trk"><thead><tr><th>Geschäftsjahr bis</th><th class="num">Umsatz</th><th class="num">Op. Ergebnis</th><th class="num">Reinertrag</th></tr></thead>
-      <tbody>${A.slice().reverse().map(x => `<tr><td>${date(x.end)}</td><td class="num">${bn(x.revenue)}</td><td class="num">${bn(x.op_income)}</td><td class="num">${bn(x.net_income)}</td></tr>`).join("")}</tbody></table>
+      <div class="peer-scroll"><table class="trk"><thead><tr><th>Geschäftsjahr bis</th><th class="num">Umsatz</th><th class="num">Op. Ergebnis</th><th class="num">Reinertrag</th></tr></thead>
+      <tbody>${A.slice().reverse().map(x => `<tr><td>${date(x.end)}</td><td class="num">${bn(x.revenue)}</td><td class="num">${bn(x.op_income)}</td><td class="num">${bn(x.net_income)}</td></tr>`).join("")}</tbody></table></div>
       <div class="stamp" style="margin-top:6px">Aus den XBRL-Daten der 10-K-Berichte; zum Abgleich mit der Erfolgsrechnung oben.</div></div>` : ""}
   </div>`;
 }
