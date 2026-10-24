@@ -2676,21 +2676,36 @@ function renderTrack(d) {
 }
 
 /* Navigation: Startseite, Browser-Verlauf und Zurück-Geste */
+let ROUTED = null;  // zuletzt geladene Seite (ohne Anker)
 function navTo(url) {
   const target = new URL(url, location.href);
   if (target.search === location.search) return;  // gleiche Seite (z. B. nach „Zurück“) -> kein doppelter Eintrag
   history.pushState(null, "", target.search || location.pathname);
+  ROUTED = location.search;
 }
 function goHome() {
   runId++;
   if (typeof scrTimer !== "undefined") clearTimeout(scrTimer);
   if (typeof closeGl === "function") closeGl();
   $("#q").value = "";
-  if (location.search) history.pushState(null, "", location.pathname);
+  if (location.search || location.hash) history.pushState(null, "", location.pathname);
+  ROUTED = location.search;
   welcome();
   window.scrollTo({top: 0});
 }
+function scrollToSection(hash, smooth = true) {
+  const el = hash && hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  if (!el) return false;
+  if (el.id === "ueberblick") { window.scrollTo({top: 0, behavior: smooth ? "smooth" : "auto"}); return true; }
+  // Abstand für die feste Kopfzeile und die Abschnittsleiste
+  const off = ($(".topbar")?.getBoundingClientRect().height || 64) + ($("#subnav")?.offsetHeight || 0) + 10;
+  const go = b => window.scrollTo({top: el.getBoundingClientRect().top + window.scrollY - off, behavior: b});
+  go(smooth ? "smooth" : "auto");
+  setTimeout(() => { if (Math.abs(el.getBoundingClientRect().top - off) > 40) go("auto"); }, 900);  // falls Diagramme nachgeladen wurden
+  return true;
+}
 function route() {
+  ROUTED = location.search;
   const ps = new URLSearchParams(location.search);
   const pre = ps.get("q");
   if (ps.get("import")) wlImport(ps.get("import"));
@@ -2702,7 +2717,16 @@ function route() {
   else if (pre) { $("#q").value = pre; run(pre); }
   else { runId++; $("#q").value = ""; welcome(); }
 }
-window.addEventListener("popstate", () => route());
+window.addEventListener("popstate", () => {
+  if (ROUTED !== null && location.search === ROUTED) { scrollToSection(location.hash); return; }  // nur Anker geändert -> nicht neu laden
+  route();
+});
+document.addEventListener("click", e => {
+  const a = e.target.closest('#subnav a[href^="#"]');
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  if (scrollToSection(a.getAttribute("href"))) history.replaceState(null, "", location.search + a.getAttribute("href"));
+});
 document.addEventListener("click", e => {
   if (e.target.closest("#homebtn") || (e.target.closest("#brand") && !e.ctrlKey && !e.metaKey)) { e.preventDefault(); goHome(); }
 });
@@ -3936,6 +3960,7 @@ function render(d) {
   wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
   const bm = $("#bizmore");
   if (bm) bm.onclick = () => { const b = $("#biz"); b.classList.toggle("clamp"); bm.textContent = b.classList.contains("clamp") ? "Mehr anzeigen" : "Weniger anzeigen"; };
+  if (location.hash.length > 1) setTimeout(() => scrollToSection(location.hash, false), 400);  // geteilter Link mit Abschnitt
 }
 
 if (location.protocol === "file:") {
