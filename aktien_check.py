@@ -4725,6 +4725,257 @@ def company_profile(symbol, info, company):
 CACHE = {}
 
 
+# ---------------------------------------------------------------------------
+# Geschäftsmodell: Kurzbeschreibung + Chancen & Risiken
+# (regelbasiert aus Branche und Kennzahlen; mit ANTHROPIC_API_KEY unternehmensgenau von Claude formuliert)
+# ---------------------------------------------------------------------------
+# (Muster auf Yahoo-Branche, Erlösmodell, typische Chancen, typische Risiken)
+INDUSTRY_PROFILES = [
+    (r"Software - Infrastructure", "verkauft Software und Cloud-Dienste für IT-Infrastruktur, Datenbanken und Sicherheit – überwiegend als Abonnement mit wiederkehrenden Umsätzen",
+     ["Wiederkehrende Abo-Umsätze sorgen für planbare Erlöse", "Hohe Wechselkosten binden Kunden langfristig"],
+     ["Starker Wettbewerb durch große Cloud-Anbieter", "Technologische Umbrüche (z. B. KI) können Produkte entwerten"]),
+    (r"Software - Application|Information Technology Services", "verkauft Anwendungssoftware und IT-Dienstleistungen an Unternehmen oder Verbraucher – zunehmend als Cloud-Abonnement",
+     ["Umstellung auf Cloud-Abos erhöht wiederkehrende Umsätze", "Digitalisierung und KI schaffen neue Nachfrage"],
+     ["Kunden sparen in Abschwüngen zuerst an IT-Projekten", "Neue, günstigere Wettbewerber (auch KI-basiert)"]),
+    (r"Semiconductor Equipment", "baut Maschinen und Anlagen, mit denen Chiphersteller Halbleiter produzieren",
+     ["Steigender Chipbedarf durch KI, Autos und Rechenzentren", "Wenige Anbieter mit hohen Eintrittsbarrieren"],
+     ["Stark zyklische Investitionen der Chiphersteller", "Exportbeschränkungen, vor allem im Handel mit China"]),
+    (r"Semiconductors", "entwickelt und verkauft Halbleiter (Chips), die in Rechenzentren, Smartphones, Autos oder Industrieanlagen verbaut werden",
+     ["Strukturelles Wachstum durch KI, Elektrifizierung und Vernetzung", "Technologievorsprung ermöglicht hohe Margen"],
+     ["Ausgeprägte Nachfragezyklen mit Lageraufbau und -abbau", "Geopolitische Risiken in der Lieferkette (Taiwan, China)"]),
+    (r"Consumer Electronics|Computer Hardware|Communication Equipment|Electronic Components|Scientific & Technical Instruments",
+     "entwickelt und verkauft elektronische Geräte und Komponenten; teils ergänzt um Software, Zubehör und Dienste",
+     ["Starke Marken und Ökosysteme fördern Kundenbindung", "Dienste und Software steigern die Marge"],
+     ["Kurze Produktzyklen und hoher Innovationsdruck", "Abhängigkeit von Zulieferern und Fertigung in Asien"]),
+    (r"Internet Content|Internet Retail|Electronic Gaming", "betreibt Online-Plattformen und verdient an Werbung, Abos, Provisionen oder digitalen Käufen",
+     ["Netzwerkeffekte: mehr Nutzer machen die Plattform wertvoller", "Skalierbares Geschäft mit geringen Zusatzkosten je Nutzer"],
+     ["Regulierung (Kartell-, Datenschutz- und Digitalrecht)", "Abhängigkeit von Werbebudgets und Nutzertrends"]),
+    (r"Telecom", "betreibt Mobilfunk-, Festnetz- und Glasfasernetze und verdient an monatlichen Vertragsgebühren",
+     ["Stabile, wiederkehrende Einnahmen aus Verträgen", "Glasfaser und 5G eröffnen neue Dienste"],
+     ["Hohe Investitionen in Netze und Frequenzen", "Preiswettbewerb und Regulierung drücken die Margen"]),
+    (r"Entertainment|Broadcasting|Publishing|Advertising", "erzielt Umsätze mit Medieninhalten, Lizenzen, Abos und Werbung",
+     ["Wertvolle Inhalte und Marken lassen sich mehrfach verwerten", "Streaming und digitale Formate erschließen neue Kunden"],
+     ["Wandel des Medienkonsums und harter Wettbewerb um Aufmerksamkeit", "Werbeumsätze schwanken mit der Konjunktur"]),
+    (r"Banks|Capital Markets|Mortgage Finance|Credit Services|Financial Conglomerates",
+     "verdient an der Zinsdifferenz zwischen Krediten und Einlagen sowie an Gebühren für Zahlungsverkehr, Anlage und Beratung",
+     ["Höhere Zinsen verbessern die Zinsmarge", "Gebührengeschäft (Vermögensverwaltung, Zahlungen) wächst stabil"],
+     ["Kreditausfälle steigen in Rezessionen", "Strenge Regulierung und Kapitalanforderungen"]),
+    (r"Asset Management", "verwaltet Kundengelder und erhält dafür laufende Gebühren auf das verwaltete Vermögen",
+     ["Steigende Märkte erhöhen das verwaltete Vermögen und die Gebühren", "Altersvorsorge treibt langfristige Zuflüsse"],
+     ["Gebührendruck durch günstige ETFs", "Mittelabflüsse in schwachen Börsenphasen"]),
+    (r"Insurance", "nimmt Versicherungsprämien ein, zahlt Schäden aus und legt die Prämien bis dahin am Kapitalmarkt an",
+     ["Prämienerhöhungen und höhere Zinsen auf die Kapitalanlagen", "Stabiles, wenig konjunkturabhängiges Geschäft"],
+     ["Großschäden durch Naturkatastrophen", "Fehleinschätzung von Risiken bei der Preiskalkulation"]),
+    (r"Drug Manufacturers", "erforscht, entwickelt und verkauft verschreibungspflichtige Medikamente; geschützt durch Patente",
+     ["Neue Medikamente mit Patentschutz ermöglichen hohe Margen", "Alternde Bevölkerung erhöht den Bedarf"],
+     ["Auslaufende Patente lassen Umsätze durch Generika einbrechen", "Preisdruck durch Gesundheitspolitik und Erstattungsstellen"]),
+    (r"Biotechnology", "entwickelt neue Wirkstoffe und Therapien; Umsätze entstehen erst nach erfolgreicher Zulassung oder über Partnerschaften",
+     ["Erfolgreiche Studien können den Wert sprunghaft steigern", "Partnerschaften mit großen Pharmakonzernen bringen Geld und Know-how"],
+     ["Hohe Ausfallquote in klinischen Studien", "Hoher Kapitalbedarf bis zur Marktreife"]),
+    (r"Medical Devices|Medical Instruments|Diagnostics", "entwickelt und verkauft Medizintechnik, Geräte und Verbrauchsmaterial an Kliniken und Praxen",
+     ["Verbrauchsmaterial sorgt für wiederkehrende Umsätze", "Alternde Bevölkerung und medizinischer Fortschritt"],
+     ["Zulassungsrisiken und Produktrückrufe", "Kostendruck der Krankenhäuser und Krankenkassen"]),
+    (r"Healthcare Plans|Medical Care|Health Information|Medical Distribution|Pharmaceutical Retail",
+     "erbringt Gesundheitsleistungen, Versicherungsschutz oder Vertrieb im Gesundheitswesen",
+     ["Wachsender Gesundheitsbedarf einer alternden Bevölkerung", "Skaleneffekte bei großen Anbietern"],
+     ["Politische Eingriffe in Preise und Erstattung", "Geringe Margen und hoher Kostendruck"]),
+    (r"Auto Manufacturers", "entwickelt, baut und verkauft Fahrzeuge; dazu kommen Finanzierung, Ersatzteile und Dienste",
+     ["Elektromobilität und Software eröffnen neue Erlösquellen", "Starke Marken ermöglichen höhere Preise"],
+     ["Hohe Investitionen in E-Autos bei harter Konkurrenz (auch aus China)", "Konjunktur- und Zinsabhängigkeit der Nachfrage"]),
+    (r"Auto Parts", "liefert Komponenten und Systeme an Autohersteller",
+     ["Mehr Elektronik und Elektroantriebe je Fahrzeug", "Langfristige Lieferverträge"],
+     ["Preisdruck durch die Autohersteller", "Umbruch vom Verbrenner zum E-Auto entwertet alte Produkte"]),
+    (r"Aerospace & Defense", "baut Flugzeuge, Triebwerke, Rüstungs- und Raumfahrtsysteme und verdient zusätzlich an Wartung und Ersatzteilen",
+     ["Volle Auftragsbücher sichern Umsätze für Jahre", "Steigende Verteidigungsbudgets und Flugverkehr"],
+     ["Lieferketten- und Produktionsprobleme", "Abhängigkeit von staatlichen Aufträgen und Politik"]),
+    (r"Specialty Industrial Machinery|Farm & Heavy|Industrial Distribution|Electrical Equipment|Tools & Accessories|Engineering & Construction|Conglomerates|Building Products|Security & Protection",
+     "stellt Maschinen, Anlagen und Industrieprodukte her und verdient zusätzlich an Service und Ersatzteilen",
+     ["Automatisierung, Energiewende und Infrastrukturprogramme", "Servicegeschäft sorgt für stabile Zusatzumsätze"],
+     ["Investitionszurückhaltung der Kunden in Abschwüngen", "Rohstoff- und Energiekosten belasten die Marge"]),
+    (r"Railroads|Trucking|Integrated Freight|Marine Shipping|Airlines|Airports",
+     "transportiert Güter oder Personen und verdient an Fracht- bzw. Ticketpreisen",
+     ["Wachsender Welthandel und Reiseverkehr", "Infrastruktur ist schwer kopierbar (Netze, Slots, Routen)"],
+     ["Stark konjunkturabhängig, hohe Fixkosten", "Treibstoffpreise und Lohnkosten"]),
+    (r"Oil & Gas|Coal|Uranium|Thermal Coal", "fördert, verarbeitet oder transportiert Energierohstoffe; der Gewinn hängt stark vom Rohstoffpreis ab",
+     ["Hohe Rohstoffpreise führen zu sprudelnden Gewinnen und Ausschüttungen", "Weiterhin hoher weltweiter Energiebedarf"],
+     ["Abhängigkeit von stark schwankenden Rohstoffpreisen", "Energiewende und Klimaregulierung"]),
+    (r"Utilities", "erzeugt und verteilt Strom, Gas oder Wasser; ein großer Teil der Erlöse ist reguliert",
+     ["Planbare, regulierte Erträge und stabile Dividenden", "Energiewende erfordert Netzausbau mit garantierten Renditen"],
+     ["Hohe Verschuldung macht zinsempfindlich", "Regulatorische und politische Eingriffe"]),
+    (r"Chemicals|Specialty Chemicals|Agricultural Inputs", "stellt chemische Grundstoffe oder Spezialprodukte für Industrie und Landwirtschaft her",
+     ["Spezialprodukte mit hoher Preissetzungsmacht", "Nachhaltige Chemie und neue Anwendungen"],
+     ["Energie- und Rohstoffkosten (besonders in Europa)", "Zyklische Nachfrage der Industriekunden"]),
+    (r"Steel|Aluminum|Copper|Gold|Silver|Other Industrial Metals|Other Precious Metals|Building Materials|Paper|Lumber",
+     "gewinnt oder verarbeitet Rohstoffe und Grundmaterialien; der Gewinn folgt stark den Marktpreisen",
+     ["Steigende Rohstoffpreise heben die Gewinne kräftig", "Energiewende erhöht den Bedarf an Metallen"],
+     ["Stark schwankende Preise und Nachfrage", "Hoher Energie- und Investitionsbedarf"]),
+    (r"Beverages|Confectioners|Packaged Foods|Household & Personal|Tobacco|Food Distribution|Farm Products",
+     "stellt Markenartikel des täglichen Bedarfs her und verkauft sie über den Handel",
+     ["Starke Marken mit Preissetzungsmacht", "Stabile Nachfrage auch in Abschwüngen"],
+     ["Kunden wechseln zu günstigen Handelsmarken", "Rohstoff- und Verpackungskosten"]),
+    (r"Discount Stores|Grocery Stores|Department Stores|Specialty Retail|Home Improvement Retail|Apparel Retail|Auto & Truck Dealerships",
+     "verkauft Waren an Endkunden über Filialen und Online-Shops und verdient an der Handelsspanne",
+     ["Skaleneffekte im Einkauf", "Ausbau von Online-Handel und Eigenmarken"],
+     ["Geringe Margen und harter Preiswettbewerb", "Abhängigkeit von der Kaufkraft der Verbraucher"]),
+    (r"Apparel Manufacturing|Footwear|Luxury Goods|Leisure|Recreational Vehicles|Furnishings|Textile",
+     "entwirft und verkauft Marken-Konsumgüter über eigene Läden, Online und den Handel",
+     ["Starke Marken erlauben hohe Preise", "Wachstum über Direktvertrieb und neue Märkte"],
+     ["Modetrends und Konsumlaune", "Abhängigkeit von Kaufkraft, besonders in China und den USA"]),
+    (r"Restaurants|Lodging|Resorts|Travel Services|Gambling", "betreibt Restaurants, Hotels, Reise- oder Freizeitangebote – oft über Franchise-Gebühren",
+     ["Franchise-Modell bringt hohe Margen mit wenig Kapital", "Wachsende Reise- und Freizeitausgaben"],
+     ["Konsumflaute trifft die Ausgaben schnell", "Personal- und Lebensmittelkosten"]),
+    (r"REIT|Real Estate", "besitzt und vermietet Immobilien und verdient an Mieten sowie an Wertsteigerungen",
+     ["Inflationsgeschützte Mieten und regelmäßige Ausschüttungen", "Knapper Wohnraum bzw. Nachfrage nach Logistik/Rechenzentren"],
+     ["Steigende Zinsen senken Immobilienwerte und verteuern Kredite", "Leerstand und Mietausfälle"]),
+    (r"Waste Management|Specialty Business Services|Consulting|Staffing|Rental & Leasing",
+     "erbringt Dienstleistungen für Unternehmen, oft über langfristige Verträge",
+     ["Langfristige Verträge sorgen für stabile Umsätze", "Auslagerung von Aufgaben durch Unternehmen"],
+     ["Lohnkosten und Fachkräftemangel", "Nachfrage hängt von der Konjunktur ab"]),
+    (r"Solar|Renewable", "erzeugt erneuerbare Energie oder liefert Technik dafür",
+     ["Politischer Rückenwind durch die Energiewende", "Sinkende Technikkosten erweitern den Markt"],
+     ["Abhängigkeit von Förderprogrammen und Zinsen", "Preisdruck durch Anbieter aus China"]),
+]
+
+
+def _profile_for(industry):
+    for pat, model, ch, rk in INDUSTRY_PROFILES:
+        if re.search(pat, industry or ""):
+            return model, ch, rk
+    return None
+
+
+def _bn(x, cur):
+    if x is None:
+        return None
+    a = abs(x)
+    v, u = (x / 1e9, "Mrd.") if a >= 1e9 else (x / 1e6, "Mio.")
+    return f"{v:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".") + f" {u} {cur}".rstrip()
+
+
+def biz_rules(m):
+    """Regelbasierte Kurzbeschreibung + Chancen/Risiken aus Branche und Kennzahlen."""
+    name = clean_company_name(m["name"]) or m["name"]
+    prof = _profile_for(m.get("industry"))
+    sk = (m.get("sector") or "").lower().replace(" ", "_")
+    sec_de = SECTOR_DE.get(sk) or SECTOR_DE.get(sk.replace("_", "")) or m.get("sector") or ""
+    land = COUNTRY_DE.get(m.get("country") or "", m.get("country") or "")
+    s1 = f"{name} {prof[0]}." if prof else f"{name} ist im Sektor {sec_de or 'unbekannt'} tätig ({m.get('industry') or '–'})."
+    facts = []
+    if m.get("revenue"):
+        facts.append(f"Umsatz zuletzt {_bn(m['revenue'], m.get('fin_currency') or m.get('currency') or '')}")
+    if m.get("op_m") is not None:
+        facts.append(f"operative Marge {m['op_m'] * 100:.0f} %".replace(".", ","))
+    if m.get("rev_cagr") is not None:
+        facts.append(f"Umsatzwachstum {m['rev_cagr'] * 100:+.0f} % pro Jahr".replace(".", ","))
+    s2 = ("Kennzahlen: " + ", ".join(facts) + "." if facts else "")
+    s0 = " · ".join(x for x in (f"Sektor {sec_de}" if sec_de else "", f"Sitz {land}" if land else "") if x)
+    ch, rk = [], []
+    g, om, gm = m.get("rev_cagr") if m.get("rev_cagr") is not None else m.get("rev_g"), m.get("op_m"), m.get("gross_m")
+    fin = m.get("biz") in ("bank", "insurance", "real_estate")  # Bruttomarge/Nettokasse dort nicht aussagekräftig
+    if fin:
+        gm = None
+    if gm is not None and gm >= 0.6:
+        ch.append(f"Hohe Bruttomarge ({gm * 100:.0f} %) spricht für Preissetzungsmacht")
+    if om is not None and om >= 0.2:
+        ch.append(f"Sehr profitabel: {om * 100:.0f} % operative Marge")
+    if g is not None and g >= 0.1:
+        ch.append(f"Starkes Wachstum: Umsatz +{g * 100:.0f} % pro Jahr")
+    if m.get("roic") is not None and m["roic"] >= 0.15:
+        ch.append(f"Hohe Kapitalrendite (ROIC {m['roic'] * 100:.0f} %) – Hinweis auf einen Wettbewerbsvorteil")
+    if not fin and m.get("net_debt") is not None and m["net_debt"] < 0:
+        ch.append("Nettokasse: mehr liquide Mittel als Schulden – finanzieller Spielraum")
+    if m.get("op_m_trend") is not None and m["op_m_trend"] >= 0.03:
+        ch.append("Steigende Margen in den letzten Jahren")
+    if m.get("eps_rev") is not None and m["eps_rev"] > 0.02:
+        ch.append("Analysten haben ihre Gewinnschätzungen zuletzt angehoben")
+    if m.get("share_change") is not None and m["share_change"] < -0.02:
+        ch.append("Aktienrückkäufe verringern die Zahl der Aktien")
+    if m.get("nd_ebitda") is not None and m["nd_ebitda"] > 3:
+        rk.append(f"Hohe Verschuldung: Nettoschulden das {m['nd_ebitda']:.1f}-fache des EBITDA".replace(".", ","))
+    if m.get("biz") not in ("bank", "insurance") and m.get("int_cov") is not None and m["int_cov"] < 3:
+        rk.append("Geringe Zinsdeckung – steigende Zinsen belasten spürbar")
+    if g is not None and g < 0:
+        rk.append(f"Schrumpfender Umsatz ({g * 100:.0f} % pro Jahr)".replace(".", ","))
+    if om is not None and om < 0:
+        rk.append("Operativ (noch) nicht profitabel")
+    if m.get("op_m_trend") is not None and m["op_m_trend"] <= -0.03:
+        rk.append("Sinkende Margen in den letzten Jahren")
+    if m.get("fcf") is not None and m["fcf"] < 0:
+        rk.append("Negativer Free Cashflow – das Geschäft verbraucht Geld")
+    if m.get("pe") and m["pe"] > 40:
+        rk.append(f"Hohe Bewertung (KGV {m['pe']:.0f}) – Enttäuschungen werden hart bestraft")
+    if m.get("share_change") is not None and m["share_change"] > 0.05:
+        rk.append("Verwässerung: die Zahl der Aktien steigt deutlich")
+    if m.get("sbc_ratio") is not None and m["sbc_ratio"] > 0.1:
+        rk.append("Hohe Aktienvergütung für Mitarbeiter schmälert den Gewinn je Aktie")
+    if m.get("eps_rev") is not None and m["eps_rev"] < -0.02:
+        rk.append("Analysten haben ihre Gewinnschätzungen zuletzt gesenkt")
+    if prof:  # je zwei Punkte aus den Kennzahlen und zwei branchentypische, Rest mit Kennzahlen auffüllen
+        ch = (ch[:2] + prof[1] + ch[2:])
+        rk = (rk[:2] + prof[2] + rk[2:])
+    return {"text": " ".join(x for x in (s1, s2) if x), "context": s0,
+            "chances": ch[:4], "risks": rk[:4], "source": "regelbasiert"}
+
+
+BIZ_AI_DAYS = 60
+
+
+def biz_ai(m):
+    """Unternehmensgenaue Beschreibung + Chancen/Risiken von Claude (nur mit ANTHROPIC_API_KEY, je Aktie zwischengespeichert)."""
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key or not m.get("summary_text"):
+        return None
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("bizai") or {}).get(m["symbol"])
+    if hit and time.time() - hit.get("t", 0) < BIZ_AI_DAYS * 86400:
+        return hit
+    pct = lambda v: "–" if v is None else f"{v * 100:.1f} %"
+    facts = (f"Sektor: {m.get('sector')}; Branche: {m.get('industry')}; Land: {m.get('country')}; "
+             f"Umsatz: {_bn(m.get('revenue'), m.get('fin_currency') or m.get('currency') or '')}; Umsatzwachstum p. a.: {pct(m.get('rev_cagr'))}; "
+             f"Bruttomarge: {pct(m.get('gross_m'))}; operative Marge: {pct(m.get('op_m'))}; ROIC: {pct(m.get('roic'))}; "
+             f"Nettoverschuldung/EBITDA: {m.get('nd_ebitda') if m.get('nd_ebitda') is not None else '–'}; KGV: {m.get('pe') or '–'}")
+    prompt = (
+        f"Unternehmen: {m['name']}\nOffizielle Kurzbeschreibung (englisch): {m['summary_text'][:2500]}\nKennzahlen: {facts}\n\n"
+        "Schreibe auf Deutsch, sachlich und für Privatanleger verständlich:\n"
+        "1. beschreibung: 2–3 kurze Sätze zum Geschäftsmodell – womit das Unternehmen Geld verdient, wer die Kunden sind "
+        "und was den Kern des Geschäfts ausmacht. Nenne die wichtigsten Geschäftsbereiche.\n"
+        "2. chancen: 3–4 Punkte, je höchstens 15 Wörter, konkret für dieses Unternehmen.\n"
+        "3. risiken: 3–4 Punkte, je höchstens 15 Wörter, konkret für dieses Unternehmen.\n"
+        "Keine Kauf- oder Verkaufsempfehlung, keine Kursziele, keine Zahlen außer den oben genannten. "
+        'Antworte nur mit JSON: {"beschreibung": "...", "chancen": ["..."], "risiken": ["..."]}')
+    body = json.dumps({"model": os.environ.get("BIZ_AI_MODEL") or "claude-haiku-5-5", "max_tokens": 700,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        resp = json.loads(r.read())
+    txt = "".join(c.get("text", "") for c in resp.get("content") or [] if c.get("type") == "text")
+    js = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
+    out = {"t": int(time.time()), "text": str(js.get("beschreibung") or "").strip()[:900],
+           "chances": [str(x).strip()[:200] for x in (js.get("chancen") or [])][:4],
+           "risks": [str(x).strip()[:200] for x in (js.get("risiken") or [])][:4], "source": "Claude"}
+    if not out["text"] or not out["chances"] or not out["risks"]:
+        return None
+    with STORE.lock:
+        bz = data.setdefault("bizai", {})
+        bz[m["symbol"]] = out
+        if len(bz) > 400:  # älteste Einträge entfernen
+            for k_ in sorted(bz, key=lambda k_: bz[k_].get("t", 0))[:len(bz) - 400]:
+                bz.pop(k_, None)
+        STORE.dirty = True
+    LOG.info("[Geschäftsmodell] %s von Claude beschrieben", m["symbol"])
+    return out
+
+
+def business_model(m):
+    rules = biz_rules(m)
+    ai = safe(lambda: biz_ai(m))
+    if ai:
+        return {**rules, "text": ai["text"], "chances": ai["chances"], "risks": ai["risks"], "source": "Claude"}
+    return rules
+
+
 def analyze(query):
     key = query.strip().lower()
     if key in CACHE and time.time() - CACHE[key][0] < 900:
@@ -4816,6 +5067,7 @@ def analyze(query):
         "symbol": symbol, "name": m["name"], "exchange": m["exchange"], "currency": m["currency"],
         "price": m["price"], "sector": m["sector"], "industry": m["industry"], "country": m["country"],
         "website": m["website"], "business": m["summary_text"][:900], "alternatives": alternatives,
+        "bizmodel": safe(lambda: business_model(m)),
         "rating": {"label": label, "group": group, "score": round(total, 1),
                    "scale": [{"label": l, "group": g, "min": thr} for thr, l, g in RATING_SCALE]},
         "summary": {"adjective": s_adj, "options": ADJ["summary"]},

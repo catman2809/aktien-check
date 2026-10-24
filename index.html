@@ -293,6 +293,22 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
+.bizm{margin-top:16px}
+.bizm-text{margin:6px 0 14px;font-size:15px;line-height:1.55}
+.bizm-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media (max-width:640px){.bizm-grid{grid-template-columns:minmax(0,1fr)}}
+.bizm-col{border-radius:10px;padding:10px 14px 6px}
+.bizm-col.pos{background:var(--pos-soft);border:1px solid var(--pos-line)}
+.bizm-col.neg{background:var(--neg-soft);border:1px solid var(--neg-line)}
+.bizm-col h3{margin:0 0 6px;font-size:14px}
+.bizm-col.pos h3{color:var(--pos)} .bizm-col.neg h3{color:var(--neg)}
+.bizm-col ul{margin:0;padding:0;list-style:none}
+.bizm-col li{position:relative;padding:0 0 7px 20px;font-size:14px;line-height:1.45}
+.bizm-col li::before{position:absolute;left:0;top:0;font-weight:700}
+.bizm-col li.pos::before{content:"+";color:var(--pos)} .bizm-col li.neg::before{content:"−";color:var(--neg)}
+.bizm-orig{margin-top:12px;font-size:13px;color:var(--text-2)}
+.bizm-orig summary{cursor:pointer;font-weight:600;padding:6px 0}
+.bizm-orig p{margin:6px 0 0;line-height:1.5}
 .etf-search{width:100%;height:36px;border-radius:9px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:0 12px;font:inherit;font-size:14px;margin-bottom:8px}
 .etf-tbl td,.etf-tbl th{white-space:nowrap}
 .etf-tbl td:nth-child(2){white-space:normal;min-width:180px}
@@ -917,7 +933,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#geschaeft">Geschäftsmodell</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -3492,6 +3508,23 @@ function cryptoPeersSection(d) {
 }
 /* Unternehmensprofil („Über“) */
 const COPY_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+function bizSection(d) {
+  const B = d.bizmodel;
+  if (!B || !B.text) return "";
+  const li = (arr, cls) => arr.map(x => `<li class="${cls}">${esc(x)}</li>`).join("");
+  return `<section class="card pad bizm" id="geschaeft" aria-label="Geschäftsmodell">
+    <div class="eyebrow">Geschäftsmodell${B.context ? " · " + esc(B.context) : ""}</div>
+    <p class="bizm-text">${esc(B.text)}</p>
+    <div class="bizm-grid">
+      <div class="bizm-col pos"><h3>Chancen</h3><ul>${li(B.chances || [], "pos")}</ul></div>
+      <div class="bizm-col neg"><h3>Risiken</h3><ul>${li(B.risks || [], "neg")}</ul></div>
+    </div>
+    ${d.business ? `<details class="bizm-orig"><summary>Offizielle Unternehmensbeschreibung (englisch, Yahoo Finance)</summary><p>${esc(d.business)}</p></details>` : ""}
+    <div class="stamp" style="margin-top:8px">${B.source === "Claude" ? "Beschreibung, Chancen und Risiken von Claude (KI) aus der Unternehmensbeschreibung und den Kennzahlen formuliert – ohne Gewähr."
+      : "Aus Branche und aktuellen Kennzahlen abgeleitet; branchentypische Punkte ergänzt."}</div>
+  </section>`;
+}
+
 function secSection(d) {
   const S = d.sec;
   if (!S) return "";
@@ -3686,6 +3719,8 @@ function render(d) {
   $("#navsym").textContent = `${d.name} · ${R.label}`;
   const nk = document.querySelector('#subnav a[href="#konkurrenz"]');
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
+  const ng_ = document.querySelector('#subnav a[href="#geschaeft"]');
+  if (ng_) ng_.style.display = d.bizmodel && d.bizmodel.text ? "" : "none";
   const nu = document.querySelector('#subnav a[href="#ueber"]');
   if (nu) nu.style.display = etf || crypto ? "none" : "";
   ["#fairerwert", "#analysten", "#bilanz"].forEach(h => { const a_ = document.querySelector(`#subnav a[href="${h}"]`); if (a_) a_.style.display = etf || crypto ? "none" : ""; });
@@ -3715,7 +3750,7 @@ function render(d) {
       <div class="watch-row"><button class="btn ${wlHas(d.symbol) ? "on" : ""}" id="wltoggle">${wlHas(d.symbol) ? "★ In der Watchlist" : "☆ Zur Watchlist"}</button>
         <button class="btn ${ALERTS?.alerts?.[d.symbol] ? "on" : ""}" id="alertbtn">${BELL_SVG} Preisalarm</button>
         <button class="btn" id="pdfbtn" title="Analyse als PDF speichern"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6"/><path d="M9 15l3 3 3-3"/></svg> Als PDF speichern</button></div>
-      ${d.business ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
+      ${d.business && !d.bizmodel ? `<p class="biz clamp" id="biz">${esc(d.business)}</p><button class="more" id="bizmore">Mehr anzeigen</button>` : ""}
       ${d.alternatives?.length ? `<div class="alts">Andere Börsenplätze / Treffer:
         ${d.alternatives.map(a => `<button data-s="${esc(a.symbol)}" title="${esc(a.name)}">${esc(a.symbol)} · ${esc(a.exchange)}</button>`).join("")}</div>` : ""}
     </div>
@@ -3744,6 +3779,8 @@ function render(d) {
       <div class="stamp">Stand ${esc(d.generated)} · Quellen: ${esc((d.sources || ["Yahoo Finance", "Google News", "Pressedienste"]).join(", "))}</div>
     </div>
   </section>
+
+  ${bizSection(d)}
 
   <section class="card chart-card" id="kurschart" aria-label="Kursverlauf">
     <div class="chart-head">

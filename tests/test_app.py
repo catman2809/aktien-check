@@ -924,3 +924,45 @@ class TestIssuerParsing(unittest.TestCase):
 
     def test_name_tokens(self):
         self.assertEqual(a._name_tokens("Amundi Core MSCI World UCITS ETF Acc"), {"amundi", "core", "msci", "world"})
+
+
+class TestBusinessModel(Isolated):
+    M = {"symbol": "TST", "name": "Test Software AG", "industry": "Software - Application", "sector": "Technology",
+         "country": "Germany", "revenue": 3.9e10, "currency": "EUR", "fin_currency": "EUR", "op_m": 0.3, "gross_m": 0.74,
+         "rev_cagr": 0.08, "roic": 0.2, "net_debt": -1e9, "nd_ebitda": None, "int_cov": 50, "pe": 45, "fcf": 5e9,
+         "op_m_trend": 0.0, "eps_rev": None, "share_change": 0.0, "sbc_ratio": 0.12, "biz": "standard",
+         "summary_text": "Test Software provides enterprise software."}
+
+    def test_rules(self):
+        b = a.biz_rules(dict(self.M))
+        self.assertIn("Anwendungssoftware", b["text"])
+        self.assertIn("39,0 Mrd. EUR", b["text"])
+        self.assertEqual(b["context"], "Sektor Technologie · Sitz Deutschland")
+        self.assertTrue(2 <= len(b["chances"]) <= 4 and 2 <= len(b["risks"]) <= 4)
+        self.assertTrue(any("Bruttomarge" in x for x in b["chances"]))
+        self.assertTrue(any("Bewertung" in x for x in b["risks"]))
+        self.assertTrue(any("Cloud" in x for x in b["chances"]))  # branchentypisch ergänzt
+        ins = a.biz_rules(dict(self.M, industry="Insurance - Diversified", biz="insurance"))
+        self.assertFalse(any("Nettokasse" in x or "Bruttomarge" in x for x in ins["chances"]))
+
+    def test_ai_cached_and_fallback(self):
+        import unittest.mock as um
+        self.assertIsNone(a.biz_ai(dict(self.M)))  # ohne Schlüssel kein Aufruf
+        answer = {"content": [{"type": "text", "text": '{"beschreibung": "Testbeschreibung.", "chancen": ["C1", "C2", "C3"], "risiken": ["R1", "R2", "R3"]}'}]}
+        calls = []
+
+        class Resp:
+            def __enter__(self): return self
+            def __exit__(self, *x): return False
+            def read(self): return json.dumps(answer).encode()
+
+        def fake(req, timeout=0):
+            calls.append(req.full_url)
+            return Resp()
+        with um.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}), um.patch.object(a.urllib.request, "urlopen", fake):
+            b1 = a.business_model(dict(self.M))
+            b2 = a.business_model(dict(self.M))
+        self.assertEqual((b1["source"], b1["text"], b1["risks"]), ("Claude", "Testbeschreibung.", ["R1", "R2", "R3"]))
+        self.assertEqual(b2["text"], "Testbeschreibung.")
+        self.assertEqual(len(calls), 1)  # zweiter Aufruf aus dem Zwischenspeicher
+        self.assertEqual(b1["context"], "Sektor Technologie · Sitz Deutschland")
