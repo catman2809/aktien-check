@@ -933,7 +933,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#geschaeft">Geschäftsmodell</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -3780,8 +3780,6 @@ function render(d) {
     </div>
   </section>
 
-  ${bizSection(d)}
-
   <section class="card chart-card" id="kurschart" aria-label="Kursverlauf">
     <div class="chart-head">
       <div><div class="eyebrow">Kursverlauf</div>
@@ -3848,6 +3846,8 @@ function render(d) {
   </dl>
 
   ${checklistCard(d)}
+
+  ${bizSection(d)}
 
   ${fairCard(d)}
 
