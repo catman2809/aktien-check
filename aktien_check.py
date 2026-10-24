@@ -266,7 +266,7 @@ SENT_WORDS = {  # exakte Wörter
     "fraud": -2.5, "recall": -1.2, "warning": -1.3, "warns": -1.3, "layoffs": -1.2, "bankruptcy": -3.0,
     "default": -2.0, "concerns": -0.8, "fears": -0.8, "selloff": -1.5, "sell-off": -1.5, "disappoints": -1.3,
     "disappointing": -1.3, "disappointed": -1.3, "scandal": -2.0, "halts": -0.8, "delay": -0.8, "delayed": -0.8,
-    "fine": -0.8, "fined": -1.2, "sued": -1.2, "slashes": -1.0, "struggles": -1.0, "slowdown": -1.0,
+    "fined": -1.2, "sued": -1.2, "slashes": -1.0, "struggles": -1.0, "slowdown": -1.0,
     # Deutsch positiv
     "steigt": 1.0, "steigen": 1.0, "gestiegen": 1.0, "stieg": 1.0, "springt": 1.3, "klettert": 1.1, "zieht": 0.3,
     "hebt": 0.8, "erhöht": 0.8, "übertrifft": 1.5, "überzeugt": 1.2, "stark": 0.8, "starke": 0.8, "starken": 0.8,
@@ -582,6 +582,10 @@ def fill_info(t, info, hint=None):
     return info
 
 
+UNSUPPORTED_TYPES = {"INDEX": "Index", "FUTURE": "Terminkontrakt (Future)", "CURRENCY": "Devisenkurs",
+                     "MUTUALFUND": "Investmentfonds (kein ETF)", "OPTION": "Optionsschein/Option"}
+
+
 def resolve(query):
     q = query.strip()
     is_isin = bool(re.fullmatch(r"[A-Za-z]{2}[A-Za-z0-9]{9}\d", q))  # ISIN -> über die Suche zur Börsennotierung
@@ -595,6 +599,10 @@ def resolve(query):
             info = fill_info(t, info, hint)
         if current_price(info) and info.get("quoteType", "EQUITY") in ("EQUITY", "ETF"):
             return sym, t, info, [a for a in found if a["symbol"] != sym][:6]
+        kind = UNSUPPORTED_TYPES.get(info.get("quoteType")) or (
+            "Index" if sym.startswith("^") else "Devisenkurs" if sym.endswith("=X") else "Terminkontrakt (Future)" if sym.endswith("=F") else None)
+        if kind:
+            raise ValueError(f"„{q}“ ist ein {kind} – Aktien-Check bewertet nur Aktien, ETFs und Kryptowährungen.")
     found = search_symbols(q)
     if not found:
         raise ValueError(f"Keine Aktie zu „{q}“ gefunden.")
@@ -6756,6 +6764,12 @@ small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-al
 </form></body></html>"""
 
 
+class BodyError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -6837,11 +6851,19 @@ class Handler(BaseHTTPRequestHandler):
         return f"{proto}://{host}" if host else ""
 
     def json_body(self, limit=16384):
-        length = min(int(self.headers.get("Content-Length") or 0), limit)
+        """Liest den JSON-Körper. Zu große oder ungültige Anfragen werden abgelehnt (nie stillschweigend als {} gewertet,
+        sonst würde z. B. eine abgeschnittene Watchlist die gespeicherte überschreiben)."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > limit:
+            self.rfile.read(min(length, limit + 1))
+            raise BodyError(413, "Die Anfrage ist zu groß.")
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            body = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
-            return {}
+            raise BodyError(400, "Ungültige Anfrage (kein gültiges JSON).")
+        if not isinstance(body, dict):
+            raise BodyError(400, "Ungültige Anfrage (JSON-Objekt erwartet).")
+        return body
 
     def _guard(self, fn):
         try:
@@ -6867,12 +6889,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(415, json.dumps({"error": "JSON erwartet"}), "application/json")
             if u.path == "/api/admin/restore" and not self.is_admin():
                 return self.send_json({"error": "Nur für Administratoren"}, 403)
-            body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 16384)
+            try:
+                body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 300_000 if u.path == "/api/watchlist" else 16384)
+            except BodyError as e:
+                return self.send_json({"error": e.msg}, e.code)
             user = self.current_user()
             if maintenance().get("on") and not self.is_admin():
                 return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
             try:
                 if u.path == "/api/watchlist":
+                    if not isinstance(body.get("items"), list):
+                        raise ValueError("Ungültige Watchlist (Liste erwartet).")
                     with STORE.lock:
                         user_space(user)["watchlist"] = clean_watchlist(body.get("items"))
                     save_async()
@@ -7277,6 +7304,9 @@ class Handler(BaseHTTPRequestHandler):
                 err_ = str(e)
                 safe(lambda: record_analysis(q, "", time.time() - t0, False, err_))
                 return self.send(404, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                LOG.info("[Analyse] %s: Browser hat die Verbindung vorher beendet (z. B. weggeklickt)", q)
+                return
             except Exception as e:
                 LOG.exception("[Analyse] %s abgebrochen nach %.1f s", q, time.time() - t0)
                 err_ = f"{type(e).__name__}: {e}"

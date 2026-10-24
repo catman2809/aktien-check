@@ -966,3 +966,21 @@ class TestBusinessModel(Isolated):
         self.assertEqual(b2["text"], "Testbeschreibung.")
         self.assertEqual(len(calls), 1)  # zweiter Aufruf aus dem Zwischenspeicher
         self.assertEqual(b1["context"], "Sektor Technologie · Sitz Deutschland")
+
+
+class TestRequestBodies(TestHTTP):
+    def test_bad_bodies_never_wipe_watchlist(self):
+        op = self.client()
+        self.login(op, "admin", "test-admin-pass")
+        items = [{"symbol": f"S{i}.DE", "name": f"Firma {i} SE", "exchange": "XETRA", "currency": "EUR", "price": 231.45,
+                  "label": "Outperform", "group": "Kaufen", "score": 23.4, "summary": "kaufenswert", "perf_1m": -0.04,
+                  "upside": 0.15, "updated": 1792858539123, "next_event": {"type": "earnings", "date": "2027-01-28"}}
+                 for i in range(150)]
+        st, _, b = self.call(op, "/api/watchlist", {"items": items})  # ~50 KB – früher bei 16 KB abgeschnitten
+        self.assertEqual((st, len(json.loads(b)["items"])), (200, 150))
+        self.assertEqual(self.call(op, "/api/watchlist", "{kaputt", ctype="application/json; charset=utf-8")[0], 400)
+        self.assertEqual(self.call(op, "/api/watchlist", {})[0], 400)
+        self.assertEqual(self.call(op, "/api/watchlist", {"items": "abc"})[0], 400)
+        self.assertEqual(self.call(op, "/api/alerts", "[1, 2]", ctype="application/json; charset=utf-8")[0], 400)
+        self.assertEqual(self.call(op, "/api/alerts", {"x": "a" * 20000})[0], 413)
+        self.assertEqual(len(json.loads(self.call(op, "/api/watchlist")[2])["items"]), 150)
