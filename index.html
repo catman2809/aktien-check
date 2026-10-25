@@ -294,6 +294,17 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
 .bizm{margin-top:16px}
+.seg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
+.seg-grid > *{min-width:0}
+.seg-card h3{margin:0 0 10px;font-size:15px}
+.seg-row{padding:6px 0 8px;border-bottom:1px solid var(--border)}
+.seg-row:last-of-type{border-bottom:0}
+.seg-top{display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-bottom:4px}
+.seg-name{min-width:0;overflow-wrap:anywhere}
+.seg-row .etf-bar{display:block}
+.seg-meta{font-size:12.5px;color:var(--text-2);margin-top:4px}
+.cc-ok{color:var(--pos);font-weight:600}
+.cc-bad{color:var(--neu);font-weight:600}
 .bizm-text{margin:6px 0 14px;font-size:15px;line-height:1.55}
 .bizm-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
 @media (max-width:640px){.bizm-grid{grid-template-columns:minmax(0,1fr)}}
@@ -933,7 +944,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -3525,6 +3536,46 @@ function bizSection(d) {
   </section>`;
 }
 
+function segSection(d) {
+  const G = d.sec?.segments;
+  if (!G || !G.breakdowns?.length) return "";
+  const cur = G.currency || "";
+  const date = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  const amt = v => { const [n, u] = big(v); return `${n} ${u} ${esc(cur)}`.trim(); };
+  const card = b => {
+    const mx = Math.max(...b.items.map(i => i.share), 0.01);
+    return `<div class="card pad seg-card"><h3>${esc(b.title)}</h3>
+      ${b.items.map(i => `<div class="seg-row">
+        <div class="seg-top"><span class="seg-name">${esc(i.name)}</span><b class="num">${pc(i.share, 0)}</b></div>
+        <span class="etf-bar"><i style="width:${Math.max(2, i.share / mx * 100)}%"></i></span>
+        <div class="seg-meta num">${amt(i.rev)}${i.growth != null ? ` · <span style="color:${i.growth >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(i.growth, 0, true)}</span> ggü. Vorjahr` : ""}${i.margin != null ? ` · Marge ${pc(i.margin, 0)}` : ""}</div>
+      </div>`).join("")}
+      <div class="stamp" style="margin-top:6px">Gesamt ${amt(b.total)}</div></div>`;
+  };
+  return `<h2 class="section" id="segmente">Segmente</h2>
+  <p class="section-sub">Welcher Geschäftsbereich wie viel zum Umsatz beiträgt – laut <a href="${esc(G.url)}" target="_blank" rel="noopener">Geschäftsbericht (${esc(G.form)})</a> bei der US-Börsenaufsicht SEC, Geschäftsjahr bis ${date(G.end)}${cur ? `, Beträge in ${esc(cur)}` : ""}. „Marge“ = operatives Ergebnis des Segments im Verhältnis zu seinem Umsatz.</p>
+  <div class="seg-grid">${G.breakdowns.map(card).join("")}</div>`;
+}
+
+function crosscheckCard(S) {
+  const C = S.crosscheck;
+  if (!C || !C.rows?.length) return "";
+  const date = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {month: "short", year: "numeric"});
+  const cell = (x, money) => {
+    if (!x || x.sec == null) return `<td class="num stamp">–</td>`;
+    const v = money ? big(x.sec)[0] + " " + big(x.sec)[1] : nf(x.sec, 2);
+    const flag = x.ok == null ? `<span class="stamp">keine Yahoo-Angabe</span>` : x.ok ? `<span class="cc-ok">✓</span>`
+      : `<span class="cc-bad" title="Yahoo: ${esc(money ? big(x.yahoo).join(" ") : nf(x.yahoo, 2))}">⚠ ${pc(x.dev, 1, true)}</span>`;
+    return `<td class="num">${v} ${flag}</td>`;
+  };
+  return `<div class="card pad etf-wide"><h3>Abgleich Quartalszahlen: SEC ↔ Yahoo
+      <span class="stamp">${C.mismatch ? `<span class="cc-bad">${C.mismatch} von ${C.checked} Werten weichen ab</span>` : `<span class="cc-ok">alle ${C.checked} Werte stimmen</span>`}</span></h3>
+    <div class="peer-scroll"><table class="trk"><thead><tr><th>Quartal bis</th><th class="num">Umsatz (USD)</th><th class="num">Reinertrag (USD)</th><th class="num">Gewinn je Aktie</th></tr></thead>
+    <tbody>${C.rows.map(r => `<tr><td>${date(r.end)}</td>${cell(r.revenue, true)}${cell(r.net_income, true)}${cell(r.eps, false)}</tr>`).join("")}</tbody></table></div>
+    <div class="stamp" style="margin-top:6px">Werte laut 10-Q/10-K-Meldungen an die SEC (4. Quartal = Geschäftsjahr minus Q1–Q3). ✓ = Yahoo stimmt überein (Toleranz 1–3 %).
+      ⚠ = Yahoo weicht ab – oft wegen anderer Abgrenzung (z. B. Anlageerträge im Umsatz), manchmal wegen eines Datenfehlers; im Zweifel gilt die SEC-Meldung.</div></div>`;
+}
+
 function secSection(d) {
   const S = d.sec;
   if (!S) return "";
@@ -3536,11 +3587,12 @@ function secSection(d) {
   <div class="etf-grid">
     <div class="card pad"><h3>Letzte Meldungen</h3>
       ${S.filings.map(f => `<div class="adm-row"><span><a href="${esc(f.url)}" target="_blank" rel="noopener"><b>${esc(f.form)}</b></a> <span class="stamp">${esc(f.label)}</span></span><span class="num stamp">${date(f.date)}</span></div>`).join("") || `<div class="stamp">Keine Meldungen gefunden.</div>`}
-      <div class="adm-row"><span>Insider-Meldungen (Form 4), letzte 90 Tage</span><b class="num">${S.form4_90d}</b></div></div>
+      ${S.domestic !== false ? `<div class="adm-row"><span>Insider-Meldungen (Form 4), letzte 90 Tage</span><b class="num">${S.form4_90d}</b></div>` : `<div class="stamp" style="margin-top:6px">Ausländisches Unternehmen mit US-Notierung (${esc(S.us_symbol || "")}) – meldet Jahresberichte als 20-F.</div>`}</div>
     ${A.length ? `<div class="card pad"><h3>Jahreszahlen laut Geschäftsbericht <span class="stamp">Mrd. USD</span></h3>
       <div class="peer-scroll"><table class="trk"><thead><tr><th>Geschäftsjahr bis</th><th class="num">Umsatz</th><th class="num">Op. Ergebnis</th><th class="num">Reinertrag</th></tr></thead>
       <tbody>${A.slice().reverse().map(x => `<tr><td>${date(x.end)}</td><td class="num">${bn(x.revenue)}</td><td class="num">${bn(x.op_income)}</td><td class="num">${bn(x.net_income)}</td></tr>`).join("")}</tbody></table></div>
       <div class="stamp" style="margin-top:6px">Aus den XBRL-Daten der 10-K-Berichte; zum Abgleich mit der Erfolgsrechnung oben.</div></div>` : ""}
+    ${crosscheckCard(S)}
   </div>`;
 }
 
@@ -3719,6 +3771,8 @@ function render(d) {
   $("#navsym").textContent = `${d.name} · ${R.label}`;
   const nk = document.querySelector('#subnav a[href="#konkurrenz"]');
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
+  const ns_ = document.querySelector('#subnav a[href="#segmente"]');
+  if (ns_) ns_.style.display = d.sec?.segments?.breakdowns?.length ? "" : "none";
   const ng_ = document.querySelector('#subnav a[href="#geschaeft"]');
   if (ng_) ng_.style.display = d.bizmodel && d.bizmodel.text ? "" : "none";
   const nu = document.querySelector('#subnav a[href="#ueber"]');
@@ -3848,6 +3902,8 @@ function render(d) {
   ${checklistCard(d)}
 
   ${bizSection(d)}
+
+  ${segSection(d)}
 
   ${fairCard(d)}
 

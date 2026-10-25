@@ -11,6 +11,7 @@ import hashlib
 import heapq
 import hmac
 import io
+import itertools
 import http.cookies
 import json
 import logging
@@ -4513,7 +4514,8 @@ def _sum_by(hs, key):
 SEC_FORMS = {"10-K": "Jahresbericht", "10-Q": "Quartalsbericht", "8-K": "Wichtiges Ereignis", "20-F": "Jahresbericht (Ausland)",
              "6-K": "Zwischenmeldung (Ausland)", "DEF 14A": "Einladung Hauptversammlung", "S-1": "Börsenprospekt"}
 SEC_REVENUE = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
-               "RevenueFromContractWithCustomerIncludingAssessedTax")
+               "RevenueFromContractWithCustomerIncludingAssessedTax", "RevenuesNetOfInterestExpense")
+SEC_FACTS_KEEP = set(SEC_REVENUE) | {"NetIncomeLoss", "OperatingIncomeLoss", "EarningsPerShareDiluted"}
 
 
 def sec_cik(symbol):
@@ -4525,47 +4527,291 @@ def sec_cik(symbol):
     return hit[1].get(symbol.upper().replace(".", "-"))
 
 
-def _sec_annual(cik, concept):
-    d = _sec_json(f"https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/us-gaap/{concept}.json")
-    vals = {}
-    for unit, rows in (d.get("units") or {}).items():
-        if unit != "USD":
-            continue
-        for r_ in rows:
-            if r_.get("form") not in ("10-K", "20-F", "10-K/A") or not r_.get("start") or not r_.get("end"):
+
+# ---------------------------------------------------------------------------
+# SEC: Segmente aus dem Geschäftsbericht (XBRL) + Quartalszahlen zur Gegenprüfung von Yahoo
+# ---------------------------------------------------------------------------
+SEG_AXES = {"StatementBusinessSegmentsAxis": "seg", "SegmentsAxis": "seg", "ProductOrServiceAxis": "prod",
+            "ProductsAndServicesAxis": "prod", "StatementGeographicalAxis": "geo", "GeographicalAreasAxis": "geo"}
+SEG_TITLES = {"seg": "Berichtssegmente", "prod": "Umsatz nach Produkten & Diensten", "geo": "Umsatz nach Regionen"}
+XBRL_REV = {"Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenue", "SalesRevenueNet",
+            "RevenueFromContractWithCustomerIncludingAssessedTax", "RevenueFromContractsWithCustomers", "RevenuesNetOfInterestExpense"}
+XBRL_OPI = {"OperatingIncomeLoss", "ProfitLossFromOperatingActivities"}
+SEG_SKIP = re.compile(r"Elimination|Intersegment|Corporate|Reconcil|NonSegment|AllOther|Consolidat|OperatingSegments", re.I)
+SEG_DE = {"united states": "USA", "u.s.": "USA", "u.s": "USA", "us": "USA", "usa": "USA", "other countries": "Übrige Länder",
+          "other": "Sonstige", "europe": "Europa", "greater china": "Großchina", "china": "China", "japan": "Japan",
+          "rest of asia pacific": "Übriges Asien-Pazifik", "americas": "Amerika", "germany": "Deutschland",
+          "international": "International", "asia pacific": "Asien-Pazifik", "asia-pacific": "Asien-Pazifik",
+          "north america": "Nordamerika", "latin america": "Lateinamerika", "non-us": "Außerhalb der USA",
+          "nonus": "Außerhalb der USA", "emea": "EMEA", "taiwan": "Taiwan", "canada": "Kanada",
+          "united kingdom": "Großbritannien", "rest of world": "Übrige Welt", "france": "Frankreich", "india": "Indien"}
+
+
+def _seg_label(member, labels):
+    lab = labels.get(member)
+    if not lab:  # technischer Name lesbar machen: msft:LinkedInCorporationMember -> Linked In Corporation
+        core = re.sub(r"Member$", "", member.split(":")[-1])
+        lab = "USA" if core in ("US", "UnitedStates") else re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", core)
+    lab = re.sub(r"\s*\[Member\]$|\s+Segment$", "", lab.strip())
+    return SEG_DE.get(lab.lower().rstrip("."), lab)
+
+
+def _xbrl_labels(url, wanted):
+    """Bezeichnungen aus dem Label-Linkbase (eigene Datei oder in das Schema eingebettet)."""
+    X = "{http://www.w3.org/1999/xlink}"
+    loc, arcs, labs = {}, {}, {}
+    req = urllib.request.Request(url, headers=SEC_UA)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        for _ev, el in ET.iterparse(r, events=("end",)):
+            tag = el.tag.rsplit("}", 1)[-1]
+            if tag == "loc":
+                loc[el.get(X + "label")] = (el.get(X + "href") or "").split("#")[-1].replace("_", ":", 1)
+            elif tag == "labelArc":
+                arcs.setdefault(el.get(X + "from"), []).append(el.get(X + "to"))
+            elif tag == "label" and el.get(X + "label"):
+                role = (el.get(X + "role") or "").rsplit("/", 1)[-1]
+                labs.setdefault(el.get(X + "label"), {})[role] = (el.text or "").strip()
+            el.clear()
+    out = {}
+    for lk, concept in loc.items():
+        if concept in wanted:
+            for to in arcs.get(lk, []):
+                d = labs.get(to) or {}
+                out[concept] = d.get("terseLabel") or d.get("label") or out.get(concept)
+    return out
+
+
+def _drop_parents(vals):
+    """Entfernt Sammelposten, die genau die Summe anderer Posten sind (z. B. Apple „Products“ = iPhone+Mac+iPad+…)."""
+    keys = list(vals)
+    changed = True
+    while changed and len(keys) > 2:
+        changed = False
+        for k in sorted(keys, key=lambda k_: -vals[k_]):
+            others = [o for o in keys if o != k and vals[o] < vals[k]]
+            if not 2 <= len(others) <= 14:
                 continue
-            days = (datetime.fromisoformat(r_["end"]) - datetime.fromisoformat(r_["start"])).days
-            if 350 <= days <= 380:
-                old = vals.get(r_["end"])
-                if not old or (r_.get("filed") or "") > old[1]:
-                    vals[r_["end"]] = (r_["val"], r_.get("filed") or "")
-    return {k: v[0] for k, v in vals.items()}
+            for r_ in range(2, len(others) + 1):
+                if any(abs(sum(vals[o] for o in comb) - vals[k]) <= 0.005 * vals[k] for comb in itertools.combinations(others, r_)):
+                    keys.remove(k)
+                    changed = True
+                    break
+            if changed:
+                break
+    return {k: vals[k] for k in keys}
 
 
-def sec_annual(cik):
-    rev = {}
-    for c in SEC_REVENUE:
-        r_ = safe(lambda: _sec_annual(cik, c)) or {}
-        if r_ and (not rev or max(r_) > max(rev)):
-            rev = r_
-    ni = safe(lambda: _sec_annual(cik, "NetIncomeLoss")) or {}
-    op = safe(lambda: _sec_annual(cik, "OperatingIncomeLoss")) or {}
-    out = [{"end": e, "revenue": rev[e], "net_income": ni.get(e), "op_income": op.get(e)} for e in sorted(rev) if e in ni]
-    return out[-5:]
-
-
-def sec_company(symbol):
-    """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
-    if "." in symbol.replace("-", ".") and not re.fullmatch(r"[A-Z]+-[A-Z]", symbol):
+def sec_segments(cik, acc, form):
+    folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}"
+    items = [i["name"] for i in _sec_json(folder + "/index.json")["directory"]["item"]]
+    inst = next((n for n in items if n.endswith("_htm.xml")), None) or next(
+        (n for n in items if n.endswith(".xml") and not re.search(r"_(lab|pre|cal|def)\.xml$|FilingSummary", n)), None)
+    if not inst:
         return None
+    lab = next((n for n in items if n.endswith("_lab.xml")), None) or next((n for n in items if n.endswith(".xsd")), None)
+    ctx, units, facts, cur, unit = {}, {}, [], None, None
+    req = urllib.request.Request(f"{folder}/{inst}", headers=SEC_UA)
+    with urllib.request.urlopen(req, timeout=40) as r:  # gestreamt – Banken-Berichte sind > 20 MB
+        for ev, el in ET.iterparse(r, events=("start", "end")):
+            tag = el.tag.rsplit("}", 1)[-1]
+            if ev == "start":
+                if tag == "context":
+                    cur = {"id": el.get("id"), "dims": {}, "start": None, "end": None}
+                elif tag == "unit":
+                    unit = el.get("id")
+                continue
+            if cur is not None:
+                if tag == "explicitMember":
+                    cur["dims"][(el.get("dimension") or "").split(":")[-1]] = (el.text or "").strip()
+                elif tag in ("startDate", "endDate"):
+                    cur["start" if tag == "startDate" else "end"] = (el.text or "").strip()
+                elif tag == "context":
+                    ctx[cur["id"]] = cur
+                    cur = None
+                continue
+            if tag == "measure" and unit:
+                units[unit] = (el.text or "").split(":")[-1]
+            elif tag == "unit":
+                unit = None
+            elif el.get("contextRef") and (tag in XBRL_REV or tag in XBRL_OPI):
+                try:
+                    facts.append(("rev" if tag in XBRL_REV else "op", el.get("contextRef"), el.get("unitRef"), float(el.text)))
+                except (TypeError, ValueError):
+                    pass
+            el.clear()
+    rows, totals, cur_count = {}, {}, {}
+    for kind, cref, uref, v in facts:
+        c = ctx.get(cref)
+        if not c or not c["start"] or not c["end"]:
+            continue
+        days = (datetime.fromisoformat(c["end"]) - datetime.fromisoformat(c["start"])).days
+        if not 350 <= days <= 380:
+            continue
+        cy = units.get(uref, "")
+        cur_count[cy] = cur_count.get(cy, 0) + 1
+        dims = {a: m_ for a, m_ in c["dims"].items() if not (a == "ConsolidationItemsAxis" and m_.endswith("OperatingSegmentsMember"))}
+        if not dims:
+            if kind == "rev":
+                totals[c["end"]] = max(totals.get(c["end"], 0), v)
+            continue
+        if len(dims) != 1:
+            continue
+        axis, member = next(iter(dims.items()))
+        ax = SEG_AXES.get(axis)
+        if not ax or SEG_SKIP.search(member):
+            continue
+        d_ = rows.setdefault((kind, ax), {}).setdefault(member, {})
+        d_[c["end"]] = max(d_.get(c["end"], v), v)
+    if not rows:
+        return None
+    currency = max(cur_count, key=cur_count.get) if cur_count else ""
+    wanted = {m_ for d in rows.values() for m_ in d}
+    labels = (safe(lambda: _xbrl_labels(f"{folder}/{lab}", wanted)) or {}) if lab else {}
+    out = []
+    for ax in ("seg", "prod", "geo"):
+        mem = rows.get(("rev", ax))
+        if not mem:
+            continue
+        last = max(e for d in mem.values() for e in d)
+        vals = _drop_parents({m_: d[last] for m_, d in mem.items() if d.get(last, 0) > 0})
+        total = totals.get(last)
+        ssum = sum(vals.values())
+        if len(vals) < 2 or (total and not 0.9 <= ssum / total <= 1.12):
+            continue  # Aufteilung ergibt nicht den Gesamtumsatz -> lieber weglassen
+        base = total or ssum
+        prev_end = max((e for d in mem.values() for e in d if e < last), default=None)
+        opm = rows.get(("op", ax), {})
+        items_ = []
+        for m_, v in sorted(vals.items(), key=lambda x: -x[1]):
+            pv = mem[m_].get(prev_end) if prev_end else None
+            op = (opm.get(m_) or {}).get(last)
+            items_.append({"name": _seg_label(m_, labels), "rev": v, "share": v / base,
+                           "growth": (v / pv - 1) if pv and pv > 0 else None,
+                           "margin": op / v if op is not None and v else None})
+        out.append({"kind": ax, "title": SEG_TITLES[ax], "items": items_[:12], "total": base, "end": last})
+    if not out:
+        return None
+    seen, uniq = set(), []
+    for b in out:  # gleiche Aufteilung nicht doppelt zeigen (z. B. Segmente = Regionen)
+        key = tuple(sorted(i["name"] for i in b["items"]))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(b)
+    return {"form": form, "end": uniq[0]["end"], "currency": currency, "url": folder + "/", "breakdowns": uniq[:3]}
+
+
+def _sec_concept(cik, concept):
+    """Eine Kennzahl aus companyfacts (einmal je Firma geladen, nur die benötigten Kennzahlen bleiben im Speicher)."""
+    hit = SEC_CACHE.get(("facts", cik))
+    if not hit or time.time() - hit[0] > 86400:
+        d = _sec_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", timeout=30)
+        keep = {k: v for k, v in ((d.get("facts") or {}).get("us-gaap") or {}).items() if k in SEC_FACTS_KEEP}
+        del d
+        hit = (time.time(), keep)
+        SEC_CACHE[("facts", cik)] = hit
+    return hit[1].get(concept) or {}
+
+
+def _sec_periods(d, unit):
+    """Jahres- und Quartalswerte einer Kennzahl; Q4 = Geschäftsjahr minus Q1–Q3."""
+    years, quarters = {}, {}
+    for r_ in (d.get("units") or {}).get(unit) or []:
+        if not r_.get("start") or not r_.get("end"):
+            continue
+        days = (datetime.fromisoformat(r_["end"]) - datetime.fromisoformat(r_["start"])).days
+        filed = r_.get("filed") or ""
+        tgt = years if 350 <= days <= 380 else quarters if 80 <= days <= 100 else None
+        if tgt is None:
+            continue
+        old = tgt.get(r_["end"])
+        if not old or filed > old[2]:
+            tgt[r_["end"]] = (r_["start"], r_["val"], filed)
+    q = {e: v[1] for e, v in quarters.items()}
+    for end, (start, val, _f) in years.items():
+        if end in q:
+            continue
+        inside = [v[1] for e, v in quarters.items() if v[0] >= start and e < end]
+        if len(inside) == 3:
+            q[end] = val - sum(inside)
+    return {e: v[1] for e, v in years.items()}, q
+
+
+def sec_financials(cik):
+    rev_y, rev_q = {}, {}
+    for c in SEC_REVENUE:  # Jahr und Quartal getrennt: je die jüngste, bei Gleichstand die umfassendste Kennzahl
+        y_, q_ = _sec_periods(_sec_concept(cik, c), "USD")
+        if y_ and (not rev_y or (max(y_), y_[max(y_)]) > (max(rev_y), rev_y[max(rev_y)])):
+            rev_y = y_
+        if q_ and (not rev_q or (max(q_), q_[max(q_)]) > (max(rev_q), rev_q[max(rev_q)])):
+            rev_q = q_
+    ni_y, ni_q = _sec_periods(_sec_concept(cik, "NetIncomeLoss"), "USD")
+    op_y, _op_q = _sec_periods(_sec_concept(cik, "OperatingIncomeLoss"), "USD")
+    eps_y, eps_q = _sec_periods(_sec_concept(cik, "EarningsPerShareDiluted"), "USD/shares")
+    annual = [{"end": e, "revenue": rev_y[e], "net_income": ni_y.get(e), "op_income": op_y.get(e)} for e in sorted(rev_y) if e in ni_y][-5:]
+    quarters = [{"end": e, "revenue": rev_q[e], "net_income": ni_q.get(e), "eps": eps_q.get(e)} for e in sorted(rev_q)][-6:]
+    return annual, quarters
+
+
+def sec_crosscheck(symbol, quarters):
+    """Quartalszahlen SEC vs. Yahoo: Umsatz, Reinertrag, Gewinn je Aktie."""
+    if not quarters:
+        return None
+    df = safe(lambda: yf.Ticker(symbol).quarterly_income_stmt)
+    if df is None or getattr(df, "empty", True):
+        return None
+
+    def ypick(col, *names):
+        for nm in names:
+            if nm in df.index:
+                return num(df.loc[nm].get(col))
+        return None
+    rows = []
+    for q in quarters:
+        end = datetime.fromisoformat(q["end"])
+        col = next((c for c in df.columns if abs((c.to_pydatetime().replace(tzinfo=None) - end).days) <= 7), None)
+        if col is None:
+            continue
+        y = {"revenue": ypick(col, "Total Revenue", "Operating Revenue"),
+             "net_income": ypick(col, "Net Income", "Net Income Common Stockholders"),
+             "eps": ypick(col, "Diluted EPS")}
+        row = {"end": q["end"]}
+        for k, tol in (("revenue", 0.01), ("net_income", 0.02), ("eps", 0.03)):
+            s_, y_ = q.get(k), y[k]
+            dev = (y_ / s_ - 1) if s_ and y_ is not None and abs(s_) > 1e-9 else None
+            row[k] = {"sec": s_, "yahoo": y_, "dev": dev, "ok": None if dev is None else abs(dev) <= tol}
+        rows.append(row)
+    if not rows:
+        return None
+    checks = [r_[k]["ok"] for r_ in rows for k in ("revenue", "net_income", "eps") if r_[k]["ok"] is not None]
+    return {"rows": rows[::-1], "checked": len(checks), "mismatch": sum(1 for c in checks if not c)}
+
+
+def sec_entity(symbol, alternatives=(), name=""):
+    """SEC-Firmennummer: direkt über das US-Kürzel, bei Auslandsaktien über eine US-Notierung (ADR) mit passendem Namen."""
+    if "." not in symbol.replace("-", "") or re.fullmatch(r"[A-Z]+-[A-Z]", symbol):
+        hit = sec_cik(symbol)
+        return (hit[0], hit[1], symbol) if hit else None
+    want = _plain_name(clean_company_name(name))
+    for a_ in alternatives or ():
+        s_ = (a_.get("symbol") or "").upper()
+        if not s_ or "." in s_ or "=" in s_:
+            continue
+        hit = sec_cik(s_)
+        if hit and want and _plain_name(hit[1])[:1] == want[:1]:
+            return hit[0], hit[1], s_
+    return None
+
+
+def sec_company(symbol, alternatives=(), name=""):
+    """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
     hit = SEC_CACHE.get(("co", symbol))
     if hit and time.time() - hit[0] < 86400:
         return hit[1]
-    m_ = sec_cik(symbol)
-    if not m_:
+    ent = safe(lambda: sec_entity(symbol, alternatives, name))
+    if not ent:
         SEC_CACHE[("co", symbol)] = (time.time(), None)
         return None
-    cik, title = m_
+    cik, title, us_sym = ent
     sub = _sec_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
     rc = (sub.get("filings") or {}).get("recent") or {}
     forms, dates, accs, docs = rc.get("form") or [], rc.get("filingDate") or [], rc.get("accessionNumber") or [], rc.get("primaryDocument") or []
@@ -4580,9 +4826,17 @@ def sec_company(symbol):
                         "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/{p_}"})
         if len(filings) >= 7:
             break
-    out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4,
+    annual_acc = next(((f_, a_) for f_, a_ in zip(forms, accs) if f_ in ("10-K", "20-F", "40-F")), None)
+    domestic = bool(annual_acc and annual_acc[0] == "10-K")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fseg = ex.submit(sec_segments, cik, annual_acc[1], annual_acc[0]) if annual_acc else None
+        ffin = ex.submit(sec_financials, cik) if domestic else None
+        segs = safe(lambda: fseg.result(timeout=45)) if fseg else None
+        annual, quarters = (safe(lambda: ffin.result(timeout=45)) or ([], [])) if ffin else ([], [])
+    out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4, "domestic": domestic, "us_symbol": us_sym,
            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=&dateb=&owner=include&count=40",
-           "annual": safe(lambda: sec_annual(cik)) or []}
+           "annual": annual, "segments": segs,
+           "crosscheck": safe(lambda: sec_crosscheck(symbol, quarters)) if domestic and symbol == us_sym else None}
     SEC_CACHE[("co", symbol)] = (time.time(), out)
     return out
 
@@ -5008,12 +5262,12 @@ def analyze(query):
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         fpeer = ex.submit(competitors, symbol, info, alternatives)
         fprof = ex.submit(company_profile, symbol, info, company)
-        fsec = ex.submit(sec_company, symbol) if info.get("quoteType") == "EQUITY" and "." not in symbol else None
+        fsec = ex.submit(sec_company, symbol, alternatives, company) if info.get("quoteType", "EQUITY") == "EQUITY" else None
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
         profile = safe(lambda: fprof.result(timeout=30))
-        sec_ = safe(lambda: fsec.result(timeout=30)) if fsec else None
+        sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
     finnhub_enrich(m, symbol, alternatives)
     own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
                "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],

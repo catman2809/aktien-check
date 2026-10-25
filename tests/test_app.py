@@ -984,3 +984,26 @@ class TestRequestBodies(TestHTTP):
         self.assertEqual(self.call(op, "/api/alerts", "[1, 2]", ctype="application/json; charset=utf-8")[0], 400)
         self.assertEqual(self.call(op, "/api/alerts", {"x": "a" * 20000})[0], 413)
         self.assertEqual(len(json.loads(self.call(op, "/api/watchlist")[2])["items"]), 150)
+
+
+class TestSecSegments(unittest.TestCase):
+    def test_drop_parents(self):
+        v = {"Products": 307.0, "iPhone": 209.6, "Mac": 33.7, "iPad": 28.0, "Wearables": 35.7, "Services": 109.2}
+        self.assertEqual(set(a._drop_parents(v)), {"iPhone", "Mac", "iPad", "Wearables", "Services"})
+        self.assertEqual(set(a._drop_parents({"A": 5.0, "B": 3.0, "C": 1.0})), {"A", "B", "C"})
+
+    def test_quarters_with_derived_q4(self):
+        rows = [{"start": "2025-01-01", "end": "2025-12-31", "val": 100, "filed": "2026-02-01"},
+                {"start": "2025-01-01", "end": "2025-03-31", "val": 20, "filed": "2025-05-01"},
+                {"start": "2025-04-01", "end": "2025-06-30", "val": 25, "filed": "2025-08-01"},
+                {"start": "2025-07-01", "end": "2025-09-30", "val": 30, "filed": "2025-11-01"},
+                {"start": "2025-01-01", "end": "2025-06-30", "val": 45, "filed": "2025-08-01"}]  # Halbjahr wird ignoriert
+        y, q = a._sec_periods({"units": {"USD": rows}}, "USD")
+        self.assertEqual(y, {"2025-12-31": 100})
+        self.assertEqual(q, {"2025-03-31": 20, "2025-06-30": 25, "2025-09-30": 30, "2025-12-31": 25})
+
+    def test_labels(self):
+        self.assertEqual(a._seg_label("msft:LinkedInCorporationMember", {}), "Linked In Corporation")
+        self.assertEqual(a._seg_label("country:US", {}), "USA")
+        self.assertEqual(a._seg_label("aapl:AmericasSegmentMember", {"aapl:AmericasSegmentMember": "Americas"}), "Amerika")
+        self.assertEqual(a._seg_label("x:IPhoneMember", {"x:IPhoneMember": "iPhone [Member]"}), "iPhone")
