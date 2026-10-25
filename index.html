@@ -3997,7 +3997,20 @@ function render(d) {
   wt.onclick = () => { const on = wlToggle(d); wt.classList.toggle("on", on); wt.textContent = on ? "★ In der Watchlist" : "☆ Zur Watchlist"; };
   const bm = $("#bizmore");
   if (bm) bm.onclick = () => { const b = $("#biz"); b.classList.toggle("clamp"); bm.textContent = b.classList.contains("clamp") ? "Mehr anzeigen" : "Weniger anzeigen"; };
+  sortSubnav();
   if (location.hash.length > 1) setTimeout(() => scrollToSection(location.hash, false), 400);  // geteilter Link mit Abschnitt
+}
+/* Menüpunkte in der Reihenfolge anordnen, in der die Abschnitte auf der Seite stehen */
+function sortSubnav() {
+  const box = $("#subnav .container"), sym = $("#navsym");
+  const links = [...box.querySelectorAll('a[href^="#"]')];
+  const target = a => document.getElementById(a.getAttribute("href").slice(1));
+  links.sort((x, y) => {
+    const ex = target(x), ey = target(y);
+    if (!ex || !ey) return ex ? -1 : ey ? 1 : 0;  // fehlende Abschnitte ans Ende
+    return ex.compareDocumentPosition(ey) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  });
+  links.forEach(a => box.insertBefore(a, sym));
 }
 
 if (location.protocol === "file:") {
