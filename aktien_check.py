@@ -1652,7 +1652,6 @@ def fair_value(m, mac):
         val = lambda roe_, r_: book * max(0.2, (roe_ - g) / (r_ - g))
         out.update(method="Kurs-Buchwert aus Eigenkapitalrendite",
                    bear=val(m["roe"] - 0.02, coe + 0.01), base=val(m["roe"], coe), bull=val(m["roe"] + 0.02, coe - 0.01))
-        out["calc"] = {"type": "pb", "book": book, "roe": m["roe"], "coe": coe, "g": g}  # für den Rechner in der App
         out["assumptions"] = [f"Buchwert je Aktie {fnum(book, 2)}", f"ROE {pct(m['roe'])} (±2 Prozentpunkte)",
                               f"Eigenkapitalkosten {pct(coe)} (±1 Prozentpunkt)"]
     elif biz == "real_estate":
@@ -1660,7 +1659,6 @@ def fair_value(m, mac):
             return None
         ffo_ps = m["ocf"] / shares
         out.update(method="Kurs/FFO-Vielfaches", bear=ffo_ps * 12, base=ffo_ps * 15, bull=ffo_ps * 18)
-        out["calc"] = {"type": "ffo", "ffo": ffo_ps, "mult": 15}
         out["assumptions"] = [f"FFO je Aktie ≈ {fnum(ffo_ps, 2)} (operativer Cashflow)", "Vielfaches 12 / 15 / 18"]
     elif biz in ("pre_revenue",):
         return {"method": "", "na": "Ohne nennenswerten Umsatz ist kein fairer Wert berechenbar – der Wert hängt an Studien, "
@@ -1704,8 +1702,6 @@ def fair_value(m, mac):
                    bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, nd, shares),
                    base=dcf_value(base_fcf, g_base, r, 0.025, nd, shares),
                    bull=dcf_value(base_fcf, min(0.40, g_base + d), max(0.07, r - 0.01), 0.03, nd, shares))
-        out["calc"] = {"type": "dcf", "fcf": base_fcf, "g": g_base, "r": r, "gt": 0.025, "nd": nd, "shares": shares,
-                       "years": 10, "fade": 5, "spread": d}
         out["assumptions"] = [
             ("Owner Earnings (operativer Cashflow minus Abschreibungen) " if used_owner else "Free Cashflow ")
             + money(base_fcf, m['currency']) + (" (Ø der Geschäftsjahre, Zykliker)" if biz == "cyclical" else "" if used_owner else " (12 Monate)")
