@@ -294,6 +294,21 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
 .bizm{margin-top:16px}
+.fv-grid > *{min-width:0}
+.fvc{margin-top:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.fvc > summary{cursor:pointer;font-weight:600;font-size:14px;padding:10px 14px;color:var(--accent)}
+.fvc-body{padding:0 14px 12px}
+.fvc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:12px 18px;margin:4px 0 12px}
+.fvc-sl{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fvc-lab{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--text-2)}
+.fvc-lab b{color:var(--text)}
+.fvc-sl input[type=range]{width:100%;accent-color:var(--accent);height:28px;margin:0}
+.fvc-res{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border)}
+.fvc-cmp{display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--text-2);text-align:right}
+.fvc-imp{font-size:13.5px;padding:8px 10px;border-radius:8px;background:var(--accent-soft);margin-top:4px}
+.fvc-tbl td,.fvc-tbl th{white-space:nowrap}
+.fvc-cur{font-weight:700;outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+@media print{.fvc{display:none}}
 .seg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
 .seg-grid > *{min-width:0}
 .seg-card h3{margin:0 0 10px;font-size:15px}
@@ -1779,6 +1794,99 @@ function showGlossary() {
 }
 
 /* Fairer Wert: Spanne aus drei Szenarien mit Kursmarke + Analystenprognosen */
+/* Fair-Value-Rechner: gleiche Formel wie auf dem Server (dcf_value) */
+function dcfJs(fcf, g1, r, gt, nd, shares, years = 10, fade = 5) {
+  if (!(r > gt)) return null;
+  let pv = 0, cf = fcf;
+  for (let y = 1; y <= years; y++) {
+    const g = y <= fade ? g1 : g1 + (gt - g1) * (y - fade) / (years - fade);
+    cf *= 1 + g;
+    pv += cf / Math.pow(1 + r, y);
+  }
+  pv += cf * (1 + gt) / (r - gt) / Math.pow(1 + r, years);
+  const eq = pv - (nd || 0);
+  return eq > 0 && shares ? eq / shares : null;
+}
+let FVC = null;  // {calc, price, cur, base, vals}
+function fvcDefaults(c) {
+  // exakte Modellwerte (nicht gerundet), damit der Rechner anfangs genau den Modellwert zeigt
+  return c.type === "dcf" ? {g: c.g * 100, r: c.r * 100, gt: c.gt * 100, k: 100}
+    : c.type === "pb" ? {roe: c.roe * 100, coe: c.coe * 100} : {mult: c.mult};
+}
+function fvcValue(c, v) {
+  if (c.type === "dcf") return dcfJs(c.fcf * v.k / 100, v.g / 100, v.r / 100, v.gt / 100, c.nd, c.shares, c.years, c.fade);
+  if (c.type === "pb") return c.book * Math.max(0.2, (v.roe / 100 - c.g) / (v.coe / 100 - c.g));
+  return c.ffo * v.mult;
+}
+function fvcImplied(c, v, price) {
+  if (c.type === "dcf") {  // Wachstum, bei dem der faire Wert genau dem Kurs entspricht (Wert steigt mit dem Wachstum)
+    const f = g => dcfJs(c.fcf * v.k / 100, g, v.r / 100, v.gt / 100, c.nd, c.shares, c.years, c.fade) || 0;
+    let lo = -0.3, hi = 0.8;
+    if (f(hi) < price) return {txt: "über 80 % pro Jahr"};
+    if (f(lo) > price) return {txt: "unter −30 % pro Jahr"};
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (f(mid) < price) lo = mid; else hi = mid; }
+    return {val: (lo + hi) / 2, txt: pc((lo + hi) / 2, 1, true) + " pro Jahr (Jahre 1–5)"};
+  }
+  if (c.type === "pb") { const roe = price / c.book * (v.coe / 100 - c.g) + c.g; return {val: roe, txt: "Eigenkapitalrendite " + pc(roe, 1)}; }
+  return {val: price / c.ffo, txt: "Kurs/FFO " + nf(price / c.ffo, 1)};
+}
+function fvcSliders(c, v) {
+  const sl = (id, lab, min, max, step, val, fmt, hint) => `<label class="fvc-sl"><span class="fvc-lab">${lab}<b class="num" id="fvc-${id}-v">${fmt(val)}</b></span>
+    <input type="range" id="fvc-${id}" min="${min}" max="${max}" step="${step}" value="${val}" aria-label="${lab}">${hint ? `<small class="stamp">${hint}</small>` : ""}</label>`;
+  const p_ = x => nf(+x, 1) + " %", p2 = x => nf(+x, 2) + " %";
+  if (c.type === "dcf") return sl("g", "Umsatz-/Cashflow-Wachstum Jahre 1–5", -10, 40, 0.5, v.g, p_, "Jahre 6–10 flachen schrittweise auf das Dauerwachstum ab")
+    + sl("r", "Diskontsatz (geforderte Rendite)", 5, 15, 0.25, v.r, p2, "höher = vorsichtiger")
+    + sl("gt", "Dauerwachstum ab Jahr 11", 0, 4, 0.25, v.gt, p2, "langfristig etwa Inflation + reales Wachstum")
+    + sl("k", "Cashflow-Basis", 50, 150, 5, v.k, x => `${x} % · ${big(c.fcf * x / 100).join(" ")} ${esc(FVC.cur)}`, "100 % = Free Cashflow laut Modell; weniger, wenn du ihn für überhöht hältst");
+  if (c.type === "pb") return sl("roe", "Eigenkapitalrendite (ROE)", 0, 30, 0.5, v.roe, p_, "") + sl("coe", "Eigenkapitalkosten", 6, 15, 0.25, v.coe, p2, "höher = vorsichtiger");
+  return sl("mult", "Kurs/FFO-Vielfaches", 6, 30, 0.5, v.mult, x => nf(+x, 1), "Immobilienwerte meist 12–18");
+}
+function fvcRender() {
+  if (!FVC || !$("#fvc-out")) return;
+  const {calc: c, price, cur, base} = FVC, v = FVC.vals;
+  const val = fvcValue(c, v);
+  const im = fvcImplied(c, v, price);
+  if (val == null) { $("#fvc-out").innerHTML = `<div class="stamp">Mit diesen Annahmen ergibt sich kein positiver Wert (z. B. Diskontsatz ≤ Dauerwachstum oder Schulden größer als der Unternehmenswert).</div>`; return; }
+  const up = val / price - 1;
+  $("#fvc-out").innerHTML = `<div class="fvc-res"><div><div class="eyebrow">Dein fairer Wert</div><div class="fv-val num">${nf(val)} <small>${esc(cur)}</small></div></div>
+    <div class="fvc-cmp"><span>ggü. Kurs <b class="num" style="color:${up >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(up, 1, true)}</b></span>
+      <span>ggü. Modell <b class="num">${pc(val / base - 1, 1, true)}</b></span></div></div>
+    <div class="fvc-imp">Der aktuelle Kurs von ${nf(price)} ${esc(cur)} entspricht bei deinen übrigen Annahmen: <b>${im.txt}</b></div>`;
+  if (c.type === "dcf") {  // Empfindlichkeit: Wachstum × Diskontsatz rund um deine Einstellung
+    const gs = [-5, 0, 5].map(x => v.g + x), rs = [1, 0, -1].map(x => v.r + x);
+    $("#fvc-sens").innerHTML = `<div class="stamp" style="margin:10px 0 4px">So stark hängt der Wert an den Annahmen (fairer Wert in ${esc(cur)}):</div>
+      <div class="peer-scroll"><table class="trk fvc-tbl"><thead><tr><th title="Zeilen: Diskontsatz, Spalten: Wachstum Jahre 1–5">Zins ↓ Wachst. →</th>${gs.map(g => `<th class="num">${nf(g, 1)} %</th>`).join("")}</tr></thead>
+      <tbody>${rs.map(r => `<tr><td class="num">${nf(r, 2)} %</td>${gs.map(g => { const x = dcfJs(c.fcf * v.k / 100, g / 100, r / 100, v.gt / 100, c.nd, c.shares, c.years, c.fade);
+        return `<td class="num ${g === v.g && r === v.r ? "fvc-cur" : ""}" style="color:${x == null ? "inherit" : x >= price ? "var(--pos)" : "var(--neg)"}">${x == null ? "–" : nf(x, x < 10 ? 2 : 0)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
+      <div class="stamp">Grün = über dem aktuellen Kurs, rot = darunter.</div>`;
+  }
+}
+function fvcHtml(f, price, cur) {
+  if (!f || !f.calc || !f.base) return "";
+  FVC = {calc: f.calc, price, cur, base: f.base, vals: fvcDefaults(f.calc)};
+  return `<details class="fvc" id="fvc"><summary>Selbst rechnen: eigene Annahmen einstellen</summary>
+    <div class="fvc-body"><div class="fvc-grid" id="fvc-sliders">${fvcSliders(f.calc, FVC.vals)}</div>
+    <div id="fvc-out"></div><div id="fvc-sens"></div>
+    <div class="modal-actions" style="justify-content:flex-start"><button class="btn" id="fvc-reset" type="button">Auf Modellwerte zurücksetzen</button></div>
+    <p class="stamp" style="margin:4px 0 0">Gleiche Formel wie das Modell – nur mit deinen Annahmen. Die Empfehlung der App ändert sich dadurch nicht.</p></div></details>`;
+}
+document.addEventListener("input", e => {
+  const m_ = e.target.id && e.target.id.match(/^fvc-(\w+)$/);
+  if (!m_ || !FVC || !(m_[1] in FVC.vals)) return;
+  FVC.vals[m_[1]] = +e.target.value;
+  const lab = $(`#fvc-${m_[1]}-v`);
+  if (lab) { const c = FVC.calc; const x = +e.target.value;
+    lab.textContent = m_[1] === "k" ? `${x} % · ${big(c.fcf * x / 100).join(" ")} ${FVC.cur}` : m_[1] === "mult" ? nf(x, 1) : nf(x, m_[1] === "g" || m_[1] === "roe" ? 1 : 2) + " %"; }
+  fvcRender();
+});
+document.addEventListener("click", e => {
+  if (e.target.id !== "fvc-reset" || !FVC) return;
+  FVC.vals = fvcDefaults(FVC.calc);
+  $("#fvc-sliders").innerHTML = fvcSliders(FVC.calc, FVC.vals);
+  fvcRender();
+});
+document.addEventListener("toggle", e => { if (e.target.id === "fvc" && e.target.open) fvcRender(); }, true);
+
 function fairCard(d) {
   const f = d.fair, fc = d.forecast || {};
   if (!f && !(fc.rev && (fc.rev["0y"] || fc.rev["+1y"]))) return "";
@@ -1811,7 +1919,8 @@ function fairCard(d) {
       ${aboveBull ? `<div class="note" style="margin-top:12px">Der Kurs liegt sogar über dem optimistischen Szenario – der Markt erwartet mehr Wachstum oder einen niedrigeren Zins, als das Modell annimmt.</div>`
         : belowBear ? `<div class="note" style="margin-top:12px;border-color:var(--pos-line);background:var(--pos-soft);color:var(--text)">Der Kurs liegt unter dem vorsichtigen Szenario – auffällig günstig, sofern die Annahmen halten.</div>` : ""}
       <details class="fv-ass"><summary>Annahmen der Szenarien</summary><ul>${(f.assumptions || []).map(a => `<li>${esc(a)}</li>`).join("")}</ul>
-        <p class="stamp">Ein Cashflow-Modell reagiert stark auf Wachstum und Zins: 1 Prozentpunkt mehr Diskontsatz senkt den Wert oft um 15–25 %. Deshalb zählt der faire Wert nur moderat in die Bewertung.</p></details>`;
+        <p class="stamp">Ein Cashflow-Modell reagiert stark auf Wachstum und Zins: 1 Prozentpunkt mehr Diskontsatz senkt den Wert oft um 15–25 %. Deshalb zählt der faire Wert nur moderat in die Bewertung.</p></details>
+      ${fvcHtml(f, price, d.currency)}`;
   } else if (f && f.na) {
     range = `<div class="eyebrow">Fairer Wert je Aktie</div><p class="stamp" style="margin:6px 0 0">${esc(f.na)}</p>`;
   }
