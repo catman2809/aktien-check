@@ -91,6 +91,7 @@ a.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .suggest div+div{border-top:1px solid var(--border)}
 .suggest div:hover,.suggest div.act{background:var(--surface-2)}
 .suggest small{color:var(--text-3);white-space:nowrap}
+.suggest > div > span{min-width:0;overflow-wrap:anywhere}
 
 /* ---------- Section nav ---------- */
 .subnav{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:64px;z-index:15;display:none}
@@ -938,6 +939,10 @@ table.peers .neg{color:var(--neg)}
   .chip-btn{height:34px}
   .more{padding:8px 0;margin-top:0}
   .btn.xs{height:32px;padding:0 10px}
+  /* Suchvorschläge: volle Breite unter der Kopfzeile statt nur so breit wie das schmale Suchfeld */
+  .suggest{position:fixed;left:8px;right:8px;top:68px;max-height:calc(100vh - 88px);max-height:calc(100dvh - 88px);overflow-y:auto;z-index:30}
+  .suggest > div{flex-direction:column;align-items:flex-start;gap:2px}
+  .suggest small{white-space:normal}
 }
 </style>
 </head>
