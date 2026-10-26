@@ -294,6 +294,21 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
 .bizm{margin-top:16px}
+.qr-card{margin-top:16px}
+.qr-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 12px}
+@media (max-width:640px){.qr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.qr-k{display:flex;flex-direction:column;padding:8px 10px;border-radius:9px;background:var(--surface-2);min-width:0}
+.qr-k small{font-size:12px;color:var(--text-2)} .qr-k b{font-size:17px;margin:2px 0} .qr-k span{font-size:12.5px}
+.qr-pts{margin:0 0 6px;padding-left:18px;font-size:14px;line-height:1.55}
+.qr-ai{border-radius:10px;padding:10px 14px;margin-bottom:6px;border:1px solid var(--border);background:var(--surface-2)}
+.qr-ai.pos{border-color:var(--pos-line)} .qr-ai.neg{border-color:var(--neg-line)} .qr-ai.neu{border-color:var(--neu-line)}
+.qr-ai-h{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}
+.qr-ai ul{margin:8px 0;padding-left:18px;font-size:14px;line-height:1.5}
+.qr-out{font-size:14px;margin-bottom:6px}
+.qr-tone{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
+.qr-tone.pos{color:var(--pos);border-color:var(--pos-line);background:var(--pos-soft)}
+.qr-tone.neg{color:var(--neg);border-color:var(--neg-line);background:var(--neg-soft)}
+.qr-tone.neu{color:var(--neu);border-color:var(--neu-line);background:var(--neu-soft)}
 .seg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
 .seg-grid > *{min-width:0}
 .seg-card h3{margin:0 0 10px;font-size:15px}
@@ -944,7 +959,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -3536,6 +3551,35 @@ function bizSection(d) {
   </section>`;
 }
 
+function quarterSection(d) {
+  const Q = d.qreport;
+  if (!Q || !(Q.points || []).length) return "";
+  const date = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  const cur = esc(Q.currency || "");
+  const chg = (v, pp) => v == null ? "" : `<span class="num" style="color:${v >= 0 ? "var(--pos)" : "var(--neg)"}">${pp ? (v >= 0 ? "+" : "") + nf(v * 100, 1) + " Pp." : pc(v, 1, true)}</span>`;
+  const tile = (lab, val, sub) => `<div class="qr-k"><small>${lab}</small><b class="num">${val}</b><span>${sub || "&nbsp;"}</span></div>`;
+  const sp = Q.eps_surprise;
+  const A = Q.ai;
+  const toneCls = A ? ({positiv: "pos", negativ: "neg"}[A.tone] || "neu") : "";
+  const next = (d.events || []).find(e => e.type === "earnings" && String(e.date) > Q.end);
+  return `<section class="card pad qr-card" id="quartal" aria-label="Letzter Quartalsbericht">
+    <div class="eyebrow">Letzter Quartalsbericht · Quartal bis ${date(Q.end)}${Q.prev_end ? ` · Vergleich mit dem Vorjahresquartal` : ""}</div>
+    <div class="qr-kpis">
+      ${tile("Umsatz", Q.revenue != null ? big(Q.revenue).join(" ") + " " + cur : "–", chg(Q.revenue_g))}
+      ${tile("Operative Marge", Q.op_margin != null ? pc(Q.op_margin, 1) : "–", chg(Q.op_margin_chg, true))}
+      ${tile("Reinertrag", Q.net_income != null ? big(Q.net_income).join(" ") + " " + cur : "–", chg(Q.net_income_g))}
+      ${tile("Gewinn je Aktie", Q.eps_act != null ? nf(Q.eps_act, 2) : Q.eps != null ? nf(Q.eps, 2) : "–",
+             sp != null ? `<span style="color:${sp > 0.005 ? "var(--pos)" : sp < -0.005 ? "var(--neg)" : "var(--text-2)"}">${Math.abs(sp) > 0.005 ? pc(Math.abs(sp), 1) + (sp > 0 ? " über" : " unter") : "wie"} Erwartung (${nf(Q.eps_est, 2)})</span>` : chg(Q.eps_g))}
+    </div>
+    ${A ? `<div class="qr-ai ${toneCls}"><div class="qr-ai-h"><b>Das Wichtigste aus der Pressemitteilung</b>${A.tone ? `<span class="qr-tone ${toneCls}">${esc(A.tone[0].toUpperCase() + A.tone.slice(1))}</span>` : ""}</div>
+        <ul>${A.points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+        <div class="qr-out"><b>Ausblick:</b> ${esc(A.outlook || "–")}</div>
+        <div class="stamp">Von Claude (KI) aus der <a href="${esc(A.url)}" target="_blank" rel="noopener">Ergebnis-Pressemitteilung</a> vom ${date(Q.release.date)} zusammengefasst – ohne Gewähr.</div></div>`
+      : `${Q.release ? `<div class="stamp">Ergebnis-Pressemitteilung vom ${date(Q.release.date)}: <a href="${esc(Q.release.url)}" target="_blank" rel="noopener">bei der SEC lesen</a></div>` : ""}`}
+    <div class="stamp" style="margin-top:6px">Zahlen laut Yahoo Finance${Q.release ? " und SEC" : ""}${next ? ` · nächste Quartalszahlen am ${date(String(next.date).slice(0, 10))}${next.estimated ? " (geschätzt)" : ""}` : ""}.</div>
+  </section>`;
+}
+
 function segSection(d) {
   const G = d.sec?.segments;
   if (!G || !G.breakdowns?.length) return "";
@@ -3771,6 +3815,8 @@ function render(d) {
   $("#navsym").textContent = `${d.name} · ${R.label}`;
   const nk = document.querySelector('#subnav a[href="#konkurrenz"]');
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
+  const nq_ = document.querySelector('#subnav a[href="#quartal"]');
+  if (nq_) nq_.style.display = d.qreport?.points?.length ? "" : "none";
   const ns_ = document.querySelector('#subnav a[href="#segmente"]');
   if (ns_) ns_.style.display = d.sec?.segments?.breakdowns?.length ? "" : "none";
   const ng_ = document.querySelector('#subnav a[href="#geschaeft"]');
@@ -3904,6 +3950,8 @@ function render(d) {
   ${bizSection(d)}
 
   ${segSection(d)}
+
+  ${quarterSection(d)}
 
   ${fairCard(d)}
 

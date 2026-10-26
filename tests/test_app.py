@@ -1007,3 +1007,31 @@ class TestSecSegments(unittest.TestCase):
         self.assertEqual(a._seg_label("country:US", {}), "USA")
         self.assertEqual(a._seg_label("aapl:AmericasSegmentMember", {"aapl:AmericasSegmentMember": "Americas"}), "Amerika")
         self.assertEqual(a._seg_label("x:IPhoneMember", {"x:IPhoneMember": "iPhone [Member]"}), "iPhone")
+
+
+class TestQuarterAI(Isolated):
+    def test_summary_cached(self):
+        import unittest.mock as um
+        calls = []
+
+        class Resp:
+            def __init__(self, d): self.d = d
+            def __enter__(self): return self
+            def __exit__(self, *x): return False
+            def read(self): return json.dumps(self.d).encode()
+
+        def fake_open(req, timeout=0):
+            calls.append(req.full_url)
+            return Resp({"content": [{"type": "text", "text": '{"kernaussagen": ["Umsatz +16 %"], "ausblick": "Keine Prognose in der Mitteilung.", "ton": "positiv"}'}]})
+        with um.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}), \
+                um.patch.object(a, "sec_press_release", lambda cik, acc: ("Apple reports results. " * 40, "https://x/ex99.htm")), \
+                um.patch.object(a.urllib.request, "urlopen", fake_open):
+            r1 = a.quarter_ai(1, "0001-26-1", "Apple")
+            r2 = a.quarter_ai(1, "0001-26-1", "Apple")
+        self.assertEqual((r1["points"], r1["tone"], r1["url"]), (["Umsatz +16 %"], "positiv", "https://x/ex99.htm"))
+        self.assertEqual(r2["points"], r1["points"])
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(a.quarter_ai(1, "0001-26-2", "Apple"))  # ohne Schlüssel kein Aufruf
+
+    def test_html_text(self):
+        self.assertEqual(a._html_text("<p>Umsatz&nbsp;<b>109</b></p><script>x()</script><div>Q3</div>"), "Umsatz 109\nQ3")

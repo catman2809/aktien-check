@@ -4802,6 +4802,149 @@ def sec_entity(symbol, alternatives=(), name=""):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Letzter Quartalsbericht: Kennzahlen ggü. Vorjahresquartal + (US, mit ANTHROPIC_API_KEY) Zusammenfassung der Pressemitteilung
+# ---------------------------------------------------------------------------
+QSUM_KEEP = 300
+
+
+def _html_text(raw):
+    t_ = re.sub(r"(?is)<(script|style).*?</\1>", " ", raw)
+    t_ = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h\d)>", "\n", t_)
+    t_ = re.sub(r"<[^>]+>", " ", t_)
+    t_ = (t_.replace("&nbsp;", " ").replace("&#160;", " ").replace("&amp;", "&").replace("&#8217;", "'")
+          .replace("&#8220;", '"').replace("&#8221;", '"').replace("&#8212;", "–").replace("&#8211;", "–"))
+    t_ = re.sub(r"&#?\w+;", " ", t_)
+    t_ = re.sub(r"[ \t]+", " ", t_)
+    return re.sub(r" *\n[ \n]*", "\n", t_).strip()
+
+
+def sec_press_release(cik, acc):
+    """Text der Ergebnis-Pressemitteilung (Anlage 99.1) eines 8-K."""
+    folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}"
+    items = [i["name"] for i in _sec_json(folder + "/index.json")["directory"]["item"]]
+    ex = next((n for n in items if re.search(r"ex-?99|exhibit-?99", n, re.I) and n.lower().endswith((".htm", ".html"))), None)
+    if not ex:
+        return None, None
+    raw = _fetch(f"{folder}/{ex}", headers=SEC_UA, timeout=20, limit=3_000_000).decode("utf-8", "replace")
+    return _html_text(raw), f"{folder}/{ex}"
+
+
+def quarter_ai(cik, acc, name):
+    """Kernaussagen + Ausblick der Pressemitteilung, formuliert von Claude (je Meldung einmal, dann gespeichert)."""
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        return None
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("qsum") or {}).get(acc)
+    if hit:
+        return hit
+    text, url = sec_press_release(cik, acc)
+    if not text or len(text) < 500:
+        return None
+    prompt = (f"Ergebnis-Pressemitteilung von {name}:\n\n{text[:24000]}\n\n"
+              "Fasse auf Deutsch für Privatanleger zusammen, sachlich und ohne Kauf-/Verkaufsempfehlung:\n"
+              "1. kernaussagen: 4–5 Punkte, je höchstens 20 Wörter – die wichtigsten Zahlen und Entwicklungen "
+              "(Umsatz, Gewinn, Margen, wichtige Bereiche, Besonderheiten). Zahlen genau wie im Text.\n"
+              "2. ausblick: 1–2 Sätze zur Prognose des Managements für das nächste Quartal oder Jahr; "
+              "wenn keine Prognose genannt wird, schreibe genau: Keine Prognose in der Mitteilung.\n"
+              "3. ton: positiv, gemischt oder negativ – wie fällt das Quartal insgesamt aus?\n"
+              'Antworte nur mit JSON: {"kernaussagen": ["..."], "ausblick": "...", "ton": "..."}')
+    body = json.dumps({"model": os.environ.get("BIZ_AI_MODEL") or "claude-haiku-5-5", "max_tokens": 800,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=45) as r:
+        resp = json.loads(r.read())
+    txt = "".join(c.get("text", "") for c in resp.get("content") or [] if c.get("type") == "text")
+    js = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
+    out = {"points": [str(x).strip()[:240] for x in (js.get("kernaussagen") or [])][:5],
+           "outlook": str(js.get("ausblick") or "").strip()[:400], "tone": str(js.get("ton") or "").strip().lower()[:12],
+           "url": url, "t": int(time.time())}
+    if not out["points"]:
+        return None
+    with STORE.lock:
+        qs = data.setdefault("qsum", {})
+        qs[acc] = out
+        if len(qs) > QSUM_KEEP:
+            for k_ in sorted(qs, key=lambda k_: qs[k_].get("t", 0))[:len(qs) - QSUM_KEEP]:
+                qs.pop(k_, None)
+        STORE.dirty = True
+    LOG.info("[Quartal] %s: Pressemitteilung zusammengefasst", name)
+    return out
+
+
+def quarter_report(t, m, sec_=None):
+    """Letztes Quartal ggü. Vorjahresquartal aus Yahoo; Ergebnisüberraschung; bei US-Firmen Pressemitteilung."""
+    df = safe(lambda: t.quarterly_income_stmt)
+    if df is None or getattr(df, "empty", True):
+        return None
+    cols = sorted(df.columns, reverse=True)
+
+    def val(col, *names):
+        for nm in names:
+            if nm in df.index:
+                return num(df.loc[nm].get(col))
+        return None
+    rev = lambda c: val(c, "Total Revenue", "Operating Revenue")
+    q0 = next((c for c in cols if rev(c)), None)
+    if q0 is None:
+        return None
+    end0 = q0.to_pydatetime().replace(tzinfo=None)
+    q4 = next((c for c in cols if 330 <= (end0 - c.to_pydatetime().replace(tzinfo=None)).days <= 400 and rev(c)), None)
+    cur = m.get("fin_currency") or m.get("currency") or ""
+
+    def row(*names):
+        a_ = val(q0, *names)
+        b_ = val(q4, *names) if q4 is not None else None
+        return a_, b_
+    r0, r4 = row("Total Revenue", "Operating Revenue")
+    o0, o4 = row("Operating Income", "Total Operating Income As Reported", "EBIT")
+    n0, n4 = row("Net Income", "Net Income Common Stockholders")
+    e0, e4 = row("Diluted EPS", "Basic EPS")
+    growth = lambda a_, b_: (a_ / b_ - 1) if a_ is not None and b_ and b_ > 0 else None
+    om0 = o0 / r0 if o0 is not None and r0 else None
+    om4 = o4 / r4 if o4 is not None and r4 else None
+    out = {"end": end0.strftime("%Y-%m-%d"), "currency": cur, "prev_end": q4.strftime("%Y-%m-%d") if q4 is not None else None,
+           "revenue": r0, "revenue_g": growth(r0, r4), "op_margin": om0,
+           "op_margin_chg": (om0 - om4) if om0 is not None and om4 is not None else None,
+           "net_income": n0, "net_income_g": growth(n0, n4), "eps": e0, "eps_g": growth(e0, e4)}
+    # Ergebnis ggü. Analystenerwartung (gleiches Quartal, ±45 Tage)
+    for q in reversed(m.get("eps_quarters") or []):
+        qd = safe(lambda: datetime.fromisoformat(str(q.get("q"))[:10]))
+        if qd and abs((qd - end0).days) <= 45 and q.get("est") and q.get("act") is not None:
+            out["eps_est"], out["eps_act"] = q["est"], q["act"]
+            out["eps_surprise"] = (q["act"] - q["est"]) / abs(q["est"]) if q["est"] else None
+            break
+    pts = []
+    f_ = lambda x: fnum(x * 100, 1)
+    if r0:
+        pts.append(f"Umsatz {money(r0, cur)}" + (f" ({'+' if out['revenue_g'] >= 0 else ''}{f_(out['revenue_g'])} % ggü. Vorjahresquartal)" if out["revenue_g"] is not None else ""))
+    if om0 is not None:
+        pts.append(f"Operative Marge {f_(om0)} %" + (f" ({'+' if out['op_margin_chg'] >= 0 else ''}{f_(out['op_margin_chg'])} Prozentpunkte)" if out["op_margin_chg"] is not None else ""))
+    if n0 is not None:
+        pts.append(f"Reinertrag {money(n0, cur)}" + (f" ({'+' if out['net_income_g'] >= 0 else ''}{f_(out['net_income_g'])} %)" if out["net_income_g"] is not None else
+                                                     " (Vorjahresquartal mit Verlust)" if n4 is not None and n4 <= 0 < n0 else ""))
+    if out.get("eps_surprise") is not None:
+        s_ = out["eps_surprise"]
+        pts.append(f"Gewinn je Aktie {fnum(out['eps_act'], 2)} statt erwartet {fnum(out['eps_est'], 2)} – "
+                   + (f"{f_(s_)} % über der Erwartung" if s_ > 0.005 else f"{f_(-s_)} % unter der Erwartung" if s_ < -0.005 else "im Rahmen der Erwartung"))
+    elif e0 is not None:
+        pts.append(f"Gewinn je Aktie {fnum(e0, 2)} {cur}".strip())
+    out["points"] = pts
+    # US-Firmen: Ergebnis-Pressemitteilung (8-K, Punkt 2.02)
+    er = (sec_ or {}).get("earnings_8k")
+    if er and not 0 <= (datetime.fromisoformat(er["date"]) - end0).days <= 75:
+        er = None  # Meldung gehört zu einem anderen Quartal
+    if er:
+        out["release"] = er
+        ai = safe(lambda: quarter_ai(sec_["cik"], er["acc"], m["name"]))
+        if ai:
+            out["ai"] = ai
+    return out
+
+
 def sec_company(symbol, alternatives=(), name=""):
     """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
     hit = SEC_CACHE.get(("co", symbol))
@@ -4815,6 +4958,9 @@ def sec_company(symbol, alternatives=(), name=""):
     sub = _sec_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
     rc = (sub.get("filings") or {}).get("recent") or {}
     forms, dates, accs, docs = rc.get("form") or [], rc.get("filingDate") or [], rc.get("accessionNumber") or [], rc.get("primaryDocument") or []
+    items_ = rc.get("items") or [""] * len(forms)
+    earn = next(({"acc": a_, "date": d_, "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/"}
+                 for f_, d_, a_, i_ in zip(forms, dates, accs, items_) if f_ in ("8-K", "6-K") and "2.02" in (i_ or "")), None)
     del sub
     filings, seen, since = [], {}, (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     form4 = sum(1 for f_, d_ in zip(forms, dates) if f_ == "4" and d_ >= since)
@@ -4834,6 +4980,7 @@ def sec_company(symbol, alternatives=(), name=""):
         segs = safe(lambda: fseg.result(timeout=45)) if fseg else None
         annual, quarters = (safe(lambda: ffin.result(timeout=45)) or ([], [])) if ffin else ([], [])
     out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4, "domestic": domestic, "us_symbol": us_sym,
+           "earnings_8k": earn,
            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=&dateb=&owner=include&count=40",
            "annual": annual, "segments": segs,
            "crosscheck": safe(lambda: sec_crosscheck(symbol, quarters)) if domestic and symbol == us_sym else None}
@@ -5343,6 +5490,7 @@ def analyze(query):
         "tech": m.get("tech"),
         "profile": profile,
         "sec": sec_,
+        "qreport": safe(lambda: quarter_report(t, m, sec_)),
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],
