@@ -297,6 +297,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .bizm{margin-top:16px}
 .lang-btn{font-size:12.5px;font-weight:700;letter-spacing:.02em;width:auto;min-width:38px;padding:0 9px}
 .qr-card{margin-top:16px}
+.src-badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:var(--surface-2);color:var(--text);margin-left:2px}
 .dv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px}
 @media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
 .dv-grid > *{min-width:0}
@@ -3833,7 +3834,7 @@ function quarterSection(d) {
         <div class="qr-out"><b>Ausblick:</b> ${esc(A.outlook || "–")}</div>
         <div class="stamp">Von Claude (KI) aus der <a href="${esc(A.url)}" target="_blank" rel="noopener">Ergebnis-Pressemitteilung</a> vom ${date(Q.release.date)} zusammengefasst – ohne Gewähr.</div></div>`
       : `${Q.release ? `<div class="stamp">Ergebnis-Pressemitteilung vom ${date(Q.release.date)}: <a href="${esc(Q.release.url)}" target="_blank" rel="noopener">bei der SEC lesen</a></div>` : ""}`}
-    <div class="stamp" style="margin-top:6px">Zahlen laut Yahoo Finance${Q.release ? " und SEC" : ""}${next ? ` · nächste Quartalszahlen am ${date(String(next.date).slice(0, 10))}${next.estimated ? " (geschätzt)" : ""}` : ""}.</div>
+    <div class="stamp" style="margin-top:6px">${Q.source === "SEC" ? "Zahlen laut 10-Q/10-K-Meldung an die SEC" : `Zahlen laut Yahoo Finance${Q.release ? " und SEC" : ""}`}${next ? ` · nächste Quartalszahlen am ${date(String(next.date).slice(0, 10))}${next.estimated ? " (geschätzt)" : ""}` : ""}.</div>
   </section>`;
 }
 
@@ -3874,7 +3875,7 @@ function crosscheckCard(S) {
     <div class="peer-scroll"><table class="trk"><thead><tr><th>Quartal bis</th><th class="num">Umsatz (USD)</th><th class="num">Reinertrag (USD)</th><th class="num">Gewinn je Aktie</th></tr></thead>
     <tbody>${C.rows.map(r => `<tr><td>${date(r.end)}</td>${cell(r.revenue, true)}${cell(r.net_income, true)}${cell(r.eps, false)}</tr>`).join("")}</tbody></table></div>
     <div class="stamp" style="margin-top:6px">Werte laut 10-Q/10-K-Meldungen an die SEC (4. Quartal = Geschäftsjahr minus Q1–Q3). ✓ = Yahoo stimmt überein (Toleranz 1–3 %).
-      ⚠ = Yahoo weicht ab – oft wegen anderer Abgrenzung (z. B. Anlageerträge im Umsatz), manchmal wegen eines Datenfehlers; im Zweifel gilt die SEC-Meldung.</div></div>`;
+      ⚠ = Yahoo weicht ab – oft wegen anderer Abgrenzung (z. B. Anlageerträge im Umsatz), manchmal wegen eines Datenfehlers. Die Analyse rechnet mit den SEC-Werten.</div></div>`;
 }
 
 function secSection(d) {
@@ -4259,7 +4260,8 @@ function render(d) {
   <h2 class="section" id="fundamental">Fundamentaldaten</h2>
   <p class="section-sub">${etf ? "Kosten, Rendite, Risiko und Streuung sowie die Bewertung der enthaltenen Aktien."
     : crypto ? "Markt und Netzwerk, Angebot und Inflation, Marktzyklus, Risiko und Stimmung."
-    : "Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen."}</p>
+    : "Tier 4: Geschäftsmodell, Bilanz, Kapitalallokation, Bewertung im Vergleich und eingepreiste Erwartungen."}${d.fin_source === "SEC EDGAR"
+      ? ` <span class="src-badge">Geschäftszahlen: SEC EDGAR</span> aus den offiziellen 10-K/10-Q-Meldungen; Kurse und Analystenwerte von Yahoo Finance.` : ""}</p>
   <div class="fund">${d.fundamentals.map((s, i) => `
     <div class="card"><h3><span>${i + 1}</span>${esc(s.title)}</h3>
       <div>${s.rows.map(r => `<div class="frow"><div class="fk">${esc(r[0])}${r[2] ? `<div class="fh">${esc(r[2])}</div>` : ""}</div>

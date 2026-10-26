@@ -220,6 +220,7 @@ WILD = [
     ("Zyklische Branche ({*})", "Cyclical industry ({*})"), ("Defensive Branche ({*})", "Defensive industry ({*})"),
     ("KGV {0} vs. Branchen-Referenz ~{1} ({*})", "P/E {0} vs. industry reference ~{1} ({*})"), ("Größte Branche: {*} {0}", "Largest sector: {*} {0}"),
     ("Stammdaten des Unternehmens. Quellen: {*}.", "Company master data. Sources: {*}."),
+    ("Stand {0} {1}:{2} · Quellen: {*}", "As of {0} {1}:{2} · sources: {*}"),
     ("{0} Wettbewerber aus der Branche „{*}“ im Vergleich. Zeile antippen, um den Wettbewerber zu analysieren.", "{0} competitors from the “{*}” industry compared. Tap a row to analyze a competitor."),
     ("Piotroski F-Score {0}/{1} (≥ {2} stark, ≤ {3} schwach) – nicht erfüllt: {*}", "Piotroski F-Score {0}/{1} (≥ {2} strong, ≤ {3} weak) – not met: {*}"),
     ("{*} ist im Sektor {*1} tätig ({*2}).", "{*} operates in the {*1} sector ({*2})."),

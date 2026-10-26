@@ -518,6 +518,28 @@ def fill_info(t, info, hint=None):
     if fin_cur:
         info["financialCurrency"] = fin_cur
     info["_fx_done"] = True  # Bilanzwerte in info liegen bereits in Kurswährung vor
+    mcap = info.get("marketCap")
+    if mcap is None and price:
+        shares = num(safe(lambda: fi.shares)) or ttm(qbs, bs, "Ordinary Shares Number", "Share Issued", flow=False)
+        mcap = price * shares if shares else None
+        put("marketCap", mcap)
+    statement_info(put, price, mcap, inc, qinc, cf, qcf, bs, qbs)
+    # Beta ggü. S&P 500 (1 Jahr, Tagesrenditen)
+    if hist is not None and len(hist) > 100:
+        idx = safe(lambda: yf.Ticker("^GSPC").history(period="1y")["Close"])
+        if idx is not None and len(idx) > 100:
+            def norm(series):
+                r = series.pct_change()
+                r.index = (r.index.tz_localize(None) if r.index.tz is not None else r.index).normalize()
+                return r
+            j = norm(hist["Close"]).to_frame("a").join(norm(idx).to_frame("b"), how="inner").dropna()
+            if len(j) > 60 and j["b"].var() > 0:
+                put("beta", float(j["a"].cov(j["b"]) / j["b"].var()))
+    return info
+
+
+def statement_info(put, price, mcap, inc, qinc, cf, qcf, bs, qbs):
+    """Kennzahlen im Format von Yahoos 'info' aus GuV, Bilanz und Cashflow (12 Monate bzw. letzter Stichtag)."""
     rev = ttm(qinc, inc, "Total Revenue")
     ni = ttm(qinc, inc, "Net Income")
     op = ttm(qinc, inc, "Operating Income")
@@ -526,16 +548,10 @@ def fill_info(t, info, hint=None):
     eps = ttm(qinc, inc, "Diluted EPS", "Basic EPS")
     fcf = ttm(qcf, cf, "Free Cash Flow")
     debt = ttm(qbs, bs, "Total Debt", flow=False)
-    cash = ttm(qbs, bs, "Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments", flow=False)
+    cash = ttm(qbs, bs, "Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents", flow=False)
     equity = ttm(qbs, bs, "Stockholders Equity", "Common Stock Equity", flow=False)
     assets = ttm(qbs, bs, "Total Assets", flow=False)
     divs_paid = ttm(qcf, cf, "Cash Dividends Paid", "Common Stock Dividend Paid")
-    mcap = info.get("marketCap")
-    if mcap is None and price:
-        shares = num(safe(lambda: fi.shares)) or ttm(qbs, bs, "Ordinary Shares Number", "Share Issued", flow=False)
-        mcap = price * shares if shares else None
-        put("marketCap", mcap)
-
     put("totalRevenue", rev)
     put("ebitda", ebitda)
     put("freeCashflow", fcf)
@@ -569,18 +585,6 @@ def fill_info(t, info, hint=None):
         put("revenueGrowth", qr[0] / qr[4] - 1)
     if len(qn) >= 5 and qn[0] and qn[4] and qn[4] > 0:
         put("earningsGrowth", qn[0] / qn[4] - 1)
-    # Beta ggü. S&P 500 (1 Jahr, Tagesrenditen)
-    if hist is not None and len(hist) > 100:
-        idx = safe(lambda: yf.Ticker("^GSPC").history(period="1y")["Close"])
-        if idx is not None and len(idx) > 100:
-            def norm(series):
-                r = series.pct_change()
-                r.index = (r.index.tz_localize(None) if r.index.tz is not None else r.index).normalize()
-                return r
-            j = norm(hist["Close"]).to_frame("a").join(norm(idx).to_frame("b"), how="inner").dropna()
-            if len(j) > 60 and j["b"].var() > 0:
-                put("beta", float(j["a"].cov(j["b"]) / j["b"].var()))
-    return info
 
 
 UNSUPPORTED_TYPES = {"INDEX": "Index", "FUTURE": "Terminkontrakt (Future)", "CURRENCY": "Devisenkurs",
@@ -3169,7 +3173,13 @@ def income_data(symbol, freq):
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
     t = yf.Ticker(symbol)
+    us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
+    st = safe(lambda: sec_statements_for(symbol)) if us_listed and not os.environ.get("NO_SEC_STATEMENTS") else None
+    sec_df = st["income"][0 if freq == "annual" else 1] if st else None
+    source = "SEC EDGAR" if sec_df is not None and not sec_df.empty else None
     df = safe(lambda: t.income_stmt if freq == "annual" else t.quarterly_income_stmt)
+    if source:  # SEC zuerst; Yahoo nur für Perioden, die die SEC noch nicht hat
+        df = merge_frames(sec_df, df)
     if (df is None or getattr(df, "empty", True)) and freq == "annual" and "." not in symbol:
         sc = safe(lambda: sec_company(symbol))
         if sc and sc.get("annual"):  # Ersatz: offizielle Jahreszahlen aus SEC EDGAR
@@ -3209,8 +3219,12 @@ def income_data(symbol, freq):
     periods = periods[-5:] if freq == "annual" else periods[-6:]
     if not periods:
         raise ValueError("Keine Geschäftszahlen verfügbar")
+    if source and any(p_["end"] not in {c.date().isoformat() for c in sec_df.columns} for p_ in periods):
+        source = "SEC EDGAR + Yahoo Finance"
     out = {"symbol": symbol, "freq": freq, "periods": periods,
-           "currency": financial_currency(symbol) or safe(lambda: t.fast_info.currency) or ""}
+           "currency": "USD" if source else financial_currency(symbol) or safe(lambda: t.fast_info.currency) or ""}
+    if source:
+        out["source"] = source
     INCOME_CACHE[key] = (time.time(), out)
     return out
 
@@ -4516,7 +4530,55 @@ SEC_FORMS = {"10-K": "Jahresbericht", "10-Q": "Quartalsbericht", "8-K": "Wichtig
              "6-K": "Zwischenmeldung (Ausland)", "DEF 14A": "Einladung Hauptversammlung", "S-1": "Börsenprospekt"}
 SEC_REVENUE = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
                "RevenueFromContractWithCustomerIncludingAssessedTax", "RevenuesNetOfInterestExpense")
-SEC_FACTS_KEEP = set(SEC_REVENUE) | {"NetIncomeLoss", "OperatingIncomeLoss", "EarningsPerShareDiluted"}
+# Jahresabschlüsse aus SEC-XBRL (us-gaap) mit den Zeilennamen von yfinance; je Periode zählt die erste vorhandene Kennzahl
+SEC_FLOW_ROWS = {
+    "Cost Of Revenue": ("CostOfRevenue", "CostOfGoodsAndServicesSold", "CostOfGoodsSold", "CostOfServices"),
+    "Gross Profit": ("GrossProfit",),
+    "Research And Development": ("ResearchAndDevelopmentExpense", "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"),
+    "Operating Income": ("OperatingIncomeLoss",),
+    "Interest Expense": ("InterestExpense", "InterestExpenseNonoperating", "InterestExpenseDebt"),
+    "Pretax Income": ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+                      "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"),
+    "Tax Provision": ("IncomeTaxExpenseBenefit",),
+    "Net Income": ("NetIncomeLoss", "NetIncomeLossAvailableToCommonStockholdersBasic", "ProfitLoss"),
+    "Operating Cash Flow": ("NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"),
+    "_capex": ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets",
+               "PaymentsForCapitalImprovements", "PaymentsToAcquireRealEstate"),
+    "Depreciation And Amortization": ("DepreciationDepletionAndAmortization", "DepreciationAmortizationAndAccretionNet",
+                                      "DepreciationAndAmortization", "Depreciation"),
+    "Stock Based Compensation": ("ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"),
+    "_buyback": ("PaymentsForRepurchaseOfCommonStock",),
+    "_dividends": ("PaymentsOfDividendsCommonStock", "PaymentsOfDividends"),
+    "_acquisitions": ("PaymentsToAcquireBusinessesNetOfCashAcquired",),
+}
+SEC_PER_SHARE_ROWS = {"Diluted EPS": ("EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"),
+                      "Basic EPS": ("EarningsPerShareBasic", "EarningsPerShareBasicAndDiluted")}
+SEC_SHARE_ROWS = {"Diluted Average Shares": ("WeightedAverageNumberOfDilutedSharesOutstanding",),
+                  "Basic Average Shares": ("WeightedAverageNumberOfSharesOutstandingBasic",)}
+SEC_INSTANT_ROWS = {
+    "Total Assets": ("Assets",), "Current Assets": ("AssetsCurrent",), "Current Liabilities": ("LiabilitiesCurrent",),
+    "_liabilities": ("Liabilities",), "Stockholders Equity": ("StockholdersEquity",),
+    "_total_equity": ("StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",),
+    "Retained Earnings": ("RetainedEarningsAccumulatedDeficit",),
+    "Cash And Cash Equivalents": ("CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "Cash"),
+    "_st_invest": ("ShortTermInvestments", "MarketableSecuritiesCurrent", "AvailableForSaleSecuritiesDebtSecuritiesCurrent"),
+    "_ltd_noncurrent": ("LongTermDebtNoncurrent",), "_ltdcl_noncurrent": ("LongTermDebtAndCapitalLeaseObligations",),
+    "_ltd": ("LongTermDebt", "UnsecuredLongTermDebt"), "_ltdcl": ("LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",),
+    "_ltd_current": ("LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent"), "_debt_current": ("DebtCurrent",),
+    "_st_borrow": ("ShortTermBorrowings", "OtherShortTermBorrowings"), "_cp": ("CommercialPaper",),
+    "_notes": ("NotesPayable", "SeniorNotes", "UnsecuredDebt"), "_loans": ("LoansPayable",), "_secured": ("SecuredDebt",),
+    "_loc": ("LineOfCredit", "LongTermLineOfCredit"),
+    "_oplease": ("OperatingLeaseLiability",), "_oplease_nc": ("OperatingLeaseLiabilityNoncurrent",),
+    "_oplease_c": ("OperatingLeaseLiabilityCurrent",), "_finlease": ("FinanceLeaseLiability",),
+    "_finlease_nc": ("FinanceLeaseLiabilityNoncurrent",), "_finlease_c": ("FinanceLeaseLiabilityCurrent",),
+    "Minority Interest": ("MinorityInterest",),
+}
+SEC_INSTANT_SHARES = {"Ordinary Shares Number": ("CommonStockSharesOutstanding",)}
+SEC_FACTS_KEEP = set(SEC_REVENUE) | {c for rows in (SEC_FLOW_ROWS, SEC_PER_SHARE_ROWS, SEC_SHARE_ROWS, SEC_INSTANT_ROWS,
+                                                    SEC_INSTANT_SHARES) for cs in rows.values() for c in cs}
+SEC_FACTS_YEARS = 12      # so weit zurück bleiben Werte im Speicher
+SEC_FACTS_MAX = 6         # Rohdaten höchstens so vieler Firmen gleichzeitig (die fertigen Abschlüsse bleiben länger)
+SEC_FACTS_LOCKS = {}
 
 
 def sec_cik(symbol):
@@ -4701,40 +4763,92 @@ def sec_segments(cik, acc, form):
     return {"form": form, "end": uniq[0]["end"], "currency": currency, "url": folder + "/", "breakdowns": uniq[:3]}
 
 
-def _sec_concept(cik, concept):
-    """Eine Kennzahl aus companyfacts (einmal je Firma geladen, nur die benötigten Kennzahlen bleiben im Speicher)."""
+def _sec_facts(cik):
+    """Benötigte us-gaap-Kennzahlen einer Firma (companyfacts einmal je Tag geladen; je Periode nur die jüngste Meldung)."""
     hit = SEC_CACHE.get(("facts", cik))
-    if not hit or time.time() - hit[0] > 86400:
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]
+    with SEC_FACTS_LOCKS.setdefault(cik, threading.Lock()):  # parallele Abrufe derselben Firma nur einmal laden
+        hit = SEC_CACHE.get(("facts", cik))
+        if hit and time.time() - hit[0] < 86400:
+            return hit[1]
         d = _sec_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", timeout=30)
-        keep = {k: v for k, v in ((d.get("facts") or {}).get("us-gaap") or {}).items() if k in SEC_FACTS_KEEP}
+        cutoff = f"{datetime.now().year - SEC_FACTS_YEARS}-01-01"
+        keep = {}
+        for k, v in ((d.get("facts") or {}).get("us-gaap") or {}).items():
+            if k not in SEC_FACTS_KEEP:
+                continue
+            units = {}
+            for u, rows in (v.get("units") or {}).items():
+                best = {}
+                for r_ in rows:
+                    if (r_.get("end") or "") < cutoff or r_.get("val") is None:
+                        continue
+                    key_, filed = (r_.get("start"), r_["end"]), r_.get("filed") or ""
+                    if key_ not in best or filed > best[key_]["filed"]:
+                        best[key_] = {"start": r_.get("start"), "end": r_["end"], "val": r_["val"], "filed": filed}
+                units[u] = list(best.values())
+            keep[k] = {"units": units}
         del d
-        hit = (time.time(), keep)
-        SEC_CACHE[("facts", cik)] = hit
-    return hit[1].get(concept) or {}
+        SEC_CACHE[("facts", cik)] = (time.time(), keep)
+        old = sorted((v[0], k) for k, v in list(SEC_CACHE.items()) if isinstance(k, tuple) and k[0] == "facts")
+        for _ts, k in old[:-SEC_FACTS_MAX]:
+            SEC_CACHE.pop(k, None)
+        return keep
 
 
-def _sec_periods(d, unit):
-    """Jahres- und Quartalswerte einer Kennzahl; Q4 = Geschäftsjahr minus Q1–Q3."""
-    years, quarters = {}, {}
+def _sec_concept(cik, concept):
+    """Eine Kennzahl aus companyfacts."""
+    return _sec_facts(cik).get(concept) or {}
+
+
+def _sec_periods(d, unit, derive=True):
+    """Jahres- und Quartalswerte einer Kennzahl. Fehlende Quartale werden aus kumulierten Angaben abgeleitet
+    (Q2 = Halbjahr − Q1, Q4 = Geschäftsjahr − 9 Monate bzw. − Q1–Q3) – Cashflows melden Firmen nur kumuliert."""
+    dur = {}
     for r_ in (d.get("units") or {}).get(unit) or []:
         if not r_.get("start") or not r_.get("end"):
             continue
-        days = (datetime.fromisoformat(r_["end"]) - datetime.fromisoformat(r_["start"])).days
-        filed = r_.get("filed") or ""
-        tgt = years if 350 <= days <= 380 else quarters if 80 <= days <= 100 else None
-        if tgt is None:
-            continue
-        old = tgt.get(r_["end"])
-        if not old or filed > old[2]:
-            tgt[r_["end"]] = (r_["start"], r_["val"], filed)
+        k_, filed = (r_["start"], r_["end"]), r_.get("filed") or ""
+        if k_ not in dur or filed > dur[k_][1]:
+            dur[k_] = (r_["val"], filed)
+    days = lambda a_, b_: (datetime.fromisoformat(b_) - datetime.fromisoformat(a_)).days
+    years, quarters = {}, {}
+    for (st, en), (val, _f) in dur.items():
+        n = days(st, en)
+        if 350 <= n <= 380:
+            years[en] = (st, val)
+        elif 80 <= n <= 100:
+            quarters[en] = (st, val)
     q = {e: v[1] for e, v in quarters.items()}
-    for end, (start, val, _f) in years.items():
-        if end in q:
-            continue
-        inside = [v[1] for e, v in quarters.items() if v[0] >= start and e < end]
-        if len(inside) == 3:
-            q[end] = val - sum(inside)
+    if derive:
+        by_start = {}
+        for (st, en), (val, _f) in dur.items():
+            by_start.setdefault(st, []).append((en, val))
+        for st, lst in by_start.items():
+            lst.sort()
+            for (e1, v1), (e2, v2) in zip(lst, lst[1:]):
+                if e2 not in q and 80 <= days(e1, e2) <= 100 and days(st, e2) <= 380:
+                    q[e2] = v2 - v1
+        for end, (start, val) in years.items():
+            if end in q:
+                continue
+            inside = [v[1] for e, v in quarters.items() if v[0] >= start and e < end]
+            if len(inside) == 3:
+                q[end] = val - sum(inside)
     return {e: v[1] for e, v in years.items()}, q
+
+
+def _sec_instants(d, unit="USD"):
+    """Stichtagswerte (Bilanz) einer Kennzahl: Datum -> Wert der jüngsten Meldung."""
+    out = {}
+    for r_ in (d.get("units") or {}).get(unit) or []:
+        if r_.get("start") or not r_.get("end"):
+            continue
+        filed = r_.get("filed") or ""
+        if r_["end"] not in out or filed > out[r_["end"]][1]:
+            out[r_["end"]] = (r_["val"], filed)
+    return {e: v[0] for e, v in out.items()}
 
 
 def sec_financials(cik):
@@ -4751,6 +4865,229 @@ def sec_financials(cik):
     annual = [{"end": e, "revenue": rev_y[e], "net_income": ni_y.get(e), "op_income": op_y.get(e)} for e in sorted(rev_y) if e in ni_y][-5:]
     quarters = [{"end": e, "revenue": rev_q[e], "net_income": ni_q.get(e), "eps": eps_q.get(e)} for e in sorted(rev_q)][-6:]
     return annual, quarters
+
+
+def sec_statements(cik):
+    """GuV, Bilanz und Cashflow (5 Geschäftsjahre, 8 Quartale) aus den 10-K/10-Q-Meldungen – als DataFrames mit den
+    Zeilennamen von yfinance, damit alle Kennzahlen unverändert darauf rechnen. None bei Firmen ohne aktuelle USD-Abschlüsse."""
+    hit = SEC_CACHE.get(("st", cik))
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]
+    import pandas as pd
+    facts = _sec_facts(cik)
+
+    def flows(concepts, unit="USD", pick=None, derive=True):
+        ys, qs = {}, {}
+        for c in concepts:
+            y_, q_ = _sec_periods(facts.get(c) or {}, unit, derive)
+            for src, dst in ((y_, ys), (q_, qs)):
+                for e, v in src.items():
+                    dst[e] = v if e not in dst else (pick(dst[e], v) if pick else dst[e])
+        return ys, qs
+
+    def instants(concepts, unit="USD"):
+        out = {}
+        for c in concepts:
+            for e, v in _sec_instants(facts.get(c) or {}, unit).items():
+                out.setdefault(e, v)
+        return out
+    F = {"Total Revenue": flows(SEC_REVENUE, pick=max)}  # je Periode die umfassendste Umsatzkennzahl
+    F.update({n: flows(cs) for n, cs in SEC_FLOW_ROWS.items()})
+    F.update({n: flows(cs, "USD/shares") for n, cs in SEC_PER_SHARE_ROWS.items()})
+    F.update({n: flows(cs, "shares", derive=False) for n, cs in SEC_SHARE_ROWS.items()})
+    I = {n: instants(cs) for n, cs in SEC_INSTANT_ROWS.items()}
+    I.update({n: instants(cs, "shares") for n, cs in SEC_INSTANT_SHARES.items()})
+    ni_y, ni_q = F["Net Income"]
+    a_ends = sorted(e for e in ni_y if e in F["Total Revenue"][0] or not F["Total Revenue"][0])[-5:]
+    if not a_ends or (datetime.now() - datetime.fromisoformat(a_ends[-1])).days > 550:
+        SEC_CACHE[("st", cik)] = (time.time(), None)
+        return None
+    q_ends = sorted(e for e in ni_q if e >= a_ends[0])[-8:]
+
+    def inst(name, e):
+        d_ = I[name]
+        if e in d_:
+            return d_[e]
+        de = datetime.fromisoformat(e)
+        near = [(abs((datetime.fromisoformat(e2) - de).days), v) for e2, v in d_.items()]
+        near = [x for x in near if x[0] <= 3]
+        return min(near)[1] if near else None
+
+    def total(*vals):
+        vals = [v for v in vals if v is not None]
+        return sum(vals) if vals else None
+
+    def period(e, k):
+        f = lambda n: F[n][k].get(e)
+        i = lambda n: inst(n, e)
+        rev, cost, op, pretax = f("Total Revenue"), f("Cost Of Revenue"), f("Operating Income"), f("Pretax Income")
+        tax, intexp, da = f("Tax Provision"), f("Interest Expense"), f("Depreciation And Amortization")
+        ocf, capex = f("Operating Cash Flow"), f("_capex")
+        gp = f("Gross Profit")
+        if gp is None and rev is not None and cost is not None:
+            gp = rev - cost
+        ebit = op  # Banken/Versicherer melden kein operatives Ergebnis – EBIT/EBITDA ergeben dort keinen Sinn
+        inc = {"Total Revenue": rev, "Cost Of Revenue": cost, "Gross Profit": gp,
+               "Research And Development": f("Research And Development"), "Operating Income": op, "EBIT": ebit,
+               "EBITDA": ebit + da if ebit is not None and da is not None else None, "Interest Expense": intexp,
+               "Pretax Income": pretax, "Tax Provision": tax,
+               "Tax Rate For Calcs": clamp(tax / pretax, 0, 0.5) if tax is not None and pretax and pretax > 0 else None,
+               "Net Income": f("Net Income"), "Diluted EPS": f("Diluted EPS"), "Basic EPS": f("Basic EPS"),
+               "Diluted Average Shares": f("Diluted Average Shares"), "Basic Average Shares": f("Basic Average Shares")}
+        neg = lambda v: -v if v is not None else None
+        cfl = {"Operating Cash Flow": ocf, "Capital Expenditure": neg(capex),
+               "Free Cash Flow": ocf - capex if ocf is not None and capex is not None else None,
+               "Depreciation And Amortization": da, "Stock Based Compensation": f("Stock Based Compensation"),
+               "Repurchase Of Capital Stock": neg(f("_buyback")), "Cash Dividends Paid": neg(f("_dividends")),
+               "Purchase Of Business": neg(f("_acquisitions"))}
+        assets, equity, mi = i("Total Assets"), i("Stockholders Equity"), i("Minority Interest")
+        liab = i("_liabilities")
+        if liab is None and assets is not None and (i("_total_equity") or equity) is not None:
+            liab = assets - (i("_total_equity") if i("_total_equity") is not None else equity + (mi or 0))
+        # Finanzschulden + Finanzierungsleasing (Operating-Leasing zählt nicht als Schuld, wird aber separat ausgewiesen)
+        ltd_nc, cl_in = i("_ltd_noncurrent"), False
+        if ltd_nc is None and i("_ltdcl_noncurrent") is not None:
+            ltd_nc, cl_in = i("_ltdcl_noncurrent"), True
+        if ltd_nc is None:
+            ltd_all, cl_in = (i("_ltd"), False) if i("_ltd") is not None else (i("_ltdcl"), True)
+            if ltd_all is not None:
+                ltd_nc = ltd_all - (i("_ltd_current") or 0)
+        if ltd_nc is None:  # z. B. REITs: Anleihen, Kredite, Hypotheken und Kreditlinien einzeln
+            ltd_nc = total(i("_notes"), i("_loans"), i("_secured"), i("_loc"))
+        cur_debt = i("_debt_current")
+        if cur_debt is None:
+            cur_debt = total(i("_ltd_current"), i("_st_borrow"), i("_cp"))
+        fin_lease = i("_finlease") if i("_finlease") is not None else total(i("_finlease_nc"), i("_finlease_c"))
+        leases = total(i("_oplease") if i("_oplease") is not None else total(i("_oplease_nc"), i("_oplease_c")), fin_lease)
+        fin_debt = total(ltd_nc, cur_debt)
+        cash = i("Cash And Cash Equivalents")
+        bal = {"Total Assets": assets, "Current Assets": i("Current Assets"), "Current Liabilities": i("Current Liabilities"),
+               "Total Liabilities Net Minority Interest": liab, "Stockholders Equity": equity, "Common Stock Equity": equity,
+               "Retained Earnings": i("Retained Earnings"), "Cash And Cash Equivalents": cash,
+               "Cash Cash Equivalents And Short Term Investments": total(cash, i("_st_invest")) if cash is not None else None,
+               "Long Term Debt": ltd_nc, "Current Debt": cur_debt, "Capital Lease Obligations": leases,
+               "Total Debt": total(fin_debt, None if cl_in else fin_lease),
+               "Invested Capital": fin_debt + equity if fin_debt is not None and equity is not None else None,
+               "Minority Interest": mi, "Ordinary Shares Number": i("Ordinary Shares Number")}
+        return inc, bal, cfl
+
+    def frames(ends, k):
+        cols = [pd.Timestamp(e) for e in reversed(ends)]  # neueste zuerst, wie yfinance
+        per = [period(e, k) for e in reversed(ends)]
+        out = []
+        for j in range(3):
+            data = {n: [p_[j][n] if p_[j][n] is not None else float("nan") for p_ in per] for n in per[0][j]} if per else {}
+            df = pd.DataFrame.from_dict(data, orient="index", columns=cols, dtype=float) if data else pd.DataFrame()
+            out.append(df.dropna(how="all"))
+        return out
+    ai, ab, ac = frames(a_ends, 0)
+    qi, qb, qc = frames(q_ends, 1)
+    st = {"income": (ai, qi), "balance": (ab, qb), "cashflow": (ac, qc), "end": a_ends[-1], "cik": cik}
+    SEC_CACHE[("st", cik)] = (time.time(), st)
+    return st
+
+
+def merge_frames(primary, extra, tol_days=10):
+    """SEC-Werte haben Vorrang; Yahoo ergänzt fehlende Zeilen und Lücken (Spalten mit höchstens 10 Tagen Abstand
+    gelten als dieselbe Periode)."""
+    if primary is None or getattr(primary, "empty", True):
+        return extra
+    if extra is None or getattr(extra, "empty", True):
+        return primary
+    import pandas as pd
+    out = primary.copy()
+    naive = lambda c: pd.Timestamp(c).tz_localize(None) if pd.Timestamp(c).tzinfo else pd.Timestamp(c)
+    ycols = [(naive(c), c) for c in extra.columns]
+    fill = {}
+    # Perioden, die Yahoo hat, die SEC aber (noch) nicht – etwa nach der Pressemitteilung, vor der 10-Q-Meldung: ganz von Yahoo
+    for yc, orig in ycols:
+        if all(abs((yc - c).days) > tol_days for c in out.columns) and any(num(safe(lambda: extra.loc[n, orig])) is not None for n in
+                                                  ("Total Revenue", "Net Income", "Total Assets", "Operating Cash Flow") if n in extra.index):
+            for name in extra.index:
+                v = num(safe(lambda: extra.loc[name, orig]))
+                if v is not None:
+                    fill.setdefault(name, {})[yc] = v
+    for col in out.columns:
+        near = min(ycols, key=lambda x: abs((x[0] - col).days), default=None)
+        if near is None or abs((near[0] - col).days) > tol_days:
+            continue
+        for name in extra.index:
+            if name in fill and col in fill[name]:
+                continue
+            v = num(safe(lambda: extra.loc[name, near[1]]))
+            if v is None:
+                continue
+            if name in out.index and num(out.loc[name, col]) is not None:
+                continue
+            fill.setdefault(name, {})[col] = v
+    if fill:
+        add = pd.DataFrame.from_dict(fill, orient="index").astype(float)
+        cols = sorted(set(out.columns) | set(add.columns), reverse=True)
+        out = out.combine_first(add).reindex(columns=cols)
+        order = list(primary.index) + [n for n in add.index if n not in primary.index]
+        out = out.reindex(order)
+    return out
+
+
+class SecTicker:
+    """yfinance-Ticker, dessen Geschäftsberichte aus SEC EDGAR stammen; Yahoo füllt nur Lücken.
+    Kurse, Dividenden, Analysten usw. kommen unverändert vom ursprünglichen Ticker."""
+    YF_NAMES = {"income": "income_stmt", "balance": "balance_sheet", "cashflow": "cashflow"}
+
+    def __init__(self, t, st):
+        self._t, self._st, self._memo = t, st, {}
+
+    def __getattr__(self, name):
+        return getattr(self._t, name)
+
+    def _get(self, kind, q):
+        if (kind, q) not in self._memo:
+            yname = ("quarterly_" if q else "") + self.YF_NAMES[kind]
+            self._memo[(kind, q)] = merge_frames(self._st[kind][q], safe(lambda: getattr(self._t, yname)))
+        return self._memo[(kind, q)]
+
+    def from_sec(self, col):
+        """Stammt diese Periode (Spalte) aus den SEC-Meldungen?"""
+        import pandas as pd
+        c = pd.Timestamp(col).tz_localize(None) if pd.Timestamp(col).tzinfo else pd.Timestamp(col)
+        return any(c == x for kind in self.YF_NAMES for df in self._st[kind] for x in df.columns)
+
+    income_stmt = property(lambda s: s._get("income", 0))
+    quarterly_income_stmt = property(lambda s: s._get("income", 1))
+    balance_sheet = property(lambda s: s._get("balance", 0))
+    quarterly_balance_sheet = property(lambda s: s._get("balance", 1))
+    cashflow = property(lambda s: s._get("cashflow", 0))
+    quarterly_cashflow = property(lambda s: s._get("cashflow", 1))
+
+
+SEC_INFO_KEYS = ("totalRevenue", "ebitda", "freeCashflow", "totalDebt", "totalCash", "trailingEps", "profitMargins",
+                 "operatingMargins", "grossMargins", "returnOnEquity", "returnOnAssets", "trailingPE", "enterpriseValue",
+                 "enterpriseToEbitda", "priceToBook", "priceToSalesTrailing12Months", "payoutRatio", "revenueGrowth",
+                 "earningsGrowth")
+
+
+def sec_info(t, info):
+    """Yahoo-'info' mit Kennzahlen aus den SEC-Abschlüssen überschreiben (Yahoo bleibt nur dort, wo SEC nichts liefert)."""
+    info = dict(info)
+    k = fx_rate("USD", info.get("currency"))
+    frames = [convert_df(safe(lambda n=n: getattr(t, n)), k) for n in
+              ("income_stmt", "quarterly_income_stmt", "cashflow", "quarterly_cashflow", "balance_sheet", "quarterly_balance_sheet")]
+    yahoo = {key_: info.pop(key_) for key_ in SEC_INFO_KEYS if key_ in info}
+
+    def put(key_, val):
+        if val is not None and info.get(key_) is None:
+            info[key_] = val
+    statement_info(put, current_price(info), num(info.get("marketCap")), *frames)
+    for key_, v in yahoo.items():
+        info.setdefault(key_, v)
+    info["financialCurrency"], info["_fx_done"], info["_sec"] = "USD", True, True
+    return info
+
+
+def sec_statements_for(symbol, alternatives=(), name=""):
+    """Offizielle Abschlüsse zur Aktie (US-Firmen mit 10-K/10-Q, auch über eine Auslandsnotierung); sonst None."""
+    ent = sec_entity(symbol, alternatives, name)
+    return sec_statements(ent[0]) if ent else None
 
 
 def sec_crosscheck(symbol, quarters):
@@ -4908,6 +5245,7 @@ def quarter_report(t, m, sec_=None):
     om0 = o0 / r0 if o0 is not None and r0 else None
     om4 = o4 / r4 if o4 is not None and r4 else None
     out = {"end": end0.strftime("%Y-%m-%d"), "currency": cur, "prev_end": q4.strftime("%Y-%m-%d") if q4 is not None else None,
+           "source": "SEC" if isinstance(t, SecTicker) and t.from_sec(q0) else "Yahoo",
            "revenue": r0, "revenue_g": growth(r0, r4), "op_margin": om0,
            "op_margin_chg": (om0 - om4) if om0 is not None and om4 is not None else None,
            "net_income": n0, "net_income_g": growth(n0, n4), "eps": e0, "eps_g": growth(e0, e4)}
@@ -5479,20 +5817,29 @@ def analyze(query):
         result = analyze_etf(symbol, t, info, alternatives, query)
         CACHE[key] = (time.time(), result)
         return result
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        fm = ex.submit(gather, symbol, t, info)
-        fmac = ex.submit(gather_macro, info.get("currency") or "")
+    with ThreadPoolExecutor(max_workers=8) as ex:
         company = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
+        equity_ = info.get("quoteType", "EQUITY") == "EQUITY"
+        fst = ex.submit(sec_statements_for, symbol, alternatives, company) if equity_ and not os.environ.get("NO_SEC_STATEMENTS") else None
+
+        def gather_primary(t0=t):  # Geschäftszahlen primär aus SEC EDGAR, Yahoo füllt Lücken
+            st = safe(lambda: fst.result(timeout=35)) if fst else None
+            if st:
+                t_ = SecTicker(t0, st)
+                return gather(symbol, t_, sec_info(t_, info)), t_
+            return gather(symbol, t0, info), t0
+        fm = ex.submit(gather_primary)
+        fmac = ex.submit(gather_macro, info.get("currency") or "")
         siblings = sibling_names(company, symbol)
         fnews = ex.submit(collect_news, symbol, company, info.get("website") or "", siblings)
         ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         fpeer = ex.submit(competitors, symbol, info, alternatives)
         fprof = ex.submit(company_profile, symbol, info, company)
-        fsec = ex.submit(sec_company, symbol, alternatives, company) if info.get("quoteType", "EQUITY") == "EQUITY" else None
+        fsec = ex.submit(sec_company, symbol, alternatives, company) if equity_ else None
         us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
         fder = ex.submit(derivatives, symbol, current_price(info)) if us_listed else None  # parallel laden
-        m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
+        (m, t), mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
         profile = safe(lambda: fprof.result(timeout=30))
@@ -5586,7 +5933,9 @@ def analyze(query):
         "forecast": {"rev": m.get("est_rev") or {}, "eps": m.get("est_eps") or {}, "n": est_analysts(m),
                      "fpe": m.get("fpe"), "currency": m["currency"]},
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
-        "sources": ["Yahoo Finance"] + (["Finnhub"] if m["finnhub"] else [])
+        "fin_source": "SEC EDGAR" if isinstance(t, SecTicker) else "Yahoo Finance",
+        "sources": (["SEC EDGAR (Geschäftszahlen)", "Yahoo Finance (Kurse und Analysten)"] if isinstance(t, SecTicker) else ["Yahoo Finance"])
+                   + (["Finnhub"] if m["finnhub"] else [])
                    + (["Analysten-Schlagzeilen"] if m.get("target_n") else []) + ["Google News", "Pressedienste"],
     }
     CACHE[key] = (time.time(), result)

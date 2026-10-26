@@ -1009,6 +1009,87 @@ class TestSecSegments(unittest.TestCase):
         self.assertEqual(a._seg_label("x:IPhoneMember", {"x:IPhoneMember": "iPhone [Member]"}), "iPhone")
 
 
+class TestSecStatements(unittest.TestCase):
+    """Jahresabschlüsse aus SEC-XBRL als primäre Quelle (synthetische companyfacts, ohne Internet)."""
+
+    @staticmethod
+    def dur(start, end, val, filed="2026-02-01"):
+        return {"start": start, "end": end, "val": val, "filed": filed}
+
+    def facts(self):
+        d, i = self.dur, (lambda end, val: {"end": end, "val": val, "filed": "2026-02-01"})
+        rev = [d("2024-01-01", "2024-12-31", 360), d("2025-01-01", "2025-12-31", 400),
+               d("2025-01-01", "2025-03-31", 90), d("2025-04-01", "2025-06-30", 100), d("2025-07-01", "2025-09-30", 100),
+               d("2024-01-01", "2024-03-31", 85), d("2024-04-01", "2024-06-30", 90), d("2024-07-01", "2024-09-30", 90)]
+        ni = [dict(r_, val=r_["val"] / 10) for r_ in rev]
+        # Cashflows nur kumuliert (3/6/9/12 Monate), wie in den 10-Q-Meldungen
+        ocf = [d("2025-01-01", "2025-03-31", 20), d("2025-01-01", "2025-06-30", 45), d("2025-01-01", "2025-09-30", 70),
+               d("2025-01-01", "2025-12-31", 100), d("2024-01-01", "2024-12-31", 80)]
+        capex = [dict(r_, val=r_["val"] / 5) for r_ in ocf]
+        u = lambda rows, unit="USD": {"units": {unit: rows}}
+        return {"Revenues": u(rev), "NetIncomeLoss": u(ni), "NetCashProvidedByUsedInOperatingActivities": u(ocf),
+                "PaymentsToAcquirePropertyPlantAndEquipment": u(capex),
+                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest":
+                    u([d("2025-01-01", "2025-12-31", 50)]),
+                "IncomeTaxExpenseBenefit": u([d("2025-01-01", "2025-12-31", 10)]),
+                "Assets": u([i("2025-12-31", 1000), i("2024-12-31", 900)]),
+                "StockholdersEquity": u([i("2025-12-31", 400), i("2024-12-31", 380)]),
+                "LongTermDebtNoncurrent": u([i("2025-12-31", 200)]), "LongTermDebtCurrent": u([i("2025-12-31", 20)]),
+                "CommercialPaper": u([i("2025-12-31", 5)]), "FinanceLeaseLiability": u([i("2025-12-31", 7)]),
+                "OperatingLeaseLiability": u([i("2025-12-31", 30)]),
+                "CashAndCashEquivalentsAtCarryingValue": u([i("2025-12-31", 60)]), "ShortTermInvestments": u([i("2025-12-31", 40)])}
+
+    def build(self):
+        import unittest.mock as um
+        a.SEC_CACHE.pop(("st", 1), None)
+        with um.patch.object(a, "_sec_facts", return_value=self.facts()),                 um.patch.object(a, "datetime", wraps=a.datetime) as dt:
+            dt.now.return_value = a.datetime(2026, 3, 1)
+            dt.fromisoformat = a.datetime.fromisoformat
+            st = a.sec_statements(1)
+        a.SEC_CACHE.pop(("st", 1), None)
+        return st
+
+    def test_ytd_cashflow_quarters(self):
+        y, q = a._sec_periods(self.facts()["NetCashProvidedByUsedInOperatingActivities"], "USD")
+        self.assertEqual(y, {"2025-12-31": 100, "2024-12-31": 80})
+        self.assertEqual(q, {"2025-03-31": 20, "2025-06-30": 25, "2025-09-30": 25, "2025-12-31": 30})
+        shares = {"units": {"shares": [self.dur("2025-01-01", "2025-12-31", 100), self.dur("2025-01-01", "2025-09-30", 90)]}}
+        self.assertEqual(a._sec_periods(shares, "shares", derive=False)[1], {})  # Durchschnittszahlen nie ableiten
+
+    def test_statements_yahoo_layout(self):
+        st = self.build()
+        inc, qinc = st["income"]
+        bs, cf = st["balance"][0], st["cashflow"][0]
+        self.assertEqual([c.strftime("%Y-%m-%d") for c in inc.columns], ["2025-12-31", "2024-12-31"])  # neueste zuerst
+        self.assertEqual(a.row(qinc, "Total Revenue")[:4], [110, 100, 100, 90])  # Q4 = Jahr − Q1–Q3
+        self.assertAlmostEqual(a.first(a.row(inc, "Tax Rate For Calcs")), 0.2)
+        self.assertEqual(a.first(a.row(cf, "Capital Expenditure")), -20)
+        self.assertEqual(a.first(a.row(cf, "Free Cash Flow")), 80)
+        self.assertEqual(a.first(a.row(bs, "Total Debt")), 232)  # 200 + 20 + 5 + Finanzierungsleasing 7, ohne Operating-Leasing
+        self.assertEqual(a.first(a.row(bs, "Capital Lease Obligations")), 37)
+        self.assertEqual(a.first(a.row(bs, "Cash Cash Equivalents And Short Term Investments")), 100)
+
+    def test_merge_prefers_sec_and_fills_gaps(self):
+        sec = pd.DataFrame({pd.Timestamp("2025-12-31"): [400.0, float("nan")]}, index=["Total Revenue", "Net Income"])
+        yahoo = pd.DataFrame({pd.Timestamp("2026-03-31"): [105.0, 9.0, 1.0], pd.Timestamp("2025-12-30"): [390.0, 38.0, 2.0]},
+                             index=["Total Revenue", "Net Income", "EBITDA"])
+        out = a.merge_frames(sec, yahoo)
+        self.assertEqual(list(out.columns), [pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")])  # neuere Yahoo-Periode
+        self.assertEqual(a.row(out, "Total Revenue"), [105.0, 400.0])  # SEC hat Vorrang
+        self.assertEqual(a.row(out, "Net Income"), [9.0, 38.0])        # Lücke aus Yahoo
+        self.assertEqual(a.row(out, "EBITDA"), [1.0, 2.0])             # Zeile nur bei Yahoo
+
+    def test_sec_info_overrides_yahoo(self):
+        st = self.build()
+        t = a.SecTicker(type("T", (), {"ticker": "X"})(), st)
+        info = a.sec_info(t, {"currency": "USD", "currentPrice": 10.0, "marketCap": 1000.0, "totalRevenue": 1.0,
+                              "forwardPE": 12.0})
+        self.assertEqual(info["totalRevenue"], 400)       # 12 Monate aus den SEC-Quartalen
+        self.assertEqual(info["forwardPE"], 12.0)         # Analystenwerte bleiben von Yahoo
+        self.assertEqual(info["totalCash"], 100)
+        self.assertTrue(info["_sec"])
+
+
 class TestQuarterAI(Isolated):
     def test_summary_cached(self):
         import unittest.mock as um
