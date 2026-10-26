@@ -1047,3 +1047,24 @@ class TestEnglish(unittest.TestCase):
         self.assertEqual(a.tr_en("Unbekannter deutscher Satz bleibt"), "Unbekannter deutscher Satz bleibt")
         self.assertEqual(a.tr_en("Termine nächste Woche:\n• Di 27.10. SAP SE: Quartalszahlen"),
                          "Events next week:\n• Tue Oct 27 SAP SE: Quarterly results")
+
+
+class TestOptions(unittest.TestCase):
+    def test_aggregation(self):
+        import unittest.mock as um
+        import pandas as pd
+        exp = (a.datetime.now() + a.timedelta(days=30)).strftime("%Y-%m-%d")
+        calls = pd.DataFrame({"strike": [90.0, 100.0], "openInterest": [300, 100], "volume": [50, 30], "lastPrice": [12.0, 4.0],
+                              "impliedVolatility": [0.3, 0.25], "currency": ["USD", "USD"]})
+        puts = pd.DataFrame({"strike": [90.0, 100.0], "openInterest": [100, 100], "volume": [20, 0], "lastPrice": [1.0, 5.0],
+                             "impliedVolatility": [0.32, 0.35], "currency": ["USD", "USD"]})
+
+        class T:
+            options = (exp,)
+        with um.patch.object(a.yf, "Ticker", lambda s: T()), um.patch.object(a, "_opt_chain", lambda s, e: (e, calls, puts)):
+            d = a.options_data("XYZ", price=99.0)
+        self.assertEqual((d["oi"]["calls"], d["oi"]["puts"], d["vol"]["calls"], d["vol"]["puts"]), (400, 200, 80, 20))
+        self.assertAlmostEqual(d["pc_oi"], 0.5)
+        self.assertAlmostEqual(d["prem"]["calls"], (50 * 12 + 30 * 4) * 100)
+        self.assertAlmostEqual(d["iv_atm"], 0.30)  # Strike 100 am nächsten: (0,25 + 0,35) / 2
+        self.assertEqual(a.derivatives("ALV.DE"), {"na": "eu"})

@@ -296,6 +296,19 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .bizm{margin-top:16px}
 .lang-btn{font-size:12.5px;font-weight:700;letter-spacing:.02em;width:auto;min-width:38px;padding:0 9px}
 .qr-card{margin-top:16px}
+.dv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px}
+@media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
+.dv-grid > *{min-width:0}
+.dv-split{margin-bottom:14px}
+.dv-lab{display:flex;justify-content:space-between;gap:8px;font-size:14px;margin-bottom:6px}
+.dv-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
+.dv-bar i{display:block;height:100%;min-width:2px}
+.dv-bar i.long,.dot.long{background:var(--pos)} .dv-bar i.short,.dot.short{background:var(--neg)}
+.dv-leg{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px;font-size:12.5px;color:var(--text-2)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.dv-kpis{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:0}
+.dv-read{font-size:14px;padding:8px 10px;border-radius:8px;background:var(--surface-2);margin-bottom:10px}
+.dv-tbl td,.dv-tbl th{white-space:nowrap}
 .qr-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 12px}
 @media (max-width:640px){.qr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .qr-k{display:flex;flex-direction:column;padding:8px 10px;border-radius:9px;background:var(--surface-2);min-width:0}
@@ -962,7 +975,7 @@ table.peers .neg{color:var(--neg)}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
     <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
-    <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
+    <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#derivate">Derivate</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
 </nav>
@@ -2315,6 +2328,46 @@ function drawValChart() {
     <span style="color:var(--sma50)"><i></i><span style="color:var(--text-2)">Gewinn je Aktie × ${nf(v.pe_norm, 1)} (Normal-KGV)</span></span>
     ${(v.est || []).length ? `<span style="color:var(--sma50)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Prognose der Analysten</span></span>` : ""}</div>
     <span>Liegt der Kurs über der orangen Linie, ist die Aktie teurer als üblich – darunter günstiger.</span>`;
+}
+
+/* Derivate: Optionen – Long (Calls) vs. Short (Puts), Volumen, Put/Call */
+function derivSection(d) {
+  const D = d.derivatives;
+  if (!D || d.asset === "crypto") return "";
+  const head = `<h2 class="section" id="derivate">Derivate</h2>`;
+  if (D.na) return head + `<div class="card empty">${D.na === "eu"
+    ? "Keine Optionsdaten: Für Werte, die nur an europäischen Börsen gehandelt werden, liefert Yahoo keine Daten der Terminbörse Eurex – und es gibt keine US-Notierung mit Optionen."
+    : "Für diesen Wert werden derzeit keine Optionen gehandelt."}</div>`;
+  const date = iso => iso ? new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "–";
+  const n0 = v => nf(v, 0), usd = v => big(v).join(" ") + " " + esc(D.currency);
+  const split = (lab, c, p_, fmt) => {
+    const tot = c + p_, cs = tot ? c / tot : 0;
+    return `<div class="dv-split"><div class="dv-lab"><b>${lab}</b><span class="stamp">${fmt(tot)} gesamt</span></div>
+      <div class="dv-bar" role="img" aria-label="${lab}: Calls ${pc(cs, 0)}, Puts ${pc(1 - cs, 0)}"><i class="long" style="width:${cs * 100}%"></i><i class="short" style="width:${(1 - cs) * 100}%"></i></div>
+      <div class="dv-leg"><span><b class="dot long"></b>Long (Calls) <b class="num">${pc(cs, 1)}</b> · ${fmt(c)}</span><span><b class="dot short"></b>Short (Puts) <b class="num">${pc(1 - cs, 1)}</b> · ${fmt(p_)}</span></div></div>`;
+  };
+  const pcTxt = v => v == null ? "–" : v < 0.7 ? "überwiegend Calls – optimistische Positionierung" : v <= 1.0 ? "ausgeglichen" : v <= 1.5 ? "mehr Puts – eher vorsichtig bzw. abgesichert" : "deutlich mehr Puts – starke Absicherung oder Pessimismus";
+  const kpi = (lab, val, sub) => `<div class="qr-k"><small>${lab}</small><b class="num">${val}</b><span>${sub || "&nbsp;"}</span></div>`;
+  const sf = d.facts?.short_float;
+  return head + `<p class="section-sub">Optionen auf ${esc(D.symbol)}${D.adr ? " (US-Notierung/ADR)" : ""} an US-Börsen · ${D.expiries} Verfallstermine · Stand ${date(D.asof)} · Quelle: Yahoo Finance.
+      Calls setzen auf steigende Kurse (long), Puts auf fallende (short) oder dienen als Absicherung.</p>
+    <div class="dv-grid">
+      <div class="card pad">${split("Offene Positionen (Open Interest)", D.oi.calls, D.oi.puts, x => n0(x) + " Kontrakte")}
+        ${split("Volumen heute", D.vol.calls, D.vol.puts, x => n0(x) + " Kontrakte")}
+        ${split("Gehandelter Wert heute (Prämien)", D.prem.calls, D.prem.puts, usd)}</div>
+      <div class="card pad"><div class="qr-kpis dv-kpis">
+          ${kpi("Put/Call (offen)", D.pc_oi != null ? nf(D.pc_oi, 2) : "–", D.near_pc_oi != null ? "nächste 30 Tage: " + nf(D.near_pc_oi, 2) : "")}
+          ${kpi("Put/Call (Volumen)", D.pc_vol != null ? nf(D.pc_vol, 2) : "–", "heute")}
+          ${kpi("Volumen heute", usd(D.prem.calls + D.prem.puts), n0(D.vol.calls + D.vol.puts) + " Kontrakte")}
+          ${kpi("Implizite Volatilität", D.iv_atm != null ? pc(D.iv_atm, 1) : "–", "am Geld, ~1–2 Monate")}
+        </div>
+        <div class="dv-read"><b>Einordnung:</b> ${pcTxt(D.pc_oi)}.${sf != null ? ` Leerverkaufsquote der Aktie: <b class="num">${pc(sf, 1)}</b> des Streubesitzes.` : ""}</div>
+        <div class="peer-scroll"><table class="trk dv-tbl"><thead><tr><th>Verfall</th><th class="num">Calls offen</th><th class="num">Puts offen</th><th class="num">Put/Call</th><th class="num">Volumen C / P</th></tr></thead>
+          <tbody>${D.by_expiry.map(r => `<tr><td>${date(r.date)} <small class="stamp">${r.days} T.</small></td><td class="num">${n0(r.c_oi)}</td><td class="num">${n0(r.p_oi)}</td>
+            <td class="num">${r.c_oi ? nf(r.p_oi / r.c_oi, 2) : "–"}</td><td class="num">${n0(r.c_vol)} / ${n0(r.p_vol)}</td></tr>`).join("")}</tbody></table></div>
+        <p class="stamp" style="margin:8px 0 0">Hinweis: Zu jeder Option gibt es einen Käufer und einen Verkäufer – Calls und Puts zeigen vor allem die Positionierung der Optionskäufer.
+          Ein hohes Put/Call-Verhältnis gilt teils als Kontraindikator (viel Absicherung = viel Angst). Fließt nicht in die Empfehlung ein.</p></div>
+    </div>`;
 }
 
 /* Analysten: Kursziel-Spanne, Urteile im Zeitverlauf, Gewinnüberraschungen */
@@ -4014,6 +4067,8 @@ function render(d) {
   $("#navsym").textContent = `${d.name} · ${R.label}`;
   const nk = document.querySelector('#subnav a[href="#konkurrenz"]');
   if (nk) nk.textContent = etf ? "Zusammensetzung" : "Konkurrenz";
+  const nd_ = document.querySelector('#subnav a[href="#derivate"]');
+  if (nd_) nd_.style.display = d.derivatives && !crypto ? "" : "none";
   const nq_ = document.querySelector('#subnav a[href="#quartal"]');
   if (nq_) nq_.style.display = d.qreport?.points?.length ? "" : "none";
   const ns_ = document.querySelector('#subnav a[href="#segmente"]');
@@ -4191,6 +4246,8 @@ function render(d) {
   ${peersSection(d)}
 
   ${analystSection(d)}
+
+  ${derivSection(d)}
 
   ${healthSection(d)}
 

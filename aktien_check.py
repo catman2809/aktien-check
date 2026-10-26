@@ -4076,6 +4076,7 @@ def analyze_etf(symbol, t, info, alternatives, query=""):
         "etf": {"top": m["top"][:10], "sectors": m["sectors"], "assets": m["assets"], "family": m["family"],
                 "ratings": m["ratings"], "gov_share": m["gov_share"], "duration": m["duration"], "maturity": m["maturity"],
                 "pe": m["pe"], "pb": m["pb"], "bond": m["bond_etf"], "issuer": iss},
+        "derivatives": safe(lambda: derivatives(symbol, m.get("price"))) if "." not in symbol else {"na": "eu"},
         "news": news, "notes": notes, "confidence": confidence, "events": [], "tech": m.get("tech"),
         "competitors": {"peers": [], "source": "", "industry": ""}, "profile": None,
         "model": {"key": "etf", "label": "ETF-Modell", "text": notes[0]},
@@ -4945,6 +4946,85 @@ def quarter_report(t, m, sec_=None):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Derivate: Optionen (Calls = Positionen auf steigende, Puts = auf fallende Kurse) – Open Interest, Volumen, Put/Call
+# ---------------------------------------------------------------------------
+OPT_MAX_EXP = 24
+
+
+def _opt_chain(sym, exp):
+    ch = yf.Ticker(sym).option_chain(exp)
+    return exp, ch.calls, ch.puts
+
+
+def options_data(sym, price=None):
+    """Aggregiert alle Verfallstermine (Yahoo, US-Optionsbörsen). None, wenn es keine Optionen gibt."""
+    exps = list(safe(lambda: yf.Ticker(sym).options, ()) or ())[:OPT_MAX_EXP]
+    if not exps:
+        return None
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        chains = [r_ for r_ in ex.map(lambda e: safe(lambda: _opt_chain(sym, e)), exps) if r_]
+    if not chains:
+        return None
+    today = datetime.now().date()
+    tot = {k: 0.0 for k in ("c_oi", "p_oi", "c_vol", "p_vol", "c_prem", "p_prem", "c_oival", "p_oival")}
+    rows, last_trade, cur, iv_atm = [], None, "", None
+
+    def col(df, name):
+        return df[name].fillna(0) if name in df else 0
+    for exp, c, p_ in chains:
+        cur = cur or (str(c["currency"].dropna().iloc[0]) if "currency" in c and c["currency"].notna().any() else "")
+        r_ = {"date": exp, "days": (datetime.strptime(exp, "%Y-%m-%d").date() - today).days,
+              "c_oi": float(col(c, "openInterest").sum()), "p_oi": float(col(p_, "openInterest").sum()),
+              "c_vol": float(col(c, "volume").sum()), "p_vol": float(col(p_, "volume").sum())}
+        for side, df in (("c", c), ("p", p_)):
+            lp = col(df, "lastPrice")
+            tot[f"{side}_prem"] += float((col(df, "volume") * lp * 100).sum())
+            tot[f"{side}_oival"] += float((col(df, "openInterest") * lp * 100).sum())
+            if "lastTradeDate" in df and len(df):
+                lt = safe(lambda: df["lastTradeDate"].max())
+                if lt is not None and (last_trade is None or lt > last_trade):
+                    last_trade = lt
+        for k in ("c_oi", "p_oi", "c_vol", "p_vol"):
+            tot[k] += r_[k]
+        rows.append(r_)
+        # implizite Volatilität am Geld: erster Verfall in 20–60 Tagen
+        if iv_atm is None and price and 20 <= r_["days"] <= 60 and "impliedVolatility" in c and len(c) and len(p_):
+            ivs = []
+            for df in (c, p_):
+                i_ = (df["strike"] - price).abs().idxmin()
+                v_ = num(df.loc[i_, "impliedVolatility"])
+                if v_ and 0.01 < v_ < 5:
+                    ivs.append(v_)
+            iv_atm = sum(ivs) / len(ivs) if ivs else None
+    if tot["c_oi"] + tot["p_oi"] <= 0 and tot["c_vol"] + tot["p_vol"] <= 0:
+        return None
+    pc_oi = tot["p_oi"] / tot["c_oi"] if tot["c_oi"] else None
+    pc_vol = tot["p_vol"] / tot["c_vol"] if tot["c_vol"] else None
+    near = [r_ for r_ in rows if r_["days"] <= 30]
+    return {"symbol": sym, "currency": cur or "USD", "expiries": len(rows),
+            "asof": last_trade.strftime("%Y-%m-%d") if hasattr(last_trade, "strftime") else None,
+            "oi": {"calls": tot["c_oi"], "puts": tot["p_oi"]}, "vol": {"calls": tot["c_vol"], "puts": tot["p_vol"]},
+            "prem": {"calls": tot["c_prem"], "puts": tot["p_prem"]}, "oi_value": {"calls": tot["c_oival"], "puts": tot["p_oival"]},
+            "pc_oi": pc_oi, "pc_vol": pc_vol, "iv_atm": iv_atm,
+            "near_pc_oi": (sum(r_["p_oi"] for r_ in near) / sum(r_["c_oi"] for r_ in near)) if near and sum(r_["c_oi"] for r_ in near) else None,
+            "by_expiry": rows[:8]}
+
+
+def derivatives(symbol, price=None, sec_=None, currency=""):
+    """Optionen der Aktie bzw. – bei europäischen Aktien – ihrer US-Notierung (ADR)."""
+    base_us = "." not in symbol.replace("-", "") or re.fullmatch(r"[A-Z]+-[A-Z]", symbol)
+    us_sym = symbol if base_us else ((sec_ or {}).get("us_symbol") if (sec_ or {}).get("us_symbol") != symbol else None)
+    if not us_sym:
+        return {"na": "eu"}
+    px = price if base_us else safe(lambda: float(yf.Ticker(us_sym).fast_info.last_price))  # ADR-Kurs in USD
+    od = safe(lambda: options_data(us_sym, px))
+    if not od:
+        return {"na": "none", "symbol": us_sym}
+    od["adr"] = not base_us
+    return od
+
+
 def sec_company(symbol, alternatives=(), name=""):
     """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
     hit = SEC_CACHE.get(("co", symbol))
@@ -5399,7 +5479,7 @@ def analyze(query):
         result = analyze_etf(symbol, t, info, alternatives, query)
         CACHE[key] = (time.time(), result)
         return result
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         fm = ex.submit(gather, symbol, t, info)
         fmac = ex.submit(gather_macro, info.get("currency") or "")
         company = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
@@ -5410,11 +5490,14 @@ def analyze(query):
         fpeer = ex.submit(competitors, symbol, info, alternatives)
         fprof = ex.submit(company_profile, symbol, info, company)
         fsec = ex.submit(sec_company, symbol, alternatives, company) if info.get("quoteType", "EQUITY") == "EQUITY" else None
+        us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
+        fder = ex.submit(derivatives, symbol, current_price(info)) if us_listed else None  # parallel laden
         m, mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
         profile = safe(lambda: fprof.result(timeout=30))
         sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
+        der_ = safe(lambda: fder.result(timeout=40)) if fder else None
     finnhub_enrich(m, symbol, alternatives)
     own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
                "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],
@@ -5491,6 +5574,7 @@ def analyze(query):
         "profile": profile,
         "sec": sec_,
         "qreport": safe(lambda: quarter_report(t, m, sec_)),
+        "derivatives": der_ if fder else safe(lambda: derivatives(symbol, m.get("price"), sec_)),
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],

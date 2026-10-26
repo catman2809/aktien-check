@@ -257,3 +257,33 @@ for _de, _en in WEEKDAYS.items():
     WILD.append((f"• {_de} {{0}} {{*}}: {{*1}}", f"• {_en} {{0}} {{*}}: {{*1}}"))
 # Allgemeine Ersatzregel ganz zum Schluss: „A · B“ teilweise übersetzen (z. B. „SAP.DE · diese Aktie“, „BAS.DE · Zykliker“)
 WILD.append(("{*} · {*1}", "{*} · {*1}"))
+
+# Derivate (Optionen)
+_PC = {"überwiegend Calls – optimistische Positionierung": "mostly calls – optimistic positioning", "ausgeglichen": "balanced",
+       "mehr Puts – eher vorsichtig bzw. abgesichert": "more puts – rather cautious or hedged",
+       "deutlich mehr Puts – starke Absicherung oder Pessimismus": "significantly more puts – heavy hedging or pessimism"}
+D.update({
+    "Derivate": "Derivatives",
+    "Keine Optionsdaten: Für Werte, die nur an europäischen Börsen gehandelt werden, liefert Yahoo keine Daten der Terminbörse Eurex – und es gibt keine US-Notierung mit Optionen.":
+        "No options data: for securities traded only on European exchanges, Yahoo provides no Eurex derivatives data – and there is no US listing with options.",
+    "Für diesen Wert werden derzeit keine Optionen gehandelt.": "No options are currently traded on this security.",
+    "Offene Positionen (Open Interest)": "Open positions (open interest)", "Volumen heute": "Volume today", "Gehandelter Wert heute (Prämien)": "Value traded today (premiums)",
+    "{0} Kontrakte gesamt": "{0} contracts total", "{0} {1} gesamt": "{0} {1} total", "{0} gesamt": "{0} total", "{0} Kontrakte": "{0} contracts",
+    "· {0} Kontrakte": "· {0} contracts", "Long (Calls)": "Long (calls)", "Short (Puts)": "Short (puts)", "Put/Call (offen)": "Put/call (open)",
+    "nächste {0} Tage: {1}": "next {0} days: {1}", "Put/Call (Volumen)": "Put/call (volume)", "heute": "today", "Implizite Volatilität": "Implied volatility",
+    "am Geld, ~{0}–{1} Monate": "at the money, ~{0}–{1} months", "Einordnung:": "Interpretation:", "Verfall": "Expiry", "Calls offen": "Open calls",
+    "Puts offen": "Open puts", "Volumen C / P": "Volume C / P", "{0} T.": "{0} d", "des Streubesitzes.": "of free float.",
+    "Hinweis: Zu jeder Option gibt es einen Käufer und einen Verkäufer – Calls und Puts zeigen vor allem die Positionierung der Optionskäufer. Ein hohes Put/Call-Verhältnis gilt teils als Kontraindikator (viel Absicherung = viel Angst). Fließt nicht in die Empfehlung ein.":
+        "Note: every option has a buyer and a seller – calls and puts mainly show how option buyers are positioned. A high put/call ratio is sometimes seen as a contrarian indicator (lots of hedging = lots of fear). Not included in the rating.",
+})
+for _de, _en in _PC.items():
+    D[f"{_de}."] = f"{_en}."
+    D[f"{_de}. Leerverkaufsquote der Aktie:"] = f"{_en}. Short interest in the stock:"
+    D[f"–. Leerverkaufsquote der Aktie:"] = "–. Short interest in the stock:"
+WILD[:0] = [
+    ("Optionen auf {*} (US-Notierung/ADR) an US-Börsen · {0} Verfallstermine · Stand {1} · Quelle: Yahoo Finance. Calls setzen auf steigende Kurse (long), Puts auf fallende (short) oder dienen als Absicherung.",
+     "Options on {*} (US listing/ADR) on US exchanges · {0} expiries · as of {1} · source: Yahoo Finance. Calls bet on rising prices (long), puts on falling prices (short) or serve as a hedge."),
+    ("Optionen auf {*} an US-Börsen · {0} Verfallstermine · Stand {1} · Quelle: Yahoo Finance. Calls setzen auf steigende Kurse (long), Puts auf fallende (short) oder dienen als Absicherung.",
+     "Options on {*} on US exchanges · {0} expiries · as of {1} · source: Yahoo Finance. Calls bet on rising prices (long), puts on falling prices (short) or serve as a hedge."),
+    ("{*}: Calls {0}, Puts {1}", "{*}: calls {0}, puts {1}"),
+]
