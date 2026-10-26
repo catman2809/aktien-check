@@ -6771,8 +6771,102 @@ def cron_key():
     return hashlib.sha256(("aktien-check-cron|" + app_password()).encode("utf-8")).hexdigest()[:24]
 
 
+# ---------------------------------------------------------------------------
+# Englisch: gleiche Übersetzungstabelle wie in der App (static/i18n_en.json) für Push, Wochenbericht und Anmeldeseite
+# ---------------------------------------------------------------------------
+I18N_STATE = {"mtime": None, "dict": {}, "wild": []}
+I18N_MON_N = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+I18N_MON = {"Jan": "Jan", "Feb": "Feb", "März": "Mar", "Mär": "Mar", "Apr": "Apr", "Mai": "May", "Juni": "Jun", "Jun": "Jun",
+            "Juli": "Jul", "Jul": "Jul", "Aug": "Aug", "Sept": "Sep", "Sep": "Sep", "Okt": "Oct", "Nov": "Nov", "Dez": "Dec",
+            "Januar": "January", "Februar": "February", "April": "April", "August": "August", "September": "September",
+            "Oktober": "October", "November": "November", "Dezember": "December"}
+I18N_TOK = re.compile(
+    r"(\d{1,2}\.\d{1,2}\.\d{4}|\d{1,2}\.\d{1,2}\.(?!\d))"
+    r"|((?:Januar|Februar|März|Mär|April|Apr|Mai|Juni|Jun|Juli|Jul|August|Aug|September|Sept|Sep|Oktober|Okt|November|Nov|Dezember|Dez|Jan|Feb)\.? \d{2,4})"
+    r"|([+−-]?\d[\d.]*(?:,\d+)?(?:\s?(?:Mrd\.|Mio\.|Bio\.|Tsd\.))?(?:\s?%)?(?:\s?Pp\.)?)"
+    r"|\b(USD|EUR|GBP|GBp|GBX|CHF|JPY|DKK|SEK|NOK|HKD|CAD|AUD|CNY|KRW|TWD|INR|BRL|ZAR|PLN|SGD|ILS|MXN|NZD|USDT|BTC|ETH)\b")
+
+
+def _i18n_load():
+    f_ = STATIC_DIR / "i18n_en.json"
+    mt = f_.stat().st_mtime if f_.is_file() else None
+    if mt != I18N_STATE["mtime"]:
+        d = safe(lambda: json.loads(f_.read_text(encoding="utf-8")), {}) or {}
+        wild = []
+        for pat, en in d.get("wild") or []:
+            rx = re.sub(r"\\\{\\\*\d?\\\}", "(.+?)", re.escape(pat))  # {*} = freier Text, {0} bleibt wörtlich
+            wild.append((re.compile("^" + rx + "$"), en))
+        I18N_STATE.update(mtime=mt, dict={**(d.get("exact") or {}), **(d.get("tpl") or {})}, wild=wild)
+    return I18N_STATE
+
+
+def _i18n_conv(tok):
+    m_ = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?", tok)
+    if m_:
+        mon = I18N_MON_N[int(m_.group(2)) - 1] if 1 <= int(m_.group(2)) <= 12 else m_.group(2)
+        return f"{mon} {int(m_.group(1))}" + (f", {m_.group(3)}" if m_.group(3) else "")
+    m_ = re.fullmatch(r"([A-Za-zä]+)\.? (\d{2,4})", tok)
+    if m_:
+        return f"{I18N_MON.get(m_.group(1), m_.group(1))} {m_.group(2)}"
+    if re.match(r"\d", tok.lstrip("+−-")):
+        t_ = re.sub(r"[.,](?=\d)", lambda x: "," if x.group(0) == "." else ".", tok)
+        for a_, b_ in ((r"\s?Mrd\.", " bn"), (r"\s?Mio\.", " m"), (r"\s?Bio\.", " tn"), (r"\s?Tsd\.", "k"), (r"\s?Pp\.", " pp"), (r"\s%", "%")):
+            t_ = re.sub(a_, b_, t_, count=1)
+        return t_
+    return tok
+
+
+def _tr_part(g):
+    t_ = tr_en(g)
+    if t_ != g or ", " not in g:
+        return t_
+    return ", ".join(tr_en(x) for x in g.split(", "))
+
+
+def tr_en(text):
+    """Deutscher Text -> Englisch (Tabelle wie in der App); unbekannte Texte bleiben unverändert."""
+    if not text:
+        return text
+    if "\n" in text:
+        return "\n".join(tr_en(x) for x in text.split("\n"))
+    st = _i18n_load()
+    lead, core = re.match(r"\s*", text).group(0), re.sub(r"\s+", " ", text.strip())
+    trail = text[len(text.rstrip()):]
+    if not core:
+        return text
+    if core in st["dict"]:
+        return lead + st["dict"][core] + trail
+    toks = []
+
+    def sub_(m_):
+        toks.append(m_.group(0))
+        return "{" + str(len(toks) - 1) + "}"
+    key = I18N_TOK.sub(sub_, core)
+    fill = lambda tpl: re.sub(r"\{(\d+)\}", lambda m_: _i18n_conv(toks[int(m_.group(1))]) if int(m_.group(1)) < len(toks) else "", tpl)
+    if key in st["dict"]:
+        return lead + fill(st["dict"][key]) + trail
+    for rx, en in st["wild"]:
+        m_ = rx.match(key)
+        if m_:
+            en2 = re.sub(r"\{\*(\d?)\}", lambda x: _tr_part(m_.group(int(x.group(1) or 0) + 1) or ""), en)
+            return lead + fill(en2) + trail
+    if not re.search(r"[A-Za-zÄÖÜäöüß]", re.sub(r"\{\d+\}", "", key)):
+        return lead + fill(key) + trail
+    return text
+
+
+def user_lang(user=None, topic=None):
+    data = STORE.load()
+    with STORE.lock:
+        if topic and not user:
+            user = next((u_ for u_, sp in data["u"].items() if sp.get("topic") == topic), None)
+        return ((data["u"].get(user) or {}).get("lang") or "de") if user else "de"
+
+
 def ntfy_send(title, message, symbol=None, tags=None, priority=4, topic=None):
     topic = topic or user_space("admin")["topic"]
+    if safe(lambda: user_lang(topic=topic)) == "en":  # Push in der Sprache des Empfängers
+        title, message = safe(lambda: tr_en(title), title), safe(lambda: tr_en(message), message)
     body = {"topic": topic, "title": title, "message": message, "tags": tags or [], "priority": priority}
     if symbol:
         body["click"] = f"{app_base_url()}/?q={urllib.parse.quote(symbol)}"
@@ -7234,6 +7328,10 @@ class Handler(BaseHTTPRequestHandler):
         page = (LOGIN_PAGE.replace("{error}", err).replace("{next}", clean(nxt)).replace("{days}", str(SESSION_DAYS))
                 .replace("{user}", clean(user)).replace("{ufocus}", "" if user else "autofocus")
                 .replace("{pfocus}", "autofocus" if user else ""))
+        if "ac_lang=en" in (self.headers.get("Cookie") or ""):
+            page = re.sub(r">([^<>]*[A-Za-zÄÖÜäöüß][^<>]*)<", lambda m_: ">" + tr_en(m_.group(1)) + "<", page)
+            page = re.sub(r'(placeholder|title|aria-label)="([^"]+)"', lambda m_: f'{m_.group(1)}="{tr_en(m_.group(2))}"', page)
+            page = page.replace('<html lang="de"', '<html lang="en"')
         return self.send(code, page, "text/html; charset=utf-8")
 
     def require_login(self, u):
@@ -7299,6 +7397,12 @@ class Handler(BaseHTTPRequestHandler):
             if maintenance().get("on") and not self.is_admin():
                 return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
             try:
+                if u.path == "/api/prefs":
+                    lang = "en" if body.get("lang") == "en" else "de"
+                    with STORE.lock:
+                        user_space(user)["lang"] = lang
+                        STORE.dirty = True
+                    return self.send_json({"ok": True, "lang": lang})
                 if u.path == "/api/watchlist":
                     if not isinstance(body.get("items"), list):
                         raise ValueError("Ungültige Watchlist (Liste erwartet).")
@@ -7549,10 +7653,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(WEB_MANIFEST, ensure_ascii=False), "application/manifest+json; charset=utf-8")
         if u.path.startswith("/static/"):
             f = STATIC_DIR / Path(u.path).name  # nur Dateien direkt im Ordner, kein Pfad-Ausbruch
-            if f.suffix == ".png" and f.is_file():
+            if f.suffix in (".png", ".json") and f.is_file():
                 data = f.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Type", "image/png" if f.suffix == ".png" else "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "public, max-age=604800")
                 self.end_headers()
@@ -7577,7 +7681,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         q = (qs.get("q") or [""])[0].strip()
         if u.path in ("/", "/index.html"):
-            return self.send(200, HTML_PATH.read_bytes(), "text/html; charset=utf-8")
+            f_ = STATIC_DIR / "i18n_en.json"  # Version der Übersetzungstabelle -> Browser lädt Änderungen sofort
+            v_ = str(int(f_.stat().st_mtime)) if f_.is_file() else "0"
+            return self.send(200, HTML_PATH.read_bytes().replace(b"__I18N_V__", v_.encode()), "text/html; charset=utf-8")
         if u.path == "/api/diag":  # Erreichbarkeit der Datenquellen prüfen
             sym = q or "SAP.DE"
             checks = {

@@ -294,6 +294,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .etf-w{text-align:right;color:var(--text-2)}
 .etf-wide{grid-column:1/-1}
 .bizm{margin-top:16px}
+.lang-btn{font-size:12.5px;font-weight:700;letter-spacing:.02em;width:auto;min-width:38px;padding:0 9px}
 .qr-card{margin-top:16px}
 .qr-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 12px}
 @media (max-width:640px){.qr-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -938,7 +939,7 @@ table.peers .neg{color:var(--neg)}
       <svg class="s" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="q" placeholder="Aktie oder Krypto, z. B. Allianz, SAP.DE, Bitcoin">
       <button type="submit">Prüfen</button>
-      <div class="suggest" id="sg"></div>
+      <div class="suggest" id="sg" translate="no"></div>
     </form>
     <button class="icon-btn" id="wlbtn" title="Watchlist" aria-label="Watchlist öffnen">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>
@@ -949,6 +950,7 @@ table.peers .neg{color:var(--neg)}
       <span class="acct-name" id="acctname"></span>
       <span class="badge-n" id="acctunread" style="display:none">0</span>
     </button>
+    <button class="icon-btn lang-btn" id="langbtn" type="button" translate="no" title="Switch to English" aria-label="Sprache / Language">EN</button>
     <button class="icon-btn" id="theme" title="Hell/Dunkel umschalten" aria-label="Farbschema umschalten">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
     </button>
@@ -966,6 +968,164 @@ table.peers .neg{color:var(--neg)}
 </nav>
 <main><div class="container" id="out"></div></main>
 
+<script>
+/* ===== Sprache (Deutsch / Englisch) =====
+   Die App rendert deutsch; bei Englisch übersetzt diese Schicht alle sichtbaren Texte anhand von static/i18n_en.json.
+   Zahlen, Daten und Währungen werden als Platzhalter erkannt und ins englische Format umgerechnet. */
+window.I18N_V = "__I18N_V__";
+const I18N = {lang: "de", dict: null, wild: [], on: false, orig: new WeakMap(), attrOrig: new WeakMap()};
+const I18N_MON = {"Jan": "Jan", "Feb": "Feb", "März": "Mar", "Mär": "Mar", "Apr": "Apr", "Mai": "May", "Juni": "Jun", "Jun": "Jun", "Juli": "Jul", "Jul": "Jul",
+  "Aug": "Aug", "Sept": "Sep", "Sep": "Sep", "Okt": "Oct", "Nov": "Nov", "Dez": "Dec", "Januar": "January", "Februar": "February", "April": "April",
+  "August": "August", "September": "September", "Oktober": "October", "November": "November", "Dezember": "December"};
+const I18N_MON_N = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const I18N_CUR = "USD|EUR|GBP|GBp|GBX|CHF|JPY|DKK|SEK|NOK|HKD|CAD|AUD|CNY|KRW|TWD|INR|BRL|ZAR|PLN|SGD|ILS|MXN|NZD|USDT|BTC|ETH";
+// Platzhalter: Datum | Monat Jahr | Zahl (+Einheit/%) | Währung
+const I18N_TOK = new RegExp("(\\d{1,2}\\.\\d{1,2}\\.\\d{4}|\\d{1,2}\\.\\d{1,2}\\.(?!\\d))"
+  + "|((?:Januar|Februar|März|Mär|April|Apr|Mai|Juni|Jun|Juli|Jul|August|Aug|September|Sept|Sep|Oktober|Okt|November|Nov|Dezember|Dez|Jan|Feb)\\.? \\d{2,4})"
+  + "|([+−-]?\\d[\\d.]*(?:,\\d+)?(?:\\s?(?:Mrd\\.|Mio\\.|Bio\\.|Tsd\\.))?(?:\\s?%)?(?:\\s?Pp\\.)?)"
+  + "|\\b(" + I18N_CUR + ")\\b", "g");
+function i18nConv(tok) {
+  let m;
+  if ((m = tok.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})?$/))) return `${I18N_MON_N[+m[2] - 1] || m[2]} ${+m[1]}${m[3] ? ", " + m[3] : ""}`;
+  if ((m = tok.match(/^([A-Za-zäÄ]+)\.? (\d{2,4})$/))) return `${I18N_MON[m[1]] || m[1]} ${m[2]}`;
+  if (/^\d/.test(tok.replace(/^[+−-]/, ""))) {
+    return tok.replace(/[.,](?=\d)/g, c => c === "." ? "," : ".").replace(/\s?Mrd\./, " bn").replace(/\s?Mio\./, " m").replace(/\s?Bio\./, " tn")
+      .replace(/\s?Tsd\./, "k").replace(/\s?Pp\./, " pp").replace(/\s%/, "%");
+  }
+  return tok;
+}
+function i18nKey(text) {
+  const toks = [];
+  const key = text.replace(I18N_TOK, t => { toks.push(t); return "{" + (toks.length - 1) + "}"; });
+  return {key, toks};
+}
+function trPart(g) {  // eingesetzten freien Text mitübersetzen (z. B. Sektor, Land, Aufzählungen)
+  const t = tr(g);
+  if (t !== g || !g.includes(", ")) return t;
+  return g.split(", ").map(x => tr(x)).join(", ");
+}
+function tr(text) {
+  if (!I18N.on || !text || !I18N.dict) return text;
+  const lead = text.match(/^\s*/)[0], trail = text.match(/\s*$/)[0], core = text.trim().replace(/\s+/g, " ");  // Leerraum vereinheitlichen
+  if (!core || !/[A-Za-zÄÖÜäöüß]/.test(core) && !I18N_TOK.test(core)) { I18N_TOK.lastIndex = 0; return text; }
+  I18N_TOK.lastIndex = 0;
+  const ex = I18N.dict[core];
+  if (ex !== undefined) return lead + ex + trail;
+  const {key, toks} = i18nKey(core);
+  const fill = tpl => tpl.replace(/\{(\d+)\}/g, (_, i) => i18nConv(toks[+i] ?? ""));
+  const t = I18N.dict[key];
+  if (t !== undefined) return lead + fill(t) + trail;
+  for (const [re, en] of I18N.wild) {  // Muster mit freiem Text, z. B. „Über {*}“
+    const m = key.match(re);
+    if (m) return lead + fill(en.replace(/\{\*(\d?)\}/g, (_, n) => trPart(m[(+n || 0) + 1] ?? ""))) + trail;
+  }
+  if (!/[A-Za-zÄÖÜäöüß]/.test(key.replace(/\{\d+\}/g, ""))) return lead + fill(key) + trail;  // nur Zahlen/Daten
+  return text;
+}
+const I18N_ATTRS = ["title", "placeholder", "aria-label"];
+const I18N_NOTR = '[translate="no"], script, style, textarea, code';
+function i18nSkip(node) {
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  return !el || !!el.closest(I18N_NOTR);
+}
+function i18nText(n) {
+  const cur = n.nodeValue, prev = I18N.orig.get(n);
+  const src = prev && prev.out === cur ? prev.src : cur;  // vom Programm geändert -> neu übersetzen
+  const out = tr(src);
+  if (out !== cur) n.nodeValue = out;
+  I18N.orig.set(n, {src, out});
+}
+function i18nAttrs(el) {
+  let store = null;
+  for (const a of I18N_ATTRS) {
+    if (!el.hasAttribute(a)) continue;
+    store = store || I18N.attrOrig.get(el) || {};
+    const cur = el.getAttribute(a), prev = store[a];
+    const src = prev && prev.out === cur ? prev.src : cur;
+    const out = tr(src);
+    if (out !== cur) el.setAttribute(a, out);
+    store[a] = {src, out};
+  }
+  if (store) I18N.attrOrig.set(el, store);
+}
+const I18N_FILTER = {acceptNode: x => x.nodeType === 1 && x.matches(I18N_NOTR) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT};
+function i18nNode(n) {
+  if (i18nSkip(n)) return;
+  if (n.nodeType === 3) return i18nText(n);
+  if (n.nodeType !== 1) return;
+  i18nAttrs(n);
+  const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, I18N_FILTER);  // ein Durchlauf, ausgeschlossene Bereiche komplett übersprungen
+  let x;
+  while ((x = w.nextNode())) x.nodeType === 3 ? i18nText(x) : i18nAttrs(x);
+}
+function i18nRestore() {  // zurück auf Deutsch
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let x;
+  while ((x = w.nextNode())) {
+    if (x.nodeType === 3) { const o = I18N.orig.get(x); if (o && o.out === x.nodeValue) x.nodeValue = o.src; I18N.orig.delete(x); }
+    else { const st = I18N.attrOrig.get(x); if (st) { for (const a in st) if (x.getAttribute(a) === st[a].out) x.setAttribute(a, st[a].src); I18N.attrOrig.delete(x); } }
+  }
+}
+let i18nObs = null;
+function i18nApply() {
+  document.documentElement.lang = I18N.lang;
+  if (I18N.on) {
+    i18nNode(document.body);
+    document.title = tr(document.title);
+    if (!i18nObs) {
+      i18nObs = new MutationObserver(ms => {
+        if (!I18N.on) return;
+        for (const m of ms) {
+          if (m.type === "characterData") i18nNode(m.target);
+          else if (m.type === "attributes") i18nNode(m.target);
+          else m.addedNodes.forEach(i18nNode);
+        }
+      });
+      i18nObs.observe(document.body, {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: I18N_ATTRS});
+    }
+  } else i18nRestore();
+  const b = document.getElementById("langbtn");
+  if (b) { b.textContent = I18N.lang === "en" ? "DE" : "EN"; b.title = I18N.lang === "en" ? "Auf Deutsch umschalten" : "Switch to English"; }
+}
+async function setLang(lang, save = true) {
+  I18N.lang = lang === "en" ? "en" : "de";
+  if (save) { try { localStorage.setItem("ac-lang", I18N.lang); } catch (e) {} document.cookie = `ac_lang=${I18N.lang};path=/;max-age=31536000;SameSite=Lax`; }
+  if (I18N.lang === "en" && !I18N.dict) {
+    try {
+      const d = await (await fetch("/static/i18n_en.json?v=" + (window.I18N_V || "1"))).json();
+      I18N.dict = Object.assign({}, d.exact || {}, d.tpl || {});
+      I18N.wild = (d.wild || []).map(([pat, en]) => [new RegExp("^" + pat.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&").replace(/\\\{\\\*\d?\\\}/g, "(.+?)") + "$"), en]);
+    } catch (e) { I18N.lang = "de"; }
+  }
+  I18N.on = I18N.lang === "en";
+  i18nApply();
+  if (save && typeof route === "function") { const y = window.scrollY; route(); setTimeout(() => window.scrollTo(0, y), 1200); }
+  if (save && typeof ME !== "undefined" && ME?.multi) fetch("/api/prefs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({lang: I18N.lang})}).catch(() => {});
+}
+// Native Dialoge laufen nicht über das DOM -> Texte hier übersetzen
+(() => { const c = window.confirm.bind(window), p = window.prompt.bind(window), a = window.alert.bind(window);
+  window.confirm = m => c(tr(String(m))); window.prompt = (m, d) => p(tr(String(m)), d); window.alert = m => a(tr(String(m))); })();
+document.getElementById("langbtn").onclick = () => setLang(I18N.lang === "en" ? "de" : "en");
+(() => {  // Startsprache: gespeichert, sonst Browsersprache
+  let l = null; try { l = localStorage.getItem("ac-lang"); } catch (e) {}
+  l = l || ((navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en");
+  if (l === "en") setLang("en", false);
+})();
+/* Entwicklerhilfe: alle (noch nicht übersetzten) Texte sammeln */
+window.__harvest = (all = false) => {
+  const keys = new Set();
+  const add = t => { const c = (t || "").trim().replace(/\s+/g, " "); if (!c || !/[A-Za-zÄÖÜäöüß]/.test(c)) return;
+    if (!all && I18N.on && tr(c) !== c) return; keys.add(i18nKey(c).key); };
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  let x;
+  while ((x = w.nextNode())) {
+    if (i18nSkip(x)) continue;
+    if (x.nodeType === 3) add(I18N.orig.get(x)?.src ?? x.nodeValue);
+    else I18N_ATTRS.forEach(a => x.hasAttribute(a) && add(I18N.attrOrig.get(x)?.[a]?.src ?? x.getAttribute(a)));
+  }
+  return [...keys];
+};
+</script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -1708,16 +1868,55 @@ const GLOSSARY = [
   ["Tier", "Quellen-Tiers", "Einstufung der Nachrichtenquellen: Tier 1 zuverlässige Originalquellen, Tier 2 glaubwürdige Medien (teils Paywall), Tier 3 Pressemitteilungen und Unternehmensblogs, die gegengeprüft werden.", ["Tier 1", "Tier 2", "Tier 3"]],
   ["Overweight", "Empfehlungsstufen", "14 Stufen von Strong Buy bis Strong Sell. Kaufen: Strong Buy, Buy, Outperform, Overweight, Accumulate. Halten: Market Perform, Equal-weight, Neutral, Hold. Verkaufen: Underperform, Underweight, Reduce, Sell, Strong Sell.", []],
 ];
-const GL_INDEX = (() => {
+/* Englische Suchbegriffe je Glossar-Eintrag (gleiche Reihenfolge wie GLOSSARY) */
+const GL_ALIAS_EN = {"KGV": ["P/E ratio", "P/E"], "Forward-KGV": ["forward P/E", "Forward P/E"], "KBV": ["price-to-book", "P/B"],
+  "KUV": ["P/S", "price-to-sales"], "EV/EBITDA": ["EV/EBITDA"], "EV/Umsatz": ["EV/sales", "EV/Sales"], "EBITDA": ["EBITDA"],
+  "Free Cashflow": ["free cash flow", "Free cash flow", "FCF"], "FCF-Rendite": ["FCF yield", "free cash flow yield"],
+  "Aktienvergütung": ["stock-based compensation", "Stock-based compensation"], "PEG": ["PEG ratio", "PEG"],
+  "ROE": ["return on equity", "Return on equity", "ROE"], "ROA": ["return on assets", "Return on assets", "ROA"],
+  "ROIC": ["return on invested capital", "Return on invested capital", "ROIC"], "Bruttomarge": ["gross margin", "Gross margin"],
+  "Operative Marge": ["operating margin", "Operating margin"], "Nettomarge": ["net margin", "Net margin"],
+  "Nettoverschuldung": ["net debt", "Net debt"], "Fairer Wert": ["fair value", "Fair value", "discounted cash flow", "DCF"],
+  "Owner Earnings": ["owner earnings", "Owner earnings"], "Prognose": ["revenue forecast", "EPS forecast"],
+  "Bollinger": ["Bollinger Bands", "Bollinger"], "MACD": ["MACD"], "Unterstützung": ["support", "Support", "resistance", "Resistance"],
+  "Normal-KGV": ["normal P/E", "Normal P/E"], "Dividendensicherheit": ["dividend safety", "Dividend safety"],
+  "Kerzenchart": ["candlestick patterns", "Candles", "candlestick"], "Hammer": ["Hammer", "Shooting Star"],
+  "Engulfing": ["Bullish Engulfing", "Bearish Engulfing", "Engulfing"], "Doji": ["Doji"], "Morning Star": ["Morning Star", "Evening Star"],
+  "Ichimoku": ["Ichimoku"], "ADX": ["ADX"], "Parabolic SAR": ["Parabolic SAR"], "EMA": ["EMA 20", "EMA"], "OBV": ["OBV", "On-Balance Volume"],
+  "Volumenprofil": ["volume profile", "Volume profile"], "Stochastik": ["Stochastic", "Williams %R", "CCI"],
+  "Doppeltop": ["Double top", "Double bottom", "double top", "double bottom"],
+  "Schulter-Kopf-Schulter": ["Inverse head and shoulders", "Head and shoulders", "head and shoulders"],
+  "Dreieck": ["Ascending triangle", "Descending triangle", "Symmetrical triangle"], "Reverse-DCF": ["reverse DCF", "Reverse DCF"],
+  "Diskontsatz": ["discount rate", "Discount rate", "cost of equity", "Cost of equity"], "CAGR": ["CAGR"], "Beta": ["Beta"],
+  "Volatilität": ["volatility", "Volatility"], "RSI": ["RSI"],
+  "Gleitender Durchschnitt": ["200-day line", "MA 200", "MA 50", "MA200", "moving average", "Moving average"],
+  "Piotroski F-Score": ["Piotroski F-Score", "Piotroski"], "Altman Z-Score": ["Altman Z-Score", "Altman"],
+  "Zinsdeckung": ["interest coverage", "Interest coverage"], "Gewinnqualität": ["earnings quality", "Earnings quality"],
+  "Gewinnrevisionen": ["earnings revisions", "Earnings revisions"], "Gewinnüberraschungen": ["earnings surprises", "Earnings surprises"],
+  "Insider": ["insider buying", "insider selling", "insider transactions", "Insider transactions"],
+  "Leerverkaufsquote": ["short interest", "Short interest"], "Analystenkonsens": ["analyst consensus", "Analyst consensus"],
+  "Kursziel": ["price target", "Price target", "analyst price target"], "Dividendenrendite": ["dividend yield", "Dividend yield"],
+  "Ausschüttungsquote": ["payout ratio", "Payout ratio"], "Aktionärsrendite": ["shareholder yield", "Shareholder yield"],
+  "Marktkapitalisierung": ["market cap", "Market cap"], "Eigenkapitalquote": ["equity ratio", "Equity ratio"],
+  "FFO": ["P/FFO", "FFO"], "Beleihungsquote": ["loan-to-value", "Loan-to-value", "LTV"], "Rule of 40": ["Rule of 40"],
+  "Cash-Reichweite": ["cash runway", "Cash runway"], "TER": ["TER"], "Thesaurierend": ["accumulating", "Accumulating", "distributing"],
+  "Fondsvolumen": ["fund size", "Fund size"], "Mayer-Multiple": ["Mayer Multiple"], "Fear & Greed": ["Fear & Greed", "Fear &amp; Greed"],
+  "ADR": ["ADR", "depositary receipt"], "ISIN": ["ISIN"], "CUSIP": ["CUSIP"], "FIGI": ["FIGI", "Composite FIGI"],
+  "Tier": ["Tier 1", "Tier 2", "Tier 3"], "Overweight": []};
+const glIndexFor = aliasOf => {
   const pairs = [];
-  GLOSSARY.forEach((g, i) => g[3].forEach(a => pairs.push([a, i])));
+  GLOSSARY.forEach((g, i) => aliasOf(g, i).forEach(a => pairs.push([a, i])));
   pairs.sort((a, b) => b[0].length - a[0].length);   // längere Begriffe zuerst (Forward-KGV vor KGV)
   const esc_ = t => t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
   return {re: new RegExp(`(?<![\\wÄÖÜäöüß-])(${pairs.map(p => esc_(p[0])).join("|")})(?![\\wÄÖÜäöüß])`, "g"),
           map: new Map(pairs.map(p => [p[0], p[1]]))};
-})();
+};
+const GL_INDEX_DE = glIndexFor(g => g[3]);
+let GL_INDEX_EN = null;
 function glossarize(root) {
-  if (!root) return;
+  if (!root || window.__noGl) return;
+  if (I18N.on) i18nNode(root);  // erst ganze Sätze übersetzen, dann englische Begriffe markieren
+  const GL_INDEX = I18N.on ? (GL_INDEX_EN = GL_INDEX_EN || glIndexFor(g => GL_ALIAS_EN[g[0]] || [])) : GL_INDEX_DE;
   const scopes = root.querySelectorAll(".reasons li, .fund .fk, .facts dt, .v-meta dt, .about-row dt, .trk-g dt, .method li, .ov-cat, .fv-ass li, .fc-row span:first-child, .fv-head .stamp, .tt-r span:first-child, .pat-n");
   scopes.forEach(el => {
     const seen = new Set();
@@ -3540,7 +3739,7 @@ function bizSection(d) {
   const li = (arr, cls) => arr.map(x => `<li class="${cls}">${esc(x)}</li>`).join("");
   return `<section class="card pad bizm" id="geschaeft" aria-label="Geschäftsmodell">
     <div class="eyebrow">Geschäftsmodell${B.context ? " · " + esc(B.context) : ""}</div>
-    <p class="bizm-text">${esc(B.text)}</p>
+    <p class="bizm-text">${B.text.split(/(?<=\.) (?=Kennzahlen:)/).map(x => `<span>${esc(x)}</span>`).join(" ")}</p>
     <div class="bizm-grid">
       <div class="bizm-col pos"><h3>Chancen</h3><ul>${li(B.chances || [], "pos")}</ul></div>
       <div class="bizm-col neg"><h3>Risiken</h3><ul>${li(B.risks || [], "neg")}</ul></div>
@@ -3838,7 +4037,7 @@ function render(d) {
       <div class="co-head">
         <div>
           <div class="eyebrow">${esc(d.symbol)} · ${esc(d.exchange)}</div>
-          <div class="co-name">${esc(d.name)}</div>
+          <div class="co-name" translate="no">${esc(d.name)}</div>
           <div class="tags">${[d.sector, d.industry, d.country, d.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
         </div>
         <div class="price-box">
@@ -4020,7 +4219,7 @@ function render(d) {
     <ul class="nlist" id="nlist"></ul>
     <div class="print-only print-news">${["1", "2", "3"].map(t => N.by_tier[t].length ? `<h4>${esc(N.labels[t])}</h4><ul>
       ${N.by_tier[t].slice(0, 6).map(n => `<li><span class="dot ${n.sentiment > 0 ? "pos" : n.sentiment < 0 ? "neg" : ""}"></span>
-        ${esc(n.title)} <span class="stamp">– ${esc(n.source)}, ${esc(n.date)}${n.verified === true ? ", bestätigt" : n.verified === false ? ", unbestätigt" : ""}</span></li>`).join("")}</ul>` : "").join("")}</div>
+        <span translate="no">${esc(n.title)}</span> <span class="stamp">– <span translate="no">${esc(n.source)}</span>, ${esc(n.date)}${n.verified === true ? ", bestätigt" : n.verified === false ? ", unbestätigt" : ""}</span></li>`).join("")}</ul>` : "").join("")}</div>
     <div class="news-foot">Tier-3-Meldungen (Pressemitteilungen, Unternehmensseiten) gelten als <b>bestätigt</b>, wenn eine Tier-1/2-Quelle inhaltlich übereinstimmt. Unbestätigte fließen nur zur Hälfte ein.
       ${N.errors.length ? `<br>Nicht erreichbar: ${esc(N.errors.join(", "))}` : ""}</div>
   </div>
@@ -4076,7 +4275,7 @@ function render(d) {
     $("#tdesc").textContent = N.labels[t];
     const items = N.by_tier[t];
     $("#nlist").innerHTML = items.length ? items.map(n => `<li><span class="dot ${n.sentiment > 0 ? "pos" : n.sentiment < 0 ? "neg" : ""}"></span>
-      <div><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+      <div><a href="${esc(n.link)}" target="_blank" rel="noopener" translate="no">${esc(n.title)}</a>
       <div class="nmeta"><span>${esc(n.source)}</span><span>·</span><span>${esc(n.date)}</span>
       ${n.verified === true ? `<span class="badge ok">bestätigt</span>` : n.verified === false ? `<span class="badge no">unbestätigt</span>` : ""}</div></div></li>`).join("")
       : `<li class="empty">Keine Meldungen aus dieser Quellen-Gruppe gefunden.</li>`;

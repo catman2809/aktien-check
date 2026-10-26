@@ -1035,3 +1035,15 @@ class TestQuarterAI(Isolated):
 
     def test_html_text(self):
         self.assertEqual(a._html_text("<p>Umsatz&nbsp;<b>109</b></p><script>x()</script><div>Q3</div>"), "Umsatz 109\nQ3")
+
+
+class TestEnglish(unittest.TestCase):
+    def test_tr_en(self):
+        self.assertEqual(a.tr_en("Kaufen, halten oder verkaufen?"), "Buy, hold or sell?")
+        self.assertEqual(a.tr_en("KGV 24,3 vs. Median von 5 Wettbewerbern 27,8"), "P/E 24.3 vs. median of 5 competitors 27.8")
+        self.assertEqual(a.tr_en("📉 SAP SE unter 200,00 EUR"), "📉 SAP SE below 200.00 EUR")
+        self.assertEqual(a.tr_en("Umsatz 1.234,5 Mrd. USD"), "Revenue 1,234.5 bn USD")
+        self.assertEqual(a.tr_en("Geschäftsmodell · Sektor Basiskonsum · Sitz Kanada"), "Business model · Consumer staples sector · based in Canada")
+        self.assertEqual(a.tr_en("Unbekannter deutscher Satz bleibt"), "Unbekannter deutscher Satz bleibt")
+        self.assertEqual(a.tr_en("Termine nächste Woche:\n• Di 27.10. SAP SE: Quartalszahlen"),
+                         "Events next week:\n• Tue Oct 27 SAP SE: Quarterly results")
