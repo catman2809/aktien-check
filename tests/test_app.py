@@ -1090,6 +1090,54 @@ class TestSecStatements(unittest.TestCase):
         self.assertTrue(info["_sec"])
 
 
+class TestEsef(unittest.TestCase):
+    """EU-Jahresberichte (ESEF, xBRL-JSON) – Auswertung und Abgleich ohne Internet."""
+
+    @staticmethod
+    def doc():
+        f = lambda c, per, v, unit="iso4217:EUR", **extra: {"value": str(v), "dimensions": {
+            "concept": "ifrs-full:" + c, "entity": "scheme:LEI1", "period": per, "unit": unit, **extra}}
+        fy25, fy24 = "2025-01-01T00:00:00/2026-01-01T00:00:00", "2024-01-01T00:00:00/2025-01-01T00:00:00"
+        facts = [f("Revenue", fy25, 1000), f("Revenue", fy24, 900), f("ProfitLoss", fy25, 130),
+                 f("ProfitLossAttributableToOwnersOfParent", fy25, 120), f("ProfitLossAttributableToOwnersOfParent", fy24, 100),
+                 f("DilutedEarningsLossPerShare", fy25, 1.2, "iso4217:EUR/xbrli:shares"),
+                 f("Assets", "2026-01-01T00:00:00", 5000), f("Revenue", "2025-07-01T00:00:00/2026-01-01T00:00:00", 520),
+                 f("Revenue", fy25, 600, **{"ifrs-full:SegmentsAxis": "x:EuropeMember"})]
+        return {"facts": {str(i): x for i, x in enumerate(facts)}}
+
+    def test_values(self):
+        years, cur = a.esef_values(self.doc())
+        self.assertEqual(cur, "EUR")
+        self.assertEqual(years["2025-12-31"]["revenue"], 1000)      # Segmentwert und Halbjahr ignoriert
+        self.assertEqual(years["2025-12-31"]["net_income"], 120)    # Anteil der Aktionäre vor Gesamtgewinn
+        self.assertEqual(years["2025-12-31"]["assets"], 5000)       # Stichtag 1.1.2026 0 Uhr = 31.12.2025
+        self.assertEqual(years["2024-12-31"]["net_income"], 100)
+
+    def test_legal_names(self):
+        self.assertEqual(a._legal_tokens("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),
+                         a._legal_tokens("LVMH MOET HENNESSY LOUIS VUITTON"))
+        self.assertNotEqual(a._legal_tokens("Heineken N.V."), a._legal_tokens("Heineken Holding N.V."))
+        self.assertNotEqual(a._legal_tokens("Nokia Oyj"), a._legal_tokens("Nokian Renkaat Oyj"))
+        self.assertEqual(a._legal_tokens("Banco Santander, S.A."), ["banco", "santander"])
+
+    def test_check_against_yahoo(self):
+        import unittest.mock as um
+        years, cur = a.esef_values(self.doc())
+        rep_ = {"lei": "LEI1", "name": "X SE", "country": "FR", "period_end": "2025-12-31", "published": "", "currency": cur,
+                "viewer": None, "package": None, "years": years}
+        cols = [pd.Timestamp("2025-12-31"), pd.Timestamp("2024-12-31")]
+        inc = pd.DataFrame({cols[0]: [1000.0, 110.0], cols[1]: [900.0, 100.0]}, index=["Total Revenue", "Net Income"])
+        t = type("T", (), {"income_stmt": inc, "cashflow": None, "balance_sheet": None})()
+        with um.patch.object(a, "esef_report", return_value=rep_):
+            out = a.esef_check({"isin": "FR0000000001"}, t, "EUR", "X.PA", "X SE")
+            self.assertIsNone(a.esef_check({"isin": "US0000000001"}, t, "USD", "X", "X Inc"))  # keine EU-Aktie
+        self.assertEqual(out["rows"][0]["revenue"]["ok"], True)
+        self.assertEqual(out["rows"][0]["net_income"]["ok"], False)  # Yahoo 110 statt 120
+        self.assertEqual((out["checked"], out["mismatch"]), (4, 1))
+        with um.patch.object(a, "esef_report", return_value=rep_):
+            self.assertEqual(a.esef_check({"isin": "FR0000000001"}, t, "USD", "X.PA")["checked"], 0)  # andere Währung
+
+
 class TestQuarterAI(Isolated):
     def test_summary_cached(self):
         import unittest.mock as um

@@ -5363,6 +5363,214 @@ def derivatives(symbol, price=None, sec_=None, currency=""):
     return od
 
 
+# ---------------------------------------------------------------------------
+# EU/UK: offizieller Jahresbericht im ESEF-Format (XBRL nach IFRS) über filings.xbrl.org – Gegenprüfung der Yahoo-Jahreszahlen
+# ---------------------------------------------------------------------------
+ESEF_CACHE = {}           # ISIN -> (Zeit, Ergebnis)
+ESEF_BASE = "https://filings.xbrl.org"
+ESEF_UA = {"User-Agent": "Aktien-Check/1.0 (https://aktien-check.onrender.com)"}
+ESEF_COUNTRIES = {"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
+                  "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "NO", "IS", "LI", "GB"}
+ESEF_MAX_DOWNLOADS = 3
+ESEF_MAX_AGE_DAYS = 900   # ältere Jahresberichte (Archiv nicht aktuell) werden nicht gezeigt
+# (Schlüssel, Yahoo-Zeilen, IFRS-Kennzahlen – erste vorhandene zählt, Toleranz, Tabelle bei Yahoo)
+ESEF_ROWS = (
+    ("revenue", ("Total Revenue", "Operating Revenue"), ("Revenue", "RevenueFromContractsWithCustomers"), 0.01, "income"),
+    ("op_income", ("Operating Income",), ("ProfitLossFromOperatingActivities",), None, "income"),  # Abgrenzung zu uneinheitlich
+    ("net_income", ("Net Income", "Net Income Common Stockholders"),
+     ("ProfitLossAttributableToOwnersOfParent", "ProfitLoss"), 0.01, "income"),
+    ("eps", ("Diluted EPS", "Basic EPS"), ("DilutedEarningsLossPerShare", "BasicAndDilutedEarningsLossPerShare",
+                                           "BasicEarningsLossPerShare"), 0.03, "income"),
+    ("ocf", ("Operating Cash Flow",), ("CashFlowsFromUsedInOperatingActivities",), 0.01, "cashflow"),
+    ("assets", ("Total Assets",), ("Assets",), 0.01, "balance"),
+    ("equity", ("Stockholders Equity", "Common Stock Equity"), ("EquityAttributableToOwnersOfParent", "Equity"), 0.01, "balance"),
+)
+ESEF_PLAIN_DIMS = {"concept", "entity", "period", "unit", "language"}
+
+
+def _esef_json(url, timeout=25, api=True):
+    hdr = ESEF_UA | {"Accept": "application/vnd.api+json"} if api else ESEF_UA
+    return json.loads(_fetch(url, headers=hdr, timeout=timeout))
+
+
+def gleif_lei(isin):
+    """ISIN -> LEI (Rechtsträger-Kennung) über die offene GLEIF-Datenbank."""
+    d = _esef_json(f"https://api.gleif.org/api/v1/lei-records?filter[isin]={urllib.parse.quote(isin)}", timeout=15)
+    rec = (d.get("data") or [None])[0]
+    if not rec:
+        return None
+    return rec["id"], ((rec.get("attributes") or {}).get("entity") or {}).get("legalName", {}).get("name") or ""
+
+
+ESEF_LEGAL_PHRASES = re.compile(r"\b(societe europeenne|societe anonyme|public limited company|naamloze vennootschap|"
+                                r"aktiengesellschaft|aktieselskab|aktiebolaget|aktiebolag|osakeyhtio|societa per azioni|sociedad anonima|"
+                                r"s a|n v|a s|s p a|b v|p l c)\b")
+ESEF_LEGAL_FORMS = {"se", "sa", "nv", "ag", "plc", "oyj", "abp", "ab", "asa", "as", "spa", "bv", "ltd", "limited", "inc", "corp",
+                    "kgaa", "co", "the", "publ", "oy", "sca", "group"}
+
+
+def _legal_tokens(name):
+    """Firmenname ohne Rechtsform, Akzente und Satzzeichen – für den strengen Namensabgleich."""
+    import unicodedata
+    n = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower().replace("&", " and ")
+    n = " ".join(re.sub(r"[^a-z0-9]+", " ", n).split())
+    return [w for w in ESEF_LEGAL_PHRASES.sub(" ", n).split() if w not in ESEF_LEGAL_FORMS]
+
+
+def gleif_by_name(name, country):
+    """LEI über den Firmennamen (GLEIF-Volltextsuche im Sitzland); nur bei exakt gleichem Namen ohne Rechtsform."""
+    want = _legal_tokens(name)
+    if not want or not country:
+        return None
+    queries = [" ".join(re.sub(r"[^\w&]+", " ", name).split()), " ".join(want)]
+    for q in dict.fromkeys(queries):  # erst der volle Name, dann ohne Rechtsform
+        url = ("https://api.gleif.org/api/v1/lei-records?page[size]=20&filter[entity.legalAddress.country]=%s&filter[fulltext]=%s"
+               % (country, urllib.parse.quote(q)))
+        for rec in _esef_json(url, timeout=15).get("data") or []:
+            legal = ((rec.get("attributes") or {}).get("entity") or {}).get("legalName", {}).get("name") or ""
+            if _legal_tokens(legal) == want:
+                return rec["id"], legal
+    return None
+
+
+def _esef_date(stamp):
+    """xBRL-JSON-Zeitpunkt -> Datum; '2026-01-01T00:00:00' ist das Ende des 31.12.2025."""
+    dt = datetime.fromisoformat(stamp[:19])
+    if len(stamp) > 10 and dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+        dt -= timedelta(days=1)
+    return dt.date().isoformat()
+
+
+def esef_values(doc):
+    """Konzernwerte (ohne Segment-Dimensionen) der Kennzahlen aus ESEF_ROWS je Geschäftsjahresende bzw. Stichtag."""
+    want = {"ifrs-full:" + c: (key_, rank) for key_, _y, cs, _t, _k in ESEF_ROWS for rank, c in enumerate(cs)}
+    years, cur = {}, None
+    for f in (doc.get("facts") or {}).values():
+        dims = f.get("dimensions") or {}
+        hit = want.get(dims.get("concept"))
+        if not hit or set(dims) - ESEF_PLAIN_DIMS:
+            continue
+        v = num(f.get("value"))
+        per = dims.get("period") or ""
+        if v is None or not per:
+            continue
+        if "/" in per:
+            a_, b_ = per.split("/")
+            if not 350 <= (datetime.fromisoformat(b_[:19]) - datetime.fromisoformat(a_[:19])).days <= 380:
+                continue  # nur Geschäftsjahre (keine Halbjahre/Quartale)
+            end = _esef_date(b_)
+        else:
+            end = _esef_date(per)
+        unit = (dims.get("unit") or "").split(":")[-1].split("/")[0] if "iso4217:" in (dims.get("unit") or "") else None
+        if unit and hit[0] != "eps":
+            cur = cur or unit
+        slot = years.setdefault(end, {})
+        key_, rank = hit
+        if key_ not in slot or rank < slot[key_][1]:
+            slot[key_] = (v, rank)
+    return {e: {k: v[0] for k, v in vals.items()} for e, vals in years.items()}, cur
+
+
+def esef_filings(lei):
+    d = safe(lambda: _esef_json(f"{ESEF_BASE}/api/entities/{lei}/filings?page[size]=100")) or {}  # 404 = keine Meldungen
+    best = {}
+    for f in d.get("data") or []:
+        a_ = f.get("attributes") or {}
+        if not a_.get("json_url") or not a_.get("period_end"):
+            continue
+        old = best.get(a_["period_end"])
+        if old is None or (a_.get("error_count") or 0) < (old.get("error_count") or 0):
+            best[a_["period_end"]] = a_
+    return sorted(best.values(), key=lambda a_: a_["period_end"], reverse=True)
+
+
+def esef_report(isin="", name="", country="", yahoo_ends=()):
+    """Jüngster ESEF-Jahresbericht (über ISIN, sonst Firmenname + Sitzland): Werte des Geschäftsjahres und der Vorjahre."""
+    key = isin or f"{country}:{name}"
+    hit = ESEF_CACHE.get(key)
+    if hit and time.time() - hit[0] < (7 * 86400 if hit[1] else 86400):
+        return hit[1]
+    out = None
+    ent, cands = None, []
+    for find in ((lambda: gleif_lei(isin)) if isin else None, lambda: gleif_by_name(name, country)):
+        ent = safe(find) if find else None
+        cands = esef_filings(ent[0]) if ent else []
+        if cands:
+            break
+    if cands:
+        lei, legal = ent
+        ye = [datetime.fromisoformat(e) for e in yahoo_ends]
+        # Berichte zum Geschäftsjahresende (laut Yahoo) zuerst – Quartals-/Halbjahresberichte enthalten keine Jahreswerte
+        cands.sort(key=lambda a_: (not any(abs((datetime.fromisoformat(a_["period_end"]) - e).days) <= 7 for e in ye),
+                                   [-ord(ch) for ch in a_["period_end"]]))
+        for a_ in cands[:ESEF_MAX_DOWNLOADS]:
+            doc = safe(lambda: _esef_json(ESEF_BASE + a_["json_url"], timeout=40, api=False))
+            if not doc:
+                continue
+            years, cur = esef_values(doc)
+            del doc
+            # Jahresbericht = enthält ein Geschäftsjahr, das kurz vor dem gemeldeten Stichtag endet (manche Archiv-Einträge
+            # nennen statt des Geschäftsjahresendes das Einreichungsdatum)
+            pe = datetime.fromisoformat(a_["period_end"])
+            fy = max((e for e, v in years.items() if v.get("net_income") is not None
+                      and 0 <= (pe - datetime.fromisoformat(e)).days <= 120), default=None)
+            if fy and (datetime.now() - datetime.fromisoformat(fy)).days <= ESEF_MAX_AGE_DAYS:
+                out = {"lei": lei, "name": legal, "country": a_.get("country") or isin[:2] or country, "period_end": fy,
+                       "published": (a_.get("published") or a_.get("date_added") or "")[:10], "currency": cur,
+                       "viewer": ESEF_BASE + a_["viewer_url"] if a_.get("viewer_url") else None,
+                       "package": ESEF_BASE + a_["package_url"] if a_.get("package_url") else None,
+                       "years": {e: v for e, v in years.items() if e <= fy}}
+                break
+    ESEF_CACHE[key] = (time.time(), out)
+    return out
+
+
+def esef_check(profile, t, fin_currency="", symbol="", name=""):
+    """Gegenprüfung: Jahreszahlen aus dem offiziellen ESEF-Bericht vs. Yahoo (gleiche Berichtswährung)."""
+    isin = (profile or {}).get("isin") or ""
+    suffix_cc = SUFFIX_MARKET.get(symbol.rsplit(".", 1)[1] if "." in symbol else "", (None,))[0]
+    country = isin[:2] if isin[:2] in ESEF_COUNTRIES else suffix_cc if suffix_cc in ESEF_COUNTRIES else None
+    if not country:
+        return None
+    if isin[:2] != country:
+        isin = ""  # z. B. US-ISIN einer Zweitnotierung
+    frames = {"income": safe(lambda: t.income_stmt), "cashflow": safe(lambda: t.cashflow), "balance": safe(lambda: t.balance_sheet)}
+    inc = frames["income"]
+    ends = [c.strftime("%Y-%m-%d") for c in inc.columns] if inc is not None and not getattr(inc, "empty", True) else []
+    rep_ = esef_report(isin, name, country, ends)
+    if not rep_:
+        return None
+    same_cur = not fin_currency or not rep_["currency"] or fin_currency == rep_["currency"]
+
+    def ypick(kind, names, end):
+        df = frames.get(kind)
+        if df is None or getattr(df, "empty", True):
+            return None
+        e_ = datetime.fromisoformat(end)
+        col = next((c for c in df.columns if abs((c.to_pydatetime().replace(tzinfo=None) - e_).days) <= 7), None)
+        if col is None:
+            return None
+        return next((num(df.loc[n_, col]) for n_ in names if n_ in df.index and num(df.loc[n_, col]) is not None), None)
+    rows = []
+    for end in sorted(rep_["years"], reverse=True)[:3]:
+        vals = rep_["years"][end]
+        if vals.get("net_income") is None and vals.get("revenue") is None:
+            continue
+        r_ = {"end": end}
+        for key_, ynames, _cs, tol, kind in ESEF_ROWS:
+            e_, y_ = vals.get(key_), (ypick(kind, ynames, end) if same_cur else None)
+            dev = (y_ / e_ - 1) if e_ and y_ is not None and abs(e_) > 1e-9 else None
+            r_[key_] = {"esef": e_, "yahoo": y_, "dev": dev if tol else None,
+                        "ok": None if dev is None or tol is None else abs(dev) <= tol}
+        rows.append(r_)
+    checks = [r_[k]["ok"] for r_ in rows for k, *_ in ESEF_ROWS if r_[k]["ok"] is not None]
+    out = {k: rep_[k] for k in ("lei", "name", "country", "period_end", "published", "currency", "viewer", "package")}
+    out.update({"rows": rows, "checked": len(checks), "mismatch": sum(1 for c in checks if not c), "same_currency": same_cur,
+                "yahoo_newer": bool(ends and max(ends) > rep_["period_end"]
+                                    and (datetime.fromisoformat(max(ends)) - datetime.fromisoformat(rep_["period_end"])).days > 30)})
+    return out
+
+
 def sec_company(symbol, alternatives=(), name=""):
     """US-Aktie: letzte Pflichtmeldungen, Insider-Meldungen (Form 4) und offizielle Jahreszahlen."""
     hit = SEC_CACHE.get(("co", symbol))
@@ -5836,6 +6044,9 @@ def analyze(query):
         fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
         fpeer = ex.submit(competitors, symbol, info, alternatives)
         fprof = ex.submit(company_profile, symbol, info, company)
+        fesef = ex.submit(lambda t0=t: esef_check(fprof.result(timeout=30), t0, financial_currency(symbol, info) or "", symbol,
+                                             info.get("longName") or info.get("shortName") or company)) \
+            if equity_ and not os.environ.get("NO_ESEF") else None
         fsec = ex.submit(sec_company, symbol, alternatives, company) if equity_ else None
         us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
         fder = ex.submit(derivatives, symbol, current_price(info)) if us_listed else None  # parallel laden
@@ -5843,6 +6054,7 @@ def analyze(query):
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
         profile = safe(lambda: fprof.result(timeout=30))
+        esef_ = safe(lambda: fesef.result(timeout=60)) if fesef else None
         sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
         der_ = safe(lambda: fder.result(timeout=40)) if fder else None
     finnhub_enrich(m, symbol, alternatives)
@@ -5919,6 +6131,7 @@ def analyze(query):
         "news": news, "notes": notes, "confidence": confidence, "events": events, "competitors": comp,
         "tech": m.get("tech"),
         "profile": profile,
+        "esef": esef_,
         "sec": sec_,
         "qreport": safe(lambda: quarter_report(t, m, sec_)),
         "derivatives": der_ if fder else safe(lambda: derivatives(symbol, m.get("price"), sec_)),
@@ -7155,7 +7368,8 @@ def cache_rules():
             ("Wettbewerber", PEER_CACHE, 6 * 3600, 200), ("Termine", EVENT_CACHE, 6 * 3600, 100),
             ("Finnhub", FINNHUB_CACHE, 3600, 400), ("CoinGecko", CG_CACHE, 86400, 60),
             ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50),
-            ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300)]
+            ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300),
+            ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200)]
 
 
 def prune_caches():

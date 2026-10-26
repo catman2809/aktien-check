@@ -3898,6 +3898,31 @@ function secSection(d) {
   </div>`;
 }
 
+function esefSection(d) {
+  const E = d.esef;
+  if (!E || !E.rows?.length) return "";
+  const date = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  const cols = [["revenue", "Umsatz", true], ["op_income", "Op. Ergebnis", true], ["net_income", "Reinertrag", true],
+    ["eps", "Gewinn je Aktie", false], ["ocf", "Op. Cashflow", true], ["assets", "Bilanzsumme", true], ["equity", "Eigenkapital", true]];
+  const cell = (x, money) => {
+    if (!x || x.esef == null) return `<td class="num stamp">–</td>`;
+    const v = money ? big(x.esef).join(" ") : nf(x.esef, 2);
+    const flag = x.ok == null ? "" : x.ok ? ` <span class="cc-ok">✓</span>`
+      : ` <span class="cc-bad" title="Yahoo: ${esc(money ? big(x.yahoo).join(" ") : nf(x.yahoo, 2))}">⚠ ${pc(x.dev, 1, true)}</span>`;
+    return `<td class="num">${v}${flag}</td>`;
+  };
+  const status = E.checked ? (E.mismatch ? `<span class="cc-bad">${E.mismatch} von ${E.checked} Werten weichen ab</span>` : `<span class="cc-ok">alle ${E.checked} Werte stimmen</span>`)
+    : E.same_currency === false ? "Yahoo berichtet in anderer Währung – kein Abgleich" : "keine Yahoo-Werte zum Vergleich";
+  return `<h2 class="section" id="esef">Offizieller Jahresbericht (ESEF)</h2>
+  <p class="section-sub">Pflichtveröffentlichung börsennotierter EU-/UK-Unternehmen im europäischen Einheitsformat (XBRL nach IFRS).
+    <span translate="no">${esc(E.name)}</span> · LEI <span translate="no">${esc(E.lei)}</span> · Geschäftsjahr bis ${date(E.period_end)}${E.viewer ? ` · <a href="${esc(E.viewer)}" target="_blank" rel="noopener">Bericht ansehen</a>` : ""}</p>
+  <div class="card pad"><h3>Abgleich Jahreszahlen: ESEF ↔ Yahoo <span class="stamp">${status}</span></h3>
+    <div class="peer-scroll"><table class="trk"><thead><tr><th>Geschäftsjahr bis</th>${cols.map(c => `<th class="num">${c[1]}</th>`).join("")}</tr></thead>
+    <tbody>${E.rows.map(r => `<tr><td>${date(r.end)}</td>${cols.map(c => cell(r[c[0]], c[2])).join("")}</tr>`).join("")}</tbody></table></div>
+    <div class="stamp" style="margin-top:6px">Beträge in ${esc(E.currency || "")} laut dem bei der Finanzaufsicht eingereichten Bericht (Archiv: filings.xbrl.org). ✓ = Yahoo stimmt überein (Toleranz 1–3 %).
+      ⚠ = Yahoo weicht ab – oft wegen anderer Abgrenzung (z. B. Umsatz mit Verbrauchsteuern, US-GAAP-Zahlen bei Firmen mit US-Notierung). Das operative Ergebnis wird nicht abgeglichen, weil es unterschiedlich definiert wird.${E.yahoo_newer ? " Ein neuerer Jahresbericht liegt im Archiv noch nicht vor." : ""}</div></div>`;
+}
+
 function aboutSection(d) {
   const p = d.profile;
   if (!p || d.asset === "crypto") return "";
@@ -4290,6 +4315,7 @@ function render(d) {
 
   ${aboutSection(d)}
   ${secSection(d)}
+  ${esefSection(d)}
 
   <h2 class="section" id="methodik">Methodik</h2>
   <p class="section-sub">So entsteht die Empfehlung. Alle Regeln sind transparent und im Programmcode anpassbar.</p>
