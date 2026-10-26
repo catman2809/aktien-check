@@ -828,7 +828,7 @@ class TestForecastAndFairValue(unittest.TestCase):
 
     def test_scenarios_ordered(self):
         f = a.fair_value(self.m(), self.MAC)
-        self.assertEqual(f["method"], "Discounted-Cashflow (10 Jahre)")
+        self.assertTrue(f["method"].startswith("Discounted-Cashflow (10 Jahre)"))
         self.assertLess(f["bear"], f["base"])
         self.assertLess(f["base"], f["bull"])
         self.assertAlmostEqual(f["upside"], f["base"] / 100 - 1)
@@ -853,6 +853,35 @@ class TestForecastAndFairValue(unittest.TestCase):
         self.assertLess(ifrs["base"], a.fair_value(self.m(symbol="TEST.DE", currency="EUR", net_debt=12e9), self.MAC)["base"] + 0.01)
         self.assertTrue(any("Leasing" in x for x in ifrs["assumptions"]))
         self.assertLess(a.fair_value(self.m(minority=20e9), self.MAC)["base"], us)          # Minderheitsanteile abgezogen
+
+    def test_forward_factor(self):
+        f = a.forward_factor(self.m())["f"]
+        self.assertAlmostEqual(f["avg"], (0.5 * 1.08 + 0.5 * 1.08 * 1.10) / (0.5 + 0.5 * 1.08))  # ohne Datum: halbes Jahr
+        q0 = a.forward_factor(self.m(fy_end="2026-06-30", q_end="2026-06-30"))["f"]["avg"]
+        self.assertAlmostEqual(q0, 1.08)                                         # Jahr gerade beendet -> laufendes GJ
+        self.assertLess(f["low"], f["avg"])
+        eps = {"0y": {"avg": 5.5, "growth": 0.1, "ago": 5.0}, "+1y": {"avg": 6.6, "low": 6.0, "high": 7.2, "growth": 0.2, "ago": 5.5}}
+        both = a.forward_factor(self.m(est_eps=eps, eps_ttm=5.2, eps_fy_last=5.0))
+        self.assertEqual(both["src"], "eps+rev")
+        self.assertAlmostEqual(both["f"]["avg"], ((5.5 + 6.6) / 2 / 5.2 + (0.5 * 1.08 + 0.5 * 1.188) / 1.04) / 2)
+        other_cur = a.forward_factor(self.m(est_eps=eps, eps_ttm=5.2, eps_fy_last=40.0))  # EPS in anderer Währung
+        self.assertEqual(other_cur["src"], "rev")
+        self.assertIsNone(a.forward_factor(self.m(est_rev={})))
+
+    def test_growth_company_valued_on_next_year(self):
+        fast = {"0y": {"growth": 0.40, "avg": 140, "low": 130, "high": 150, "n": 20, "ago": 100},
+                "+1y": {"growth": 0.35, "avg": 189, "low": 170, "high": 205, "n": 18, "ago": 140}}
+        with_fwd = a.fair_value(self.m(est_rev=fast, rev_cagr=0.4), self.MAC)
+        no_fwd = a.fair_value(self.m(est_rev={}, rev_cagr=0.4), self.MAC)
+        self.assertTrue(with_fwd["forward"])
+        self.assertGreater(with_fwd["base"], no_fwd["base"] * 1.03)
+        self.assertTrue(any(x.startswith("Startwert nächste 12 Monate") for x in with_fwd["assumptions"]))
+        # Free Cashflow negativ, aber Gewinn im nächsten Jahr erwartet -> Startwert aus dem erwarteten Gewinn
+        eps = {"0y": {"avg": 0.5, "n": 10, "ago": -0.2}, "+1y": {"avg": 2.0, "low": 1.5, "high": 2.5, "n": 10, "ago": 0.5}}
+        f = a.fair_value(self.m(fcf=-1e9, est_rev={}, est_eps=eps, eps_fy_last=-0.2), self.MAC)
+        self.assertNotIn("na", f)
+        self.assertTrue(f["forward"])
+        self.assertIn("na", a.fair_value(self.m(fcf=-1e9, est_rev={}, est_eps={}), self.MAC))
 
     def test_forecast_growth(self):
         self.assertAlmostEqual(a.est_growth(self.m(), "est_rev"), 0.09)

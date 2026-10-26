@@ -1441,6 +1441,9 @@ def gather(symbol, t, info):
     rv = [r for r in revs if r]
     m["rev_cagr"] = ((rv[0] / rv[-1]) ** (1 / (len(rv) - 1)) - 1) if len(rv) >= 2 and rv[-1] > 0 else None
     te, fe = num(g("trailingEps")), num(g("forwardEps"))
+    m["eps_ttm"], m["eps_fy_last"] = te, first(eps_hist)
+    m["fy_end"] = safe(lambda: max(inc.columns).strftime("%Y-%m-%d"))
+    m["q_end"] = safe(lambda: max(c for c in qcf.columns if num(qcf.loc["Operating Cash Flow", c]) is not None).strftime("%Y-%m-%d"))
     m["fwd_eps_g"] = (fe / te - 1) if te and fe and te > 0 else None
     capex = first(row(cf, "Capital Expenditure"))
     m["capex_ratio"] = abs(capex) / m["revenue"] if capex and m["revenue"] else None
@@ -1628,17 +1631,77 @@ def model_valuation(m, mac, ref_pe, why):
     return parts
 
 
-def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5):
-    """Abgezinste Free Cashflows: Jahre 1–5 mit g1, danach linear auf g_term, Endwert nach Gordon."""
+def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5, first=None):
+    """Abgezinste Free Cashflows: Jahre 1–5 mit g1, danach linear auf g_term, Endwert nach Gordon.
+    first = Cashflow des ersten Jahres (Prognose für das nächste Geschäftsjahr); das Wachstum gilt dann ab Jahr 2."""
     pv, cf_ = 0.0, fcf
     for y in range(1, years + 1):
         g = g1 if y <= fade_from else g1 + (g_term - g1) * (y - fade_from) / (years - fade_from)
-        cf_ *= 1 + g
+        cf_ = first if y == 1 and first is not None else cf_ * (1 + g)
         pv += cf_ / (1 + r) ** y
     tv = cf_ * (1 + g_term) / (r - g_term)
     pv += tv / (1 + r) ** years
     equity = pv - (net_debt or 0)
     return equity / shares if equity > 0 and shares else None
+
+
+def fy_progress(m):
+    """Anteil des laufenden Geschäftsjahres, den die letzten 12 Monate schon abdecken (0 = Jahr gerade beendet)."""
+    fy, q = m.get("fy_end"), m.get("q_end")
+    if not fy or not q:
+        return 0.5
+    months = round((datetime.fromisoformat(q) - datetime.fromisoformat(fy)).days / 30.44)
+    return (months % 12) / 12
+
+
+def forward_factor(m):
+    """Erwartete Entwicklung in den nächsten 12 Monaten ggü. den letzten 12 Monaten laut Analysten – je Szenario
+    (niedrigste / mittlere / höchste Schätzung). Die nächsten 12 Monate setzen sich aus laufendem und folgendem
+    Geschäftsjahr zusammen, gewichtet nach dem Fortschritt des Geschäftsjahres. Gewinn je Aktie und Umsatz werden
+    gemittelt, damit Sondereffekte im Gewinn der letzten 12 Monate den Faktor nicht verzerren."""
+    E, R = m.get("est_eps") or {}, m.get("est_rev") or {}
+    e0, e1 = E.get("0y") or {}, E.get("+1y") or {}
+    r0, r1 = R.get("0y") or {}, R.get("+1y") or {}
+    q = fy_progress(m)
+    rev = None
+    if r0.get("growth") is not None and r1.get("growth") is not None:
+        fy0, fy1 = 1 + r0["growth"], (1 + r0["growth"]) * (1 + r1["growth"])
+        avg = ((1 - q) * fy0 + q * fy1) / ((1 - q) + q * fy0)
+        spread = ((r1["high"] - r1["low"]) / r1["avg"] / 2) if r1.get("avg") and r1.get("high") and r1.get("low") else 0.05
+        rev = {"avg": avg, "low": avg * (1 - spread), "high": avg * (1 + spread)}
+    ttm, last, ago = m.get("eps_ttm"), m.get("eps_fy_last"), e0.get("ago")
+    same_basis = bool(ago and last and ago * last > 0 and 0.85 <= ago / last <= 1.15)  # gleiche Währung/Aktienbasis
+    eps = None
+    if e0.get("avg") and e1.get("avg") and e1["avg"] > 0 and ttm and ttm > 0 and same_basis:
+        eps = {k: ((1 - q) * (e0.get(k) or e0["avg"]) + q * (e1.get(k) or e1["avg"])) / ttm for k in ("low", "avg", "high")}
+        eps = eps if eps["avg"] > 0 else None
+    if eps and rev:
+        f, src = {k: (min(eps[k], rev[k] * 1.6) + rev[k]) / 2 for k in eps}, "eps+rev"
+    elif eps or rev:
+        f, src = eps or rev, "eps" if eps else "rev"
+    else:
+        return None
+    f = {k: clamp(v, 0.6, 2.5) for k, v in f.items()}
+    f["low"], f["high"] = min(f["low"], f["avg"]), max(f["high"], f["avg"])
+    return {"f": f, "src": src, "q": q}
+
+
+def forward_earnings(m, shares):
+    """Erwarteter Gewinn der nächsten 12 Monate (Aktien × Gewinn je Aktie) je Szenario – Startwert, wenn der
+    Free Cashflow heute noch negativ ist. Nur bei mehreren Analysten und plausibler Größenordnung."""
+    E = m.get("est_eps") or {}
+    e0, e1 = E.get("0y") or {}, E.get("+1y") or {}
+    if not (e1.get("avg") and e1["avg"] > 0 and e0.get("avg") is not None and (e1.get("n") or 0) >= 3 and m["price"]):
+        return None
+    q = fy_progress(m)
+    nxt = {k: (1 - q) * (e0.get(k) if e0.get(k) is not None else e0["avg"]) + q * (e1.get(k) or e1["avg"])
+           for k in ("low", "avg", "high")}
+    if not 0.002 <= nxt["avg"] / m["price"] <= 0.25:
+        return None  # KGV unter 4 oder über 500 -> vermutlich andere Währung/Aktienbasis
+    last, ago = m.get("eps_fy_last"), e0.get("ago")
+    if last and ago and not (ago * last > 0 and 0.85 <= ago / last <= 1.15):
+        return None
+    return {k: max(0.0, v) * shares for k, v in nxt.items()}
 
 
 def fair_value(m, mac):
@@ -1684,9 +1747,27 @@ def fair_value(m, mac):
             base_fcf = owner  # hohe Wachstumsinvestitionen drücken den Free Cashflow nur vorübergehend
         if base_fcf is not None and m.get("sbc"):
             base_fcf -= m["sbc"]
+        # Startwert = Prognose für das nächste Geschäftsjahr (sonst kommen wachstumsstarke Firmen zu schlecht weg);
+        # Zykliker rechnen bewusst mit dem Durchschnitt der Geschäftsjahre
+        start, start_note, from_earn = None, "", False
+        fwd = None if biz == "cyclical" else forward_factor(m)
+        if fwd and base_fcf is not None and base_fcf > 0:
+            start = {k: base_fcf * f for k, f in fwd["f"].items()}
+            chg = fwd["f"]["avg"] - 1
+            start_note = (f"Startwert nächste 12 Monate: {money(start['low'], m['currency'])} / "
+                          f"{money(start['avg'], m['currency'])} / {money(start['high'], m['currency'])} – Cashflow × erwartete "
+                          f"Entwicklung laut Analysten ({'+' if chg >= 0 else ''}{pct(chg)} ggü. den letzten 12 Monaten)")
+        elif (base_fcf is None or base_fcf <= 0) and biz != "cyclical":
+            earn = forward_earnings(m, shares)
+            if earn and earn["avg"] > 0:
+                start = {k: v * 0.8 for k, v in earn.items()}
+                base_fcf, from_earn = start["avg"], True
+                start_note = (f"Startwert nächste 12 Monate: 80 % des erwarteten Gewinns "
+                              f"({money(start['avg'], m['currency'])}) – der Free Cashflow ist heute noch negativ")
         if base_fcf is None or base_fcf <= 0:
             return {"method": "", "na": "Der Free Cashflow ist (nach Aktienvergütung) negativ – ein Cashflow-Modell ist "
                     "noch nicht sinnvoll. Maßgeblich sind EV/Umsatz, Rule of 40 und Cash-Reichweite."}
+        start = start or {}
         frg = est_growth(m, "est_rev")
         hist_g = m["rev_cagr"]
         parts_ = [(frg, 0.6), (hist_g, 0.4)] if frg is not None and hist_g is not None else [(frg if frg is not None else hist_g, 1)]
@@ -1702,15 +1783,17 @@ def fair_value(m, mac):
         # Diskontsatz: angepasstes Beta (Blume: 2/3 Beta + 1/3) und 4,5 % Marktrisikoprämie
         beta_adj = 0.67 * clamp(m["beta"] or 1.0, 0.3, 2.5) + 0.33
         r = clamp((mac["rf"] or 4.0) / 100 + beta_adj * 0.045, 0.075, 0.12)  # Untergrenze: auch „sichere“ Aktien sind keine Anleihe
-        out.update(method="Discounted-Cashflow (10 Jahre)",
-                   bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, nd, shares),
-                   base=dcf_value(base_fcf, g_base, r, 0.025, nd, shares),
-                   bull=dcf_value(base_fcf, min(0.40, g_base + d), max(0.07, r - 0.01), 0.03, nd, shares))
+        out.update(method="Discounted-Cashflow (10 Jahre)" + (", ab Prognose für die nächsten 12 Monate" if start else ""),
+                   bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, nd, shares, first=start.get("low")),
+                   base=dcf_value(base_fcf, g_base, r, 0.025, nd, shares, first=start.get("avg")),
+                   bull=dcf_value(base_fcf, min(0.40, g_base + d), max(0.07, r - 0.01), 0.03, nd, shares, first=start.get("high")))
+        out["forward"] = bool(start)
         out["assumptions"] = [
-            ("Owner Earnings (operativer Cashflow minus Abschreibungen) " if used_owner else "Free Cashflow ")
-            + money(base_fcf, m['currency']) + (" (Ø der Geschäftsjahre, Zykliker)" if biz == "cyclical" else "" if used_owner else " (12 Monate)")
-            + (" nach Aktienvergütung" if m.get("sbc") else ""),
-            f"Wachstum Jahre 1–5: {pct(g_base - d)} / {pct(g_base)} / {pct(g_base + d)}"
+            *([] if from_earn else [("Owner Earnings (operativer Cashflow minus Abschreibungen) " if used_owner else "Free Cashflow ")
+              + money(base_fcf, m['currency']) + (" (Ø der Geschäftsjahre, Zykliker)" if biz == "cyclical" else "" if used_owner else " (12 Monate)")
+              + (" nach Aktienvergütung" if m.get("sbc") else "")]),
+            *([start_note] if start_note else []),
+            f"Wachstum Jahre {2 if start else 1}–5: {pct(g_base - d)} / {pct(g_base)} / {pct(g_base + d)}"
             + (" (aus Analystenprognose und Historie)" if frg is not None else " (aus der Historie)"),
             "danach schrittweise auf 2–3 % Dauerwachstum",
             *([f"Leasing: Zahlungen ≈ {money(lease_pay, m['currency'])} p. a. abgezogen, Leasingschulden nicht doppelt gezählt"]
