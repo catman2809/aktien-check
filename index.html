@@ -305,8 +305,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-drop{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:22px 16px;border:2px dashed var(--border-strong);border-radius:12px;cursor:pointer}
 .dp-drop span{font-size:13.5px;color:var(--text-2);max-width:620px}
 .dp-drop.over,.dp-drop:focus-visible{border-color:var(--accent);background:var(--accent-soft);outline:none}
-.dp-save{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--text-2);margin:12px 0 6px}
-.dp-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .dp-note{margin-top:10px} .dp-err{border-color:var(--neg-line);background:var(--neg-soft)}
 .dp-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:4px 0 8px}
 .dp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;min-width:0}
@@ -1887,7 +1886,7 @@ async function depotUpload(file) {
   const buf = await file.arrayBuffer();
   let text;
   try { text = new TextDecoder("utf-8", {fatal: true}).decode(buf); } catch (e) { text = new TextDecoder("windows-1252").decode(buf); }
-  const save = $("#dp-save") ? $("#dp-save").checked : true;
+  const save = true;  // Depot immer (verschlüsselt) im Konto speichern
   depotBusy = "Depot wird eingelesen und analysiert …"; renderDepot();
   const my = runId;
   try {
@@ -1968,7 +1967,6 @@ function renderDepot() {
       <span>Auch Umsatzlisten mit Käufen und Verkäufen werden verrechnet – dann bitte den gesamten Zeitraum ab Depoteröffnung exportieren.</span>
       <input type="file" id="dp-file" accept=".csv,.txt,text/csv" hidden>
       <button class="btn primary" id="dp-pick" type="button">Datei auswählen</button></div>
-    <label class="dp-save"><input type="checkbox" id="dp-save" checked> Depot in meinem Konto speichern (verschlüsselt), damit es beim nächsten Besuch wieder da ist</label>
     <div class="dp-actions"><button class="btn xs" id="dp-tpl" type="button">Vorlage herunterladen</button>
       ${D?.saved ? `<button class="btn xs" id="dp-del" type="button">Gespeichertes Depot löschen</button>` : ""}</div>
     ${depotBusy ? `<div class="note dp-note"><span class="wl-busy"></span> ${esc(depotBusy)}</div>` : ""}

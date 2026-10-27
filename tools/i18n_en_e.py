@@ -9,8 +9,6 @@ DEPOT_EXACT = {
     "Export aus deinem Online-Depot (z. B. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) oder eine eigene Tabelle mit den Spalten ISIN (oder Symbol/Name), Stück und optional Kaufkurs.":
         "Export from your online brokerage account (e.g. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) or your own table with the columns ISIN (or symbol/name), quantity and optionally purchase price.",
     "Datei auswählen": "Choose file",
-    "Depot in meinem Konto speichern (verschlüsselt), damit es beim nächsten Besuch wieder da ist":
-        "Save the portfolio in my account (encrypted) so it is still there on my next visit",
     "Vorlage herunterladen": "Download template", "Gespeichertes Depot löschen": "Delete saved portfolio",
     "Gespeichertes Depot wirklich löschen?": "Really delete the saved portfolio?",
     "Depot wird eingelesen und analysiert … (je nach Größe {0}–{1} Sekunden)": "Reading and analyzing the portfolio … ({0}–{1} seconds depending on size)",
