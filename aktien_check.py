@@ -6443,12 +6443,18 @@ DEPOT_COLS = (
     ("isin", ("isin",)),
     ("wkn", ("wkn",)),
     ("symbol", ("symbol", "ticker", "kuerzel", "kürzel")),
+    # Umsatzlisten: Buchungsart, Status, Datum (kurze Stichwörter nur als ganzes Wort, sonst trifft „type“ auch „assettype“)
+    ("type", ("transaktionsart", "geschäftsart", "geschaeftsart", "buchungsart", "umsatzart", "orderart", "transaktion",
+              "transaction", "vorgang", "typ", "type", "art", "side", "aktion")),
+    ("status", ("status",)),
+    ("date", ("datum", "date", "buchtag", "handelstag", "geschäftstag", "valuta", "zeitpunkt")),
     ("name", ("wertpapiername", "wertpapier", "bezeichnung", "instrument", "produkt", "security", "description")),
     ("qty", ("stueck", "stück", "stk", "anzahl", "menge", "bestand", "quantity", "shares", "nominal", "units")),
     ("cost", ("einstandswert", "kaufwert", "anschaffungswert", "investiert", "einstand gesamt", "cost basis", "kosten")),
     ("buy", ("kaufkurs", "einstandskurs", "einstiegskurs", "kaufpreis", "durchschnittskurs", "einstand", "avg", "average",
              "purchase", "buy")),
     ("value", ("kurswert", "marktwert", "aktueller wert", "depotwert", "market value", "value", "wert")),
+    ("amount", ("betrag", "amount", "total")),
     ("price", ("aktueller kurs", "letzter kurs", "kurs", "price")),
     ("cur", ("waehrung", "währung", "currency", "whg")),
     ("name", ("name", "titel")),
@@ -6466,6 +6472,44 @@ EQUITY_SECTOR_DE = {"technology": "Technologie", "financial services": "Finanzen
                     "healthcare": "Gesundheit", "industrials": "Industrie", "consumer cyclical": "Zyklischer Konsum",
                     "consumer defensive": "Basiskonsum", "communication services": "Kommunikation", "energy": "Energie",
                     "basic materials": "Grundstoffe", "utilities": "Versorger", "real estate": "Immobilien"}
+
+
+DEPOT_SHORT_KW = {"typ", "type", "art", "side", "aktion", "date", "status", "total"}
+
+
+def _depot_kw_match(h, kw):
+    if kw in DEPOT_SHORT_KW:
+        return re.search(rf"(?<![a-zäöü]){re.escape(kw)}(?![a-zäöü])", h) is not None
+    return kw in h
+
+
+def _tx_kind(v):
+    """Buchungsart einer Umsatzzeile -> buy | sell | skip (storniert) | split | other (Dividende, Gebühr, Einzahlung …)."""
+    v = (v or "").lower()
+    if re.search(r"storn|cancel|abgelehnt|reject|fehlgeschlagen|failed|gelöscht|deleted", v):
+        return "skip"
+    if re.search(r"split", v):
+        return "split"
+    if re.search(r"verkauf|sell|\bsale\b|abgang|auslieferung|ausbuchung|transfer.?out|ausgang|fälligkeit|faelligkeit|"
+                 r"tilgung|rückzahlung|redemption", v):
+        return "sell"
+    if re.search(r"kauf|buy|purchase|sparplan|savings|zugang|einlieferung|einbuchung|transfer.?in|eingang|bonus|gratis|bezug",
+                 v):
+        return "buy"
+    return "other"
+
+
+def _depot_date(v):
+    v = (v or "").strip()
+    m_ = re.search(r"(\d{4})-(\d{2})-(\d{2})", v) or None
+    if m_:
+        return f"{m_.group(1)}-{m_.group(2)}-{m_.group(3)}"
+    m_ = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})", v)
+    if m_:
+        y = m_.group(3) if len(m_.group(3)) == 4 else "20" + m_.group(3)
+        return f"{y}-{int(m_.group(2)):02d}-{int(m_.group(1)):02d}"
+    m_ = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
+    return f"{m_.group(3)}-{int(m_.group(1)):02d}-{int(m_.group(2)):02d}" if m_ else ""
 
 
 def _depot_norm(h):
@@ -6512,7 +6556,7 @@ def parse_depot_csv(text):
             if not h or len(h) > 40:
                 continue
             for field, kws in DEPOT_COLS:
-                if field not in found and any(k in h for k in kws):
+                if field not in found and any(_depot_kw_match(h, k) for k in kws):
                     found[field] = j
                     break
         if ("qty" in found or "value" in found) and any(k in found for k in ("isin", "wkn", "symbol", "name")):
@@ -6522,7 +6566,7 @@ def parse_depot_csv(text):
         raise ValueError("Keine Kopfzeile erkannt. Benötigt werden eine Spalte für das Wertpapier (ISIN, WKN, Symbol "
                          "oder Name) und eine für die Stückzahl oder den Wert.")
     dec_comma = delim != ","
-    out, notes, seen = [], [], {}
+    recs = []
     for r_ in rows[head_i + 1:]:
         get = lambda f: r_[cols[f]].strip() if f in cols and cols[f] < len(r_) else ""
         isin = get("isin").upper().replace(" ", "")
@@ -6531,13 +6575,24 @@ def parse_depot_csv(text):
         sym, name = get("symbol").upper(), get("name")
         if not (isin or wkn or sym or name) or re.match(r"(?i)(summe|gesamt|total|depotwert|saldo)", name or sym):
             continue
-        qty, val = _depot_num(get("qty"), dec_comma), _depot_num(get("value"), dec_comma)
+        recs.append({"key": isin or wkn or sym or name.lower(), "isin": isin, "wkn": wkn, "symbol": sym, "name": name[:80],
+                     "qty": _depot_num(get("qty"), dec_comma), "value": _depot_num(get("value"), dec_comma),
+                     "buy": _depot_num(get("buy"), dec_comma), "cost": _depot_num(get("cost"), dec_comma),
+                     "price": _depot_num(get("price"), dec_comma), "amount": _depot_num(get("amount"), dec_comma),
+                     "cur": (get("cur") or "").upper()[:3] or None, "kind": _tx_kind(get("type")) if "type" in cols else None,
+                     "status": _tx_kind(get("status")) if "status" in cols else None, "date": _depot_date(get("date"))})
+    kinds = [r_["kind"] for r_ in recs]
+    keys = [r_["key"] for r_ in recs]
+    is_tx = (kinds.count("buy") + kinds.count("sell") > 0) or ("date" in cols and len(set(keys)) < len(keys))
+    if is_tx:
+        return _depot_from_transactions(recs)
+    out, notes, seen = [], [], {}
+    for rec in recs:
+        qty, val, key = rec["qty"], rec["value"], rec["key"]
         if not (qty and qty > 0) and not (val and val > 0):
             continue
-        key = isin or wkn or sym or name.lower()
-        p_ = {"isin": isin, "wkn": wkn, "symbol": sym, "name": name[:80], "qty": qty if qty and qty > 0 else None,
-              "buy": _depot_num(get("buy"), dec_comma), "cost": _depot_num(get("cost"), dec_comma),
-              "value": val, "cur": (get("cur") or "").upper()[:3] or None}
+        p_ = {"isin": rec["isin"], "wkn": rec["wkn"], "symbol": rec["symbol"], "name": rec["name"],
+              "qty": qty if qty and qty > 0 else None, "buy": rec["buy"], "cost": rec["cost"], "value": val, "cur": rec["cur"]}
         if key in seen:  # gleiche Position aus mehreren Lagerstellen zusammenfassen
             q_ = seen[key]
             if p_["qty"] and q_["qty"]:
@@ -6558,6 +6613,67 @@ def parse_depot_csv(text):
     return out, notes
 
 
+def _depot_from_transactions(recs):
+    """Umsatzliste (Käufe, Verkäufe, Sparpläne, Dividenden …) -> aktueller Bestand. Käufe erhöhen, Verkäufe senken den
+    Bestand; vollständig verkaufte Positionen entfallen. Einstandskurs nach der Durchschnittsmethode (ein Verkauf senkt
+    den Einstand anteilig). Dividenden, Gebühren, Ein-/Auszahlungen und stornierte Aufträge werden ignoriert."""
+    stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0}
+    # chronologisch; Exporte stehen oft mit der neuesten Buchung oben
+    order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", i)) if any(r_["date"] for r_ in recs) else range(len(recs))
+    pos = {}
+    for i in order:
+        r_ = recs[i]
+        if r_["status"] == "skip" or r_["kind"] == "skip":
+            stats["skip"] += 1
+            continue
+        qty = r_["qty"]
+        kind = r_["kind"] or ("sell" if qty is not None and qty < 0 else "buy" if qty else "other")
+        if kind in ("other", "split") or not qty:
+            stats["split" if kind == "split" else "other"] += 1
+            continue
+        stats[kind] += 1
+        q = abs(qty)
+        p_ = pos.setdefault(r_["key"], {"isin": r_["isin"], "wkn": r_["wkn"], "symbol": r_["symbol"], "name": r_["name"],
+                                        "qty": 0.0, "cost": 0.0, "cur": r_["cur"], "cost_ok": True})
+        if kind == "buy":
+            px = r_["price"] or r_["buy"]
+            trade = q * px if px else abs(r_["amount"] or r_["value"] or 0) or None
+            if trade is None:
+                p_["cost_ok"] = False
+            p_["cost"] += trade or 0.0
+            p_["qty"] += q
+        else:
+            if p_["qty"] > 1e-9:
+                p_["cost"] -= p_["cost"] * min(1.0, q / p_["qty"])
+            p_["qty"] -= q
+        if abs(p_["qty"]) < 1e-6:
+            p_["qty"], p_["cost"] = 0.0, 0.0
+    out, sold, negative = [], 0, 0
+    for p_ in pos.values():
+        if p_["qty"] > 1e-6:
+            out.append({"isin": p_["isin"], "wkn": p_["wkn"], "symbol": p_["symbol"], "name": p_["name"], "qty": p_["qty"],
+                        "buy": p_["cost"] / p_["qty"] if p_["cost_ok"] and p_["cost"] > 0 else None, "cost": None,
+                        "value": None, "cur": p_["cur"]})
+        elif p_["qty"] < -1e-6:
+            negative += 1
+        else:
+            sold += 1
+    notes = [f"Umsatzliste erkannt: {stats['buy']} Käufe und {stats['sell']} Verkäufe verrechnet, "
+             f"{stats['other']} andere Buchungen (z. B. Dividenden, Gebühren, Ein- und Auszahlungen) nicht berücksichtigt."]
+    if sold:
+        notes.append(f"{sold} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.")
+    if stats["skip"]:
+        notes.append(f"{stats['skip']} stornierte oder abgelehnte Aufträge übersprungen.")
+    if negative:
+        notes.append(f"Bei {negative} Positionen enthält die Datei mehr Verkäufe als Käufe – vermutlich fehlen ältere Käufe "
+                     "im Export. Diese Positionen werden nicht angezeigt; bitte den Zeitraum ab Depoteröffnung exportieren.")
+    if stats["split"]:
+        notes.append(f"{stats['split']} Aktiensplits in der Datei – die Stückzahl der betroffenen Positionen kann abweichen.")
+    if not out:
+        raise ValueError("Nach Verrechnung aller Käufe und Verkäufe ist kein Bestand übrig.")
+    return out[:DEPOT_MAX_POSITIONS], notes
+
+
 def depot_resolve(p_):
     """Yahoo-Symbol zu einer Position: Symbol, sonst ISIN, sonst Name (WKN ist bei Yahoo nicht suchbar)."""
     key = p_.get("symbol") or p_.get("isin") or p_.get("name") or p_.get("wkn")
@@ -6571,6 +6687,10 @@ def depot_resolve(p_):
         res = safe(lambda: search_symbols(q, include_crypto=True), []) or []
         if q == p_.get("symbol"):
             res = [x for x in res if x["symbol"].upper() == q.upper()] or res[:1]
+        elif q == p_.get("name") and not p_.get("isin"):
+            # nur über den Namen gesucht: erstes Namenswort muss passen, sonst lieber „nicht zugeordnet“ als ein falsches Papier
+            want = _plain_name(clean_company_name(q))[:1]
+            res = [x for x in res if want and _plain_name(clean_company_name(x.get("name", "")))[:1] == want]
         if res:
             # bei Nicht-US-ISINs bevorzugt die Xetra-Notierung (Euro, gute Datenqualität)
             found = next((x for x in res if x["symbol"].endswith(".DE")), None) if p_.get("isin", "")[:2] not in ("", "US") else None

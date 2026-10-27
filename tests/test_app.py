@@ -1302,6 +1302,52 @@ class TestDepotParse(unittest.TestCase):
         with self.assertRaises(ValueError):
             a.parse_depot_csv("")
 
+    SCALABLE = ("date;time;status;reference;description;assetType;type;isin;shares;price;amount;fee;tax;currency\n"
+                "2026-09-15;10:00;Executed;R7;Apple;Security;Sell;US0378331005;5;200,00;1000,00;0;0;EUR\n"
+                "2026-08-01;09:00;Executed;R6;Apple;Security;Distribution;US0378331005;;;12,00;0;0;EUR\n"
+                "2026-07-01;09:00;Cancelled;R5;SAP;Security;Buy;DE0007164600;100;150,00;-15000,00;0;0;EUR\n"
+                "2026-06-01;09:00;Executed;R4;Tesla;Security;Sell;US88160R1014;3;250,00;750,00;0;0;EUR\n"
+                "2026-03-01;09:00;Executed;R3;Tesla;Security;Buy;US88160R1014;3;180,00;-540,00;1;0;EUR\n"
+                "2026-02-01;09:00;Executed;R2;Apple;Security;Savings plan;US0378331005;10;150,00;-1500,00;0;0;EUR\n"
+                "2026-01-01;09:00;Executed;R1;Apple;Security;Buy;US0378331005;10;130,00;-1300,00;0;0;EUR\n"
+                "2026-01-01;08:00;Executed;R0;;Cash;Deposit;;;;5000,00;0;0;EUR\n")
+    COMDIRECT_TX = ('"Geschäftstag";"Bezeichnung";"WKN";"ISIN";"Geschäftsart";"Stück / Nom.";"Kurs";"Kurswert"\n'
+                    '"10.10.2026";"Allianz SE";"840400";"DE0008404005";"Verkauf";"10";"380,00";"3.800,00"\n'
+                    '"05.05.2026";"Allianz SE";"840400";"DE0008404005";"Kauf";"5";"300,00";"1.500,00"\n'
+                    '"02.01.2026";"Allianz SE";"840400";"DE0008404005";"Kauf";"10";"250,00";"2.500,00"\n'
+                    '"02.01.2026";"BASF SE";"BASF11";"DE000BASF111";"Kauf";"20";"45,00";"900,00"\n')
+
+    def test_transactions_scalable(self):
+        pos, notes = a.parse_depot_csv(self.SCALABLE)
+        self.assertEqual([(p_["isin"], p_["qty"]) for p_ in pos], [("US0378331005", 15)])   # Tesla verkauft, SAP storniert
+        self.assertAlmostEqual(pos[0]["buy"], 140.0)   # Ø-Einstand (1300 + 1500) / 20, Verkauf senkt anteilig
+        text = " ".join(notes)
+        self.assertIn("3 Käufe und 2 Verkäufe", text)
+        self.assertIn("1 Positionen wurden vollständig verkauft", text)
+        self.assertIn("1 stornierte", text)
+
+    def test_transactions_comdirect(self):
+        pos, notes = a.parse_depot_csv(self.COMDIRECT_TX)
+        self.assertEqual({p_["isin"]: p_["qty"] for p_ in pos}, {"DE0008404005": 5, "DE000BASF111": 20})
+        self.assertAlmostEqual(pos[0]["buy"], (2500 + 1500) / 15)   # Verkauf ändert den Ø-Einstandskurs nicht
+        self.assertIsNone(pos[0]["value"])                          # Kurswert eines Auftrags ist kein Depotwert
+
+    def test_transactions_negative_quantities(self):
+        csv_ = ("Datum;Name;ISIN;Anzahl;Kurs\n03.03.2026;SAP;DE0007164600;-4;200\n"
+                "01.01.2026;SAP;DE0007164600;10;100\n02.02.2026;SAP;DE0007164600;2;130\n")
+        pos, _ = a.parse_depot_csv(csv_)
+        self.assertEqual(pos[0]["qty"], 8)
+        self.assertAlmostEqual(pos[0]["buy"], (1000 + 260) / 12)
+        with self.assertRaises(ValueError):
+            a.parse_depot_csv("Datum;ISIN;Typ;Stück\n01.01.2026;DE0007164600;Kauf;5\n02.01.2026;DE0007164600;Verkauf;5\n")
+
+    def test_holdings_list_unchanged(self):
+        # Bestandsliste mit „Art“ = Wertpapierart darf nicht als Umsatzliste gelten
+        pos, notes = a.parse_depot_csv("Bezeichnung;ISIN;Art;Stück;Kurswert\nSAP;DE0007164600;Aktie;10;2000\n"
+                                       "MSCI World;IE00B4L5Y983;ETF;5;600\n")
+        self.assertEqual([p_["qty"] for p_ in pos], [10, 5])
+        self.assertEqual(notes, [])
+
     def test_checks(self):
         rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
                 {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]

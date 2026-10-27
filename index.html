@@ -1944,6 +1944,7 @@ function renderDepot() {
     <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="CSV-Datei auswählen">
       <b>${D ? "Neue Depot-Datei hochladen" : "CSV-Datei deines Depots hierher ziehen oder auswählen"}</b>
       <span>Export aus deinem Online-Depot (z. B. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) oder eine eigene Tabelle mit den Spalten ISIN (oder Symbol/Name), Stück und optional Kaufkurs.</span>
+      <span>Auch Umsatzlisten mit Käufen und Verkäufen werden verrechnet – dann bitte den gesamten Zeitraum ab Depoteröffnung exportieren.</span>
       <input type="file" id="dp-file" accept=".csv,.txt,text/csv" hidden>
       <button class="btn primary" id="dp-pick" type="button">Datei auswählen</button></div>
     <label class="dp-save"><input type="checkbox" id="dp-save" checked> Depot in meinem Konto speichern (verschlüsselt), damit es beim nächsten Besuch wieder da ist</label>

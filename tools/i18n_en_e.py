@@ -121,4 +121,16 @@ DEPOT_WILD = [
      "{*} and {*1} move almost identically (correlation {0}) – they barely spread the risk."),
     ("Einzelpositionen: {*}", "Individual positions: {*}"), ("Branchen: {*}", "Sectors: {*}"), ("Länder: {*}", "Countries: {*}"),
     ("Anlageklassen: {*}", "Asset classes: {*}"), ("Währungen: {*}", "Currencies: {*}"),
+    ("Umsatzliste erkannt: {0} Käufe und {1} Verkäufe verrechnet, {2} andere Buchungen (z. B. Dividenden, Gebühren, Ein- und Auszahlungen) nicht berücksichtigt.",
+     "Transaction list detected: {0} purchases and {1} sales netted, {2} other bookings (e.g. dividends, fees, deposits and withdrawals) ignored."),
 ]
+DEPOT_EXACT.update({
+    "{0} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.": "{0} positions were sold completely and are no longer in the portfolio.",
+    "{0} stornierte oder abgelehnte Aufträge übersprungen.": "{0} cancelled or rejected orders skipped.",
+    "Bei {0} Positionen enthält die Datei mehr Verkäufe als Käufe – vermutlich fehlen ältere Käufe im Export. Diese Positionen werden nicht angezeigt; bitte den Zeitraum ab Depoteröffnung exportieren.":
+        "For {0} positions the file contains more sales than purchases – older purchases are probably missing from the export. These positions are not shown; please export the period since the account was opened.",
+    "{0} Aktiensplits in der Datei – die Stückzahl der betroffenen Positionen kann abweichen.": "{0} stock splits in the file – the quantity of the affected positions may differ.",
+    "Nach Verrechnung aller Käufe und Verkäufe ist kein Bestand übrig.": "After netting all purchases and sales, no holdings remain.",
+    "Auch Umsatzlisten mit Käufen und Verkäufen werden verrechnet – dann bitte den gesamten Zeitraum ab Depoteröffnung exportieren.":
+        "Transaction lists with purchases and sales are netted too – in that case please export the entire period since the account was opened.",
+})
