@@ -321,6 +321,12 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-leg li{display:flex;align-items:center;gap:8px;padding:2px 0}
 .dp-leg i{flex:0 0 10px;height:10px;border-radius:3px}
 .dp-leg span{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3}
+.dp-other{display:flex;align-items:center;gap:8px;width:100%;padding:2px 0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.dp-other span{text-decoration:underline dotted;text-underline-offset:3px} .dp-other:hover span,.dp-other:focus-visible span{color:var(--accent)}
+.dp-arr{font-style:normal;color:var(--text-3);font-size:11px}
+.dp-donut [data-other]{cursor:pointer}
+.dp-more{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);max-height:320px;overflow-y:auto}
+.dp-more small{flex:0 0 auto;min-width:70px;text-align:right;color:var(--text-3);font-size:12px}
 .dp-tip{position:fixed;z-index:60;display:none;pointer-events:none;background:var(--text);color:var(--surface);font-size:12.5px;padding:6px 9px;border-radius:8px;max-width:280px}
 .dp-checks{display:flex;flex-direction:column;gap:10px}
 .dp-check{display:flex;gap:10px;align-items:flex-start;font-size:14px}
@@ -337,7 +343,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-groups{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
 .dp-tbl td,.dp-tbl th{white-space:nowrap} .dp-tbl td small{display:block}
 .dp-intro ul{margin:6px 0 10px;padding-left:20px;font-size:14px;color:var(--text-2)}
-@media (max-width:600px){.dp-donut-body{flex-direction:column;align-items:stretch}.dp-donut svg{align-self:center}.dp-kpi b{font-size:18px}}
+@media (max-width:600px){.dp-other{min-height:34px}.dp-donut-body{flex-direction:column;align-items:stretch}.dp-donut svg{align-self:center}.dp-kpi b{font-size:18px}}
 .src-badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:var(--surface-2);color:var(--text);margin-left:2px}
 .dv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px}
 @media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
@@ -1855,6 +1861,7 @@ function welcome() {
 
 /* Depot-Analyse: CSV-Export des Brokers hochladen -> Struktur, Risiko, Dividenden, Prüfpunkte */
 let DEPOT = null, depotView = false, depotBusy = "", depotErr = "", depotRatings = {};
+const dpOpen = new Set();  // Kreisdiagramme, bei denen „Sonstige“ aufgeklappt ist
 const DP_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
 const DP_TEMPLATE = "ISIN;Name;Stück;Kaufkurs\nDE0007164600;SAP SE;10;120,00\nUS0378331005;Apple Inc.;5;145,30\nIE00B4L5Y983;iShares Core MSCI World;40;75,20\n";
 
@@ -1902,11 +1909,17 @@ function dpDonut(title, items, sub) {
     a0 = a1;
     return d;
   };
+  const other = i => rest.length && i === segs.length - 1;
+  const open = dpOpen.has(title);
   const paths = segs.map((s, i) => `<path d="${arc(s, s.weight)}" fill="${s.color}" stroke="var(--surface)" stroke-width="2"
-      data-tip="${esc(s.label)}: ${pc(s.weight, 1)} · ${nf(s.value, 0)} €" tabindex="0"></path>`).join("");
-  return `<div class="card pad dp-donut"><h3>${esc(title)}</h3>${sub ? `<div class="stamp" style="margin:-4px 0 8px">${esc(sub)}</div>` : ""}
+      data-tip="${esc(s.label)}: ${pc(s.weight, 1)} · ${nf(s.value, 0)} €" tabindex="0"${other(i) ? ` data-other="1"` : ""}></path>`).join("");
+  const li = (s, i) => other(i)
+    ? `<li><button type="button" class="dp-other" data-other="1" aria-expanded="${open}" aria-label="Alle übrigen Positionen anzeigen"><i style="background:${s.color}"></i><span>${esc(s.label)}</span><em class="dp-arr" aria-hidden="true">${open ? "▴" : "▾"}</em><b class="num">${pc(s.weight, 1)}</b></button></li>`
+    : `<li><i style="background:${s.color}"></i><span title="${esc(s.label)}">${esc(s.label)}</span><b class="num">${pc(s.weight, 1)}</b></li>`;
+  return `<div class="card pad dp-donut" data-title="${esc(title)}"><h3>${esc(title)}</h3>${sub ? `<div class="stamp" style="margin:-4px 0 8px">${esc(sub)}</div>` : ""}
     <div class="dp-donut-body"><svg viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="${esc(title)}: ${esc(segs.map(s => s.label + " " + pc(s.weight, 0)).join(", "))}">${paths}</svg>
-    <ul class="dp-leg">${segs.map(s => `<li><i style="background:${s.color}"></i><span title="${esc(s.label)}">${esc(s.label)}</span><b class="num">${pc(s.weight, 1)}</b></li>`).join("")}</ul></div></div>`;
+    <ul class="dp-leg">${segs.map(li).join("")}</ul></div>
+    ${rest.length ? `<ul class="dp-leg dp-more"${open ? "" : " hidden"}>${rest.map(x => `<li><i style="background:var(--c-other)"></i><span title="${esc(x.label)}">${esc(x.label)}</span><b class="num">${pc(x.weight, 1)}</b><small class="num">${nf(x.value, 0)} €</small></li>`).join("")}</ul>` : ""}</div>`;
 }
 
 function dpLine(C) {
@@ -2051,6 +2064,17 @@ function bindDepot() {
   if (!tip) { tip = document.createElement("div"); tip.id = "dp-tip"; tip.className = "dp-tip"; document.body.appendChild(tip); }
   const show = (txt, x, y) => { tip.textContent = txt; tip.style.display = "block"; tip.style.left = Math.min(x + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (y + 12) + "px"; };
   const hide = () => { tip.style.display = "none"; };
+  // „Sonstige“ antippen (Legende oder Kreissegment) -> alle übrigen Positionen auf- bzw. zuklappen
+  document.querySelectorAll(".dp-donut [data-other]").forEach(el => el.onclick = () => {
+    const card = el.closest(".dp-donut"), t = card.dataset.title, more = card.querySelector(".dp-more");
+    if (dpOpen.has(t)) dpOpen.delete(t); else dpOpen.add(t);
+    const open = dpOpen.has(t);
+    more.hidden = !open;
+    const btn = card.querySelector("button.dp-other");
+    btn.setAttribute("aria-expanded", open);
+    btn.querySelector(".dp-arr").textContent = open ? "▴" : "▾";
+    hide();
+  });
   document.querySelectorAll(".dp-donut path[data-tip]").forEach(p => {
     p.onmousemove = e => show(p.dataset.tip, e.clientX, e.clientY);
     p.onmouseleave = hide;
