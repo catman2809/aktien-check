@@ -189,3 +189,5 @@ DEPOT_EXACT.update({
 })
 DEPOT_EXACT.update({"Top & Flop seit Monatsbeginn": "Top & flop month to date", "Heute": "Today", "Monat": "Month",
                     "seit Monatsbeginn: {0} bis {1}": "month to date: {0} to {1}"})
+DEPOT_EXACT.update({"Top & Flop seit Jahresbeginn": "Top & flop year to date", "Jahr": "Year",
+                    "seit Jahresbeginn: {0} bis {1}": "year to date: {0} to {1}"})

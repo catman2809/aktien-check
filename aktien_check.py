@@ -8635,15 +8635,16 @@ def _mover_name(sym):
 
 def market_movers(uni="dax", n=5, period="day"):
     """Die n Werte eines Index mit dem größten Kursanstieg und -verlust (Yahoo, ~15 Min. verzögert): am letzten Handelstag
-    (period="day") oder seit Monatsbeginn (period="month": aktueller Kurs gegen den letzten Schlusskurs des Vormonats)."""
+    (period="day"), seit Monatsbeginn (period="month": aktueller Kurs gegen den letzten Schlusskurs des Vormonats) oder seit
+    Jahresbeginn (period="year": gegen den letzten Schlusskurs des Vorjahres)."""
     import pandas as pd
-    if uni not in SCREENER_UNIVERSES or period not in ("day", "month"):
+    if uni not in SCREENER_UNIVERSES or period not in ("day", "month", "year"):
         raise ValueError("Unbekannter Index oder Zeitraum")
     hit = MOVERS_CACHE.get((uni, period))
     if hit and time.time() - hit[0] < 600:
         return hit[1]
     name, syms = SCREENER_UNIVERSES[uni]
-    df = yf.download(syms, period="5d" if period == "day" else "3mo", interval="1d", auto_adjust=False, progress=False,
+    df = yf.download(syms, period={"day": "5d", "month": "3mo", "year": "1y"}[period], interval="1d", auto_adjust=False, progress=False,
                      threads=True)["Close"]
     if isinstance(df, pd.Series):
         df = df.to_frame(syms[0])
@@ -8652,7 +8653,7 @@ def market_movers(uni="dax", n=5, period="day"):
         raise ValueError("Keine Kursdaten verfügbar")
     days = pd.Series(list(last.values())).value_counts()
     ref = max(d for d, c in days.items() if c >= 0.5 * len(last))  # letzter Handelstag, an dem die meisten Werte notierten
-    since = ref.replace(day=1) if period == "month" else None  # erster Tag des laufenden Monats
+    since = ref.replace(day=1) if period == "month" else ref.replace(month=1, day=1) if period == "year" else None
     rows = []
     for s_, d in last.items():
         if d != ref:
@@ -8661,7 +8662,7 @@ def market_movers(uni="dax", n=5, period="day"):
         if since is None:
             prev = float(c.iloc[-2])
         else:
-            base = c[c.index < since]  # Schlusskurs am letzten Handelstag des Vormonats
+            base = c[c.index < since]  # Schlusskurs am letzten Handelstag des Vormonats bzw. Vorjahres
             if base.empty:
                 continue  # erst seit Kurzem notiert
             prev = float(base.iloc[-1])

@@ -1628,6 +1628,19 @@ class TestMovers(unittest.TestCase):
         self.assertAlmostEqual(r["up"][0]["change"], 0.30)      # 130 gegen den letzten Schlusskurs im September (100)
         self.assertAlmostEqual(r["down"][0]["change"], -0.25)   # B: 150 gegen 200
 
+    def test_year(self):
+        import unittest.mock as um
+        import pandas as pd
+        syms = ["A.DE", "B.DE", "C.DE"]
+        idx = pd.to_datetime(["2025-12-30", "2026-01-02", "2026-06-01", "2026-10-27"])
+        df = pd.DataFrame({"A.DE": [100, 105, 150, 140], "B.DE": [80, 82, 60, 40], "C.DE": [10, 10, 10, 10]}, index=idx)
+        with um.patch.dict(a.SCREENER_UNIVERSES, {"test": ("Testindex", syms)}),                 um.patch.object(a.yf, "download", lambda *x, **k: pd.concat({"Close": df}, axis=1)),                 um.patch.object(a, "_mover_name", lambda s_: s_):
+            a.MOVERS_CACHE.pop(("test", "year"), None)
+            r = a.market_movers("test", n=1, period="year")
+        self.assertEqual((r["since"], r["period"]), ("2026-01-01", "year"))
+        self.assertAlmostEqual(r["up"][0]["change"], 0.40)      # 140 gegen den Jahresschluss 2025 (100)
+        self.assertAlmostEqual(r["down"][0]["change"], -0.50)   # B: 40 gegen 80
+
 
 class TestOptions(unittest.TestCase):
     def test_aggregation(self):
