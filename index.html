@@ -2624,6 +2624,23 @@ function derivSection(d) {
   const D = d.derivatives;
   if (!D || d.asset === "crypto") return "";
   const head = `<h2 class="section" id="derivate">Derivate</h2>`;
+  if (D.na === "error") {
+    // Optionsdaten kamen nicht rechtzeitig: einmal nachladen und den Abschnitt ersetzen
+    setTimeout(async () => {
+      const box = document.getElementById("dv-retry");
+      try {
+        const r = await fetch("/api/derivatives?q=" + encodeURIComponent(D.symbol));
+        const nd = r.ok ? await r.json() : null;
+        if (!box || !nd || nd.na === "error") throw 0;
+        d.derivatives = nd;
+        const wrap = document.createElement("div");
+        wrap.innerHTML = derivSection(d);
+        box.previousElementSibling?.remove();
+        box.replaceWith(...wrap.childNodes);
+      } catch (e) { if (box) box.textContent = "Die Optionsdaten konnten gerade nicht geladen werden. Bitte die Analyse später erneut öffnen."; }
+    }, 0);
+    return head + `<div class="card empty" id="dv-retry"><span class="wl-busy"></span> Optionsdaten werden nachgeladen …</div>`;
+  }
   if (D.na) return head + `<div class="card empty">${D.na === "eu"
     ? "Keine Optionsdaten: Für Werte, die nur an europäischen Börsen gehandelt werden, liefert Yahoo keine Daten der Terminbörse Eurex – und es gibt keine US-Notierung mit Optionen."
     : "Für diesen Wert werden derzeit keine Optionen gehandelt."}</div>`;

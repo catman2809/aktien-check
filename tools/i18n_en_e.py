@@ -165,3 +165,8 @@ DEPOT_EXACT.update({
 })
 DEPOT_WILD += [("Ordergebühren von {0} € sind in Einstand und Verkaufserlöse eingerechnet.",
                 "Order fees of {0} € are included in the cost basis and sale proceeds.")]
+DEPOT_EXACT.update({
+    "Optionsdaten werden nachgeladen …": "Loading options data …",
+    "Die Optionsdaten konnten gerade nicht geladen werden. Bitte die Analyse später erneut öffnen.":
+        "The options data could not be loaded right now. Please open the analysis again later.",
+})

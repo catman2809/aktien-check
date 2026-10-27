@@ -5605,6 +5605,22 @@ def options_data(sym, price=None):
             "by_expiry": rows[:8]}
 
 
+DERIV_CACHE = {}          # Symbol -> (Zeit, Optionsdaten)
+
+
+def derivatives_cached(symbol, price=None, sec_=None):
+    """Optionsdaten mit Zwischenspeicher (24 Verfallstermine laden dauert auf dem Server teils über 40 s)."""
+    hit = DERIV_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < (1800 if not hit[1].get("na") == "none" else 300):
+        return hit[1]
+    t0 = time.time()
+    res = derivatives(symbol, price, sec_)
+    DERIV_CACHE[symbol] = (time.time(), res)
+    LOG.info("[Derivate] %s: %s · %.1f s", symbol, res.get("na") and f"keine ({res['na']})" or
+             f"{res.get('expiries')} Verfallstermine", time.time() - t0)
+    return res
+
+
 def derivatives(symbol, price=None, sec_=None, currency=""):
     """Optionen der Aktie bzw. – bei europäischen Aktien – ihrer US-Notierung (ADR)."""
     base_us = "." not in symbol.replace("-", "") or re.fullmatch(r"[A-Z]+-[A-Z]", symbol)
@@ -6316,7 +6332,7 @@ def analyze(query):
             if equity_ and not os.environ.get("NO_ESEF") else None
         fsec = ex.submit(sec_company, symbol, alternatives, company) if equity_ else None
         us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
-        fder = ex.submit(derivatives, symbol, current_price(info)) if us_listed else None  # parallel laden
+        fder = ex.submit(derivatives_cached, symbol, current_price(info)) if us_listed else None  # parallel laden
         (m, t), mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
@@ -6324,6 +6340,8 @@ def analyze(query):
         esef_ = safe(lambda: fesef.result(timeout=60)) if fesef else None
         sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
         der_ = safe(lambda: fder.result(timeout=40)) if fder else None
+    if fder and der_ is None:  # länger als 40 s: der Block oben hat trotzdem auf das Ende gewartet -> Ergebnis übernehmen
+        der_ = safe(lambda: fder.result(timeout=0)) or {"na": "error", "symbol": symbol}
     if not m.get("country"):
         alt_country = (profile or {}).get("country_en") or (sec_ or {}).get("country")
         if alt_country:  # nur für das Länderrisiko, die Anzeige bleibt unverändert
@@ -6406,7 +6424,8 @@ def analyze(query):
         "esef": esef_,
         "sec": sec_,
         "qreport": safe(lambda: quarter_report(t, m, sec_)),
-        "derivatives": der_ if fder else safe(lambda: derivatives(symbol, m.get("price"), sec_)),
+        "derivatives": der_ if fder else (safe(lambda: derivatives_cached(symbol, m.get("price"), sec_))
+                                          or {"na": "error", "symbol": (sec_ or {}).get("us_symbol") or symbol}),
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],
@@ -8642,7 +8661,7 @@ def cache_rules():
             ("Depot-Analysen", DEPOT_CACHE, 900, 30),
             ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500),
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
-            ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000)]
+            ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200)]
 
 
 def prune_caches():
@@ -9758,6 +9777,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if u.path == "/api/derivatives":
+            sym = q.upper()
+            if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
+                return self.send_json({"error": "Ungültiges Symbol"}, 400)
+            DERIV_CACHE.pop(sym, None)
+            return self.send(200, json.dumps(json_safe(safe(lambda: derivatives_cached(sym)) or {"na": "error", "symbol": sym})),
+                             "application/json; charset=utf-8")
         if u.path == "/api/chart":
             try:
                 return self.send(200, json.dumps(json_safe(chart_data(q, (qs.get("range") or ["1y"])[0]))),
