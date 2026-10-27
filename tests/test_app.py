@@ -1594,6 +1594,26 @@ class TestEnglish(unittest.TestCase):
                          "Events next week:\n• Tue Oct 27 SAP SE: Quarterly results")
 
 
+class TestMovers(unittest.TestCase):
+    def test_top_and_flop(self):
+        import unittest.mock as um
+        import pandas as pd
+        syms = ["A.DE", "B.DE", "C.DE", "D.DE", "E.DE", "F.DE", "G.DE"]
+        idx = pd.to_datetime(["2026-10-26", "2026-10-27"])
+        df = pd.DataFrame({"A.DE": [100, 110], "B.DE": [100, 90], "C.DE": [100, 101], "D.DE": [100, 99],
+                           "E.DE": [100, 105], "F.DE": [100, 97], "G.DE": [100, float("nan")]}, index=idx)
+        with um.patch.dict(a.SCREENER_UNIVERSES, {"test": ("Testindex", syms)}),                 um.patch.object(a.yf, "download", lambda *x, **k: pd.concat({"Close": df}, axis=1)),                 um.patch.object(a, "_mover_name", lambda s_: s_.split(".")[0]):
+            a.MOVERS_CACHE.pop("test", None)
+            r = a.market_movers("test", n=2)
+        self.assertEqual([x["symbol"] for x in r["up"]], ["A.DE", "E.DE"])
+        self.assertEqual([x["symbol"] for x in r["down"]], ["B.DE", "F.DE"])   # größter Verlust zuerst
+        self.assertAlmostEqual(r["up"][0]["change"], 0.10)
+        self.assertEqual((r["n"], r["advancers"], r["decliners"], r["date"]), (6, 3, 3, "2026-10-27"))  # G ohne aktuellen Kurs
+        self.assertEqual(r["up"][0]["currency"], "EUR")
+        with self.assertRaises(ValueError):
+            a.market_movers("gibtsnicht")
+
+
 class TestOptions(unittest.TestCase):
     def test_aggregation(self):
         import unittest.mock as um

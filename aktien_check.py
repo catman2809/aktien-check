@@ -8619,6 +8619,60 @@ def screener_start(user, mode="due", unis=None):
         return True, f"Gestartet: {names} – {len(due)} Werte werden bewertet."
 
 
+MOVERS_CACHE = {}         # Index -> (Zeit, Gewinner/Verlierer des Tages)
+MOVER_NAMES = {}          # Symbol -> Firmenname
+
+
+def _mover_name(sym):
+    if sym not in MOVER_NAMES:
+        n = (screener_store().get(sym) or {}).get("name")
+        if not n:
+            hit = next((h for h in safe(lambda: search_symbols(sym), []) or [] if h.get("symbol") == sym), None)
+            n = hit["name"] if hit else sym
+        MOVER_NAMES[sym] = safe(lambda: clean_company_name(n)) or n
+    return MOVER_NAMES[sym]
+
+
+def market_movers(uni="dax", n=5):
+    """Die n Werte eines Index mit dem größten Kursanstieg und -verlust am letzten Handelstag (Yahoo, ~15 Min. verzögert)."""
+    import pandas as pd
+    if uni not in SCREENER_UNIVERSES:
+        raise ValueError("Unbekannter Index")
+    hit = MOVERS_CACHE.get(uni)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    name, syms = SCREENER_UNIVERSES[uni]
+    df = yf.download(syms, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True)["Close"]
+    if isinstance(df, pd.Series):
+        df = df.to_frame(syms[0])
+    last = {s_: df[s_].dropna().index[-1] for s_ in syms if s_ in df and df[s_].dropna().size >= 2}
+    if not last:
+        raise ValueError("Keine Kursdaten verfügbar")
+    days = pd.Series(list(last.values())).value_counts()
+    ref = max(d for d, c in days.items() if c >= 0.5 * len(last))  # letzter Handelstag, an dem die meisten Werte notierten
+    rows = []
+    for s_, d in last.items():
+        if d != ref:
+            continue  # z. B. Handel ausgesetzt: kein aktueller Kurs
+        c = df[s_].dropna()
+        prev, px = float(c.iloc[-2]), float(c.iloc[-1])
+        if prev > 0 and px > 0:
+            suf = s_.rsplit(".", 1)[1] if "." in s_ else ""
+            rows.append({"symbol": s_, "price": px, "change": px / prev - 1,
+                         "currency": SUFFIX_CURRENCY.get(suf, "USD") if suf else "USD"})
+    rows.sort(key=lambda r_: -r_["change"])
+    top, flop = rows[:n], sorted(rows[-n:], key=lambda r_: r_["change"]) if len(rows) > n else []
+    picked = top + flop
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for r_, nm in zip(picked, ex.map(_mover_name, [r_["symbol"] for r_ in picked])):
+            r_["name"] = nm
+    res = {"index": name, "key": uni, "date": ref.strftime("%Y-%m-%d"), "n": len(rows), "up": top, "down": flop,
+           "advancers": sum(1 for r_ in rows if r_["change"] > 0), "decliners": sum(1 for r_ in rows if r_["change"] < 0),
+           "updated": berlin_now().strftime("%H:%M")}
+    MOVERS_CACHE[uni] = (time.time(), res)
+    return res
+
+
 def screener_payload():
     store = screener_store()
     syms = screener_symbols()
@@ -8717,7 +8771,8 @@ def cache_rules():
             ("Depot-Analysen", DEPOT_CACHE, 900, 30),
             ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500),
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
-            ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200)]
+            ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
+            ("Tagesgewinner", MOVERS_CACHE, 600, 10)]
 
 
 def prune_caches():
@@ -9833,6 +9888,12 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if u.path == "/api/movers":
+            try:
+                return self.send(200, json.dumps(json_safe(market_movers((qs.get("u") or ["dax"])[0])), ensure_ascii=False),
+                                 "application/json; charset=utf-8")
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
         if u.path == "/api/derivatives":
             sym = q.upper()
             if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):

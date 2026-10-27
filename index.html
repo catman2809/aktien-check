@@ -287,6 +287,27 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .wl-empty{padding:40px 24px;text-align:center;color:var(--text-2)}
 .wl-empty b{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
 .wl-preview{margin-top:36px;text-align:left}
+.mv{margin-top:36px;text-align:left}
+.mv-head{display:flex;justify-content:space-between;align-items:flex-end;gap:10px 16px;flex-wrap:wrap;margin:0 0 10px}
+.mv-head h2{font-size:16px;margin:0}
+.mv-head .stamp{display:block;margin-top:2px}
+.mv-unis{margin-bottom:10px;max-width:100%;overflow-x:auto;flex-wrap:nowrap}
+.mv-unis button{white-space:nowrap}
+.mv-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:700px){.mv-grid{grid-template-columns:minmax(0,1fr)}}
+.mv-col h3{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);margin:0;padding:12px 16px 4px}
+.mv-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 16px;
+  border-top:1px solid var(--border);cursor:pointer;width:100%;background:none;border-left:0;border-right:0;border-bottom:0;
+  font:inherit;color:inherit;text-align:left}
+.mv-col h3 + .mv-row{border-top:0}
+.mv-row:hover{background:var(--surface-2)}
+.mv-rank{color:var(--text-3);font-size:12.5px}
+.mv-name{min-width:0}
+.mv-name b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mv-name small{color:var(--text-3);font-size:12px}
+.mv-chg{min-width:68px;text-align:right;font-weight:700;padding:3px 8px;border-radius:7px}
+.mv-chg.up{color:var(--pos);background:var(--pos-soft)} .mv-chg.down{color:var(--neg);background:var(--neg-soft)}
+.mv-msg{padding:18px 16px;color:var(--text-2);font-size:14px}
 .etf-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px}
 .etf-grid > *{min-width:0}
 .etf-grid h3{margin:0 0 10px;font-size:15px}
@@ -1831,6 +1852,7 @@ function welcome() {
         <span>CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Risiko, Dividenden und ein Depot-Check auf Klumpenrisiken.</span></div>
       <button class="btn primary" id="dpopen">Depot hochladen</button>
     </div>
+    <div class="mv" id="mv"></div>
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
@@ -1858,10 +1880,48 @@ function welcome() {
   const so_ = $("#scropen"); if (so_) so_.onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
   wlBind($("#out"));
+  moversLoad();
   bindPushGuide();
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
   bindA2hs();
+}
+
+/* Startseite: größte Gewinner und Verlierer des Tages je Index */
+const MV_UNIS = [["dax", "DAX"], ["mdax", "MDAX"], ["tecdax", "TecDAX"], ["es50", "Euro Stoxx 50"], ["dow", "Dow Jones"],
+  ["ndx", "Nasdaq-100"], ["sp500", "S&P 500"]];
+let mvUni = (() => { try { return localStorage.getItem("mvUni") || "dax"; } catch (e) { return "dax"; } })();
+async function moversLoad() {
+  const box = $("#mv");
+  if (!box) return;
+  const uni = MV_UNIS.some(([k]) => k === mvUni) ? mvUni : "dax";
+  const head = `<div class="mv-head"><div><h2>Top &amp; Flop heute</h2><span class="stamp" id="mv-stamp">&nbsp;</span></div></div>
+    <div class="seg mv-unis" id="mv-unis">${MV_UNIS.map(([k, l]) => `<button type="button" data-u="${k}" class="${k === uni ? "on" : ""}">${esc(l)}</button>`).join("")}</div>`;
+  box.innerHTML = head + `<div class="card mv-msg"><span class="wl-busy"></span> Kurse werden geladen …</div>`;
+  box.querySelectorAll("#mv-unis button").forEach(b => b.onclick = () => {
+    mvUni = b.dataset.u;
+    try { localStorage.setItem("mvUni", mvUni); } catch (e) {}
+    moversLoad();
+  });
+  let d;
+  try {
+    const r = await fetch("/api/movers?u=" + uni);
+    d = await r.json();
+    if (!r.ok) throw new Error(d.error || "Fehler");
+  } catch (e) {
+    if ($("#mv") === box && mvUni === uni) box.lastElementChild.outerHTML = `<div class="card mv-msg">Die Kurse konnten gerade nicht geladen werden.</div>`;
+    return;
+  }
+  if ($("#mv") !== box || mvUni !== uni) return;  // inzwischen anderer Index gewählt oder Seite gewechselt
+  const day = new Date(d.date + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  $("#mv-stamp").innerHTML = `<span>${esc(d.index)}</span> · <span>Handelstag ${day}</span> · <span>${d.advancers} im Plus, ${d.decliners} im Minus</span> · <span>Stand ${esc(d.updated)} Uhr, ca. 15 Min. verzögert</span>`;
+  const row = (x, i, cls) => `<button type="button" class="mv-row" data-q="${esc(x.symbol)}" title="${esc(x.name)} analysieren">
+      <span class="mv-rank num">${i + 1}</span>
+      <span class="mv-name"><b>${esc(x.name)}</b><small><span>${esc(x.symbol)}</span> · <span class="num">${nf(x.price, 2)} ${esc(x.currency)}</span></small></span>
+      <span class="mv-chg num ${cls}">${pc(x.change, 2, true)}</span></button>`;
+  const col = (title, list, cls) => `<div class="card mv-col"><h3>${title}</h3>${list.length ? list.map((x, i) => row(x, i, cls)).join("") : `<div class="mv-msg">Keine Daten</div>`}</div>`;
+  box.lastElementChild.outerHTML = `<div class="mv-grid">${col("Größte Gewinner", d.up, "up")}${col("Größte Verlierer", d.down, "down")}</div>`;
+  box.querySelectorAll(".mv-row").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
 }
 
 /* Depot-Analyse: CSV-Export des Brokers hochladen -> Struktur, Risiko, Dividenden, Prüfpunkte */

@@ -181,3 +181,9 @@ DEPOT_EXACT.update({
     "für 30 Tage": "for 30 days",
 })
 DEPOT_EXACT.update({"Gehandelter Wert": "Value traded", "{0} Aktien (Gegenwert)": "{0} share equivalents"})
+DEPOT_EXACT.update({
+    "Top & Flop heute": "Top & flop today", "Größte Gewinner": "Top gainers", "Größte Verlierer": "Top losers",
+    "Kurse werden geladen …": "Loading prices …", "Die Kurse konnten gerade nicht geladen werden.": "Prices could not be loaded right now.",
+    "Keine Daten": "No data", "Handelstag {0}": "Trading day {0}",
+    "{0} im Plus, {1} im Minus": "{0} up, {1} down", "Stand {0}:{1} Uhr, ca. {2} Min. verzögert": "as of {0}:{1}, delayed approx. {2} min",
+})
