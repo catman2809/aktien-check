@@ -311,7 +311,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:4px 0 8px}
 .dp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;min-width:0}
 .dp-kpi small{display:block;font-size:12px;color:var(--text-3)} .dp-kpi b{display:block;font-size:20px;margin:2px 0}
-.dp-kpi span{display:block;font-size:12px;color:var(--text-3);overflow-wrap:anywhere}
+.dp-kpi > span{display:block;font-size:12px;color:var(--text-3);overflow-wrap:anywhere}
 .dp-kpi b.pos,.dp-tbl .pos{color:var(--pos)} .dp-kpi b.neg,.dp-tbl .neg{color:var(--neg)}
 .dp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px}
 .dp-grid > *,.dp-donut-body > *{min-width:0}
@@ -1925,7 +1925,7 @@ function dpLine(C) {
   const months = C.dates.map((d, i) => [d, i]).filter(([d], i, a) => i === 0 || d.slice(5, 7) !== a[i - 1][0].slice(5, 7)).filter((_, k) => k % 2 === 0);
   const mon = d => new Date(d + "T00:00:00").toLocaleDateString("de-DE", {month: "short", year: "2-digit"});
   return `<div class="card pad dp-wide"><h3>Entwicklung der letzten 12 Monate <span class="stamp">indexiert auf 100</span></h3>
-    <div class="dp-line-leg"><span><i style="background:var(--c1)"></i>Dein Depot (heutige Stückzahlen)</span><span><i style="background:var(--c2)"></i>${esc(C.bench_name)}</span></div>
+    <div class="dp-line-leg"><span><i style="background:var(--c1)"></i>${C.actual ? "Dein Depot (tatsächlich, zeitgewichtet)" : "Dein Depot (heutige Stückzahlen)"}</span><span><i style="background:var(--c2)"></i>${esc(C.bench_name)}</span></div>
     <div class="dp-line" data-n="${n}"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Depot ${nf(C.depot[n - 1], 1)}, ${esc(C.bench_name)} ${nf(C.bench[n - 1], 1)} (Start = 100)">
       ${ticks.map(v => `<line x1="${L}" x2="${W - Rr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--track)"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" class="dp-ax">${nf(v, 0)}</text>`).join("")}
       ${months.map(([d, i]) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="dp-ax">${mon(d)}</text>`).join("")}
@@ -1933,7 +1933,9 @@ function dpLine(C) {
       <path d="${path(C.depot)}" fill="none" stroke="var(--c1)" stroke-width="2"/>
       <line class="dp-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--text-3)" stroke-dasharray="3 3" style="display:none"/>
       <rect x="${L}" y="${T}" width="${W - L - Rr}" height="${H - T - B}" fill="transparent" class="dp-hit"/></svg></div>
-    <div class="stamp" style="margin-top:6px">Rückrechnung mit den heutigen Stückzahlen und Wechselkursen je Tag – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden nicht wieder angelegt).</div></div>`;
+    <div class="stamp" style="margin-top:6px">${C.actual
+      ? "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden sind eingerechnet."
+      : "Rückrechnung mit den heutigen Stückzahlen – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden wieder angelegt). Mit einer Umsatzliste zeigt die App die tatsächliche Entwicklung."}</div></div>`;
 }
 
 function dpKpi(label, value, sub, tone) {
@@ -1945,6 +1947,7 @@ function renderDepot() {
   const D = DEPOT, S = D?.summary, Rk = D?.risk || {};
   const eur = v => v == null ? "–" : nf(v, v >= 1000 ? 0 : 2) + " €";
   const tone = v => v == null ? "" : v >= 0 ? "pos" : "neg";
+  const sgn = v => v != null && v >= 0 ? "+" : "";
   const upload = `<div class="card pad dp-upload">
     <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="CSV-Datei auswählen">
       <b>${D ? "Neue Depot-Datei hochladen" : "CSV-Datei deines Depots hierher ziehen oder auswählen"}</b>
@@ -1963,10 +1966,17 @@ function renderDepot() {
     body = `
     ${(D.unresolved || []).length ? `<div class="note dp-note">Nicht zugeordnet (fehlen in der Auswertung): ${esc(D.unresolved.join(", "))}</div>` : ""}
     ${(D.notes || []).map(n => `<div class="note dp-note">${esc(n)}</div>`).join("")}
+    ${(Rk.twr_missing || []).length ? `<div class="note dp-note">Ohne Kursdaten, daher nicht in der 12-Monats-Rendite: ${esc(Rk.twr_missing.join(", "))}</div>` : ""}
     <div class="dp-kpis">
       ${dpKpi("Depotwert", eur(S.total), `${S.n} Positionen`)}
-      ${dpKpi("Gewinn/Verlust", S.gain != null ? (S.gain >= 0 ? "+" : "") + eur(S.gain) : "–", S.gain_pct != null ? pc(S.gain_pct, 1, true) + (S.cost_coverage < 0.99 ? ` · für ${pc(S.cost_coverage, 0)} des Depots` : "") : "Kaufkurse fehlen in der Datei", tone(S.gain))}
-      ${dpKpi("Rendite 12 Monate", Rk.perf_1y != null ? pc(Rk.perf_1y, 1, true) : "–", Rk.bench_perf != null ? `MSCI World ${pc(Rk.bench_perf, 1, true)}` : "", tone(Rk.perf_1y))}
+      ${S.total_gain != null
+        ? dpKpi("Gewinn/Verlust gesamt", sgn(S.total_gain) + eur(S.total_gain),
+            `<span>offen ${sgn(S.gain)}${eur(S.gain)} (${pc(S.gain_pct, 1, true)})</span> · <span>realisiert ${sgn(S.realized)}${eur(S.realized)}</span> · <span>Dividenden ${eur(S.div_received)}</span>`
+            + (S.cost_coverage < 0.99 ? ` · <span>offen für ${pc(S.cost_coverage, 0)} des Depots</span>` : ""), tone(S.total_gain))
+        : dpKpi("Gewinn/Verlust", S.gain != null ? sgn(S.gain) + eur(S.gain) : "–", S.gain_pct != null ? pc(S.gain_pct, 1, true) + " (nicht realisiert)" + (S.cost_coverage < 0.99 ? ` · für ${pc(S.cost_coverage, 0)} des Depots` : "") : "Kaufkurse fehlen in der Datei", tone(S.gain))}
+      ${Rk.twr != null
+        ? dpKpi("Rendite 12 Monate", pc(Rk.twr, 1, true), `<span>zeitgewichtet</span> · <span>${sgn(Rk.twr_pnl)}${eur(Rk.twr_pnl)}</span>` + (Rk.bench_perf != null ? ` · <span>MSCI World ${pc(Rk.bench_perf, 1, true)}</span>` : ""), tone(Rk.twr))
+        : dpKpi("Rendite 12 Monate", Rk.perf_1y != null ? pc(Rk.perf_1y, 1, true) : "–", "<span>heutige Zusammensetzung</span>" + (Rk.bench_perf != null ? ` · <span>MSCI World ${pc(Rk.bench_perf, 1, true)}</span>` : ""), tone(Rk.perf_1y))}
       ${dpKpi("Dividenden pro Jahr", eur(S.div), `Rendite ${pc(S.div_yield, 2)}${S.div_yoc != null ? " · auf Einstand " + pc(S.div_yoc, 2) : ""}`)}
       ${dpKpi("Schwankung (Volatilität)", Rk.vol != null ? pc(Rk.vol, 1) : "–", Rk.bench_vol != null ? `MSCI World ${pc(Rk.bench_vol, 1)}` : "pro Jahr")}
       ${dpKpi("Größter Rückgang", Rk.max_dd != null ? pc(Rk.max_dd, 1) : "–", "vom Hoch, letzte 12 Monate", Rk.max_dd != null ? "neg" : "")}

@@ -130,7 +130,18 @@ DEPOT_WILD += [
     ("Mehr Verkäufe als Käufe in der Datei – nicht angezeigt: {*}. Vermutlich fehlen ältere Käufe im Export; bitte den Zeitraum ab Depoteröffnung exportieren.",
      "More sales than purchases in the file – not shown: {*}. Older purchases are probably missing from the export; please export the period since the account was opened."),
 ]
+DEPOT_WILD += [("Ohne Kursdaten, daher nicht in der {0}-Monats-Rendite: {*}",
+                "No price data, therefore not included in the {0}-month return: {*}")]
 DEPOT_EXACT.update({
+    "Gewinn/Verlust gesamt": "Total gain/loss", "Dein Depot (tatsächlich, zeitgewichtet)": "Your portfolio (actual, time-weighted)",
+    "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden sind eingerechnet.":
+        "Actual performance with all purchases and sales from the transaction list, time-weighted (deposits and withdrawals do not distort the return); dividends paid out are included.",
+    "Rückrechnung mit den heutigen Stückzahlen – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden wieder angelegt). Mit einer Umsatzliste zeigt die App die tatsächliche Entwicklung.":
+        "Back-calculation with today's quantities – shows how the current composition would have performed (no purchases/sales, dividends reinvested). With a transaction list the app shows the actual performance.",
+    "offen {0} € ({1})": "unrealized {0} € ({1})", "realisiert {0} € · Dividenden {1} €": "realized {0} € · dividends {1} €",
+    "realisiert {0} € · Dividenden {1} € · offen für {2} des Depots": "realized {0} € · dividends {1} € · unrealized for {2} of the portfolio", "realisiert {0} €": "realized {0} €", "Dividenden {0} €": "dividends {0} €",
+    "zeitgewichtet": "time-weighted", "heutige Zusammensetzung": "current composition",
+    "offen für {0} des Depots": "unrealized for {0} of the portfolio", "{0} (nicht realisiert)": "{0} (unrealized)",
     "Depot wird eingelesen und analysiert …": "Reading and analyzing the portfolio …",
     "Alle übrigen Positionen anzeigen": "Show all remaining positions",
     "{0} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.": "{0} positions were sold completely and are no longer in the portfolio.",

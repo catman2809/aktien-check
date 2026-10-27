@@ -1431,6 +1431,38 @@ class TestDepotParse(unittest.TestCase):
             self.assertEqual(pos[0]["qty"], 15)
         a.DEPOT_SPLIT_CACHE.clear()
 
+    def test_time_weighted_return(self):
+        idx = pd.date_range("2026-01-01", periods=4)
+        # Tag 0: 100 €; Tag 1: +10 %; Tag 2: Kauf für 100 € und weitere +9,09 %; Tag 3: Verkauf für 50 €, Kurs unverändert
+        V = pd.Series([100.0, 110.0, 220.0, 170.0], index=idx)
+        F = pd.Series([0.0, 0.0, 100.0, -50.0], index=idx)
+        D = pd.Series(0.0, index=idx)
+        twr, level = a.depot_twr(V, F, D)
+        self.assertAlmostEqual(twr, 0.2)                     # 1,1 × (120/110) × 1,0 − 1: Einzahlungen zählen nicht als Rendite
+        self.assertAlmostEqual(level[-1], 120.0)
+        D2 = pd.Series([0.0, 0.0, 0.0, 2.2], index=idx)       # ausgezahlte Dividende erhöht die Rendite
+        self.assertGreater(a.depot_twr(V, F, D2)[0], twr)
+        self.assertEqual(a.depot_twr(pd.Series([0.0, 0.0, 100.0], index=idx[:3]),
+                                     pd.Series([0.0, 0.0, 100.0], index=idx[:3]), D[:3])[0], 0.0)  # vor dem 1. Kauf keine Rendite
+
+    def test_realized_gains_and_dividends(self):
+        r = self.tr_row
+        csv_ = self.TR_HEAD + "".join([
+            r("2026-08-14", "CASH", "DIVIDEND", "STOCK", "Apple", "US0378331005", "15.000000", "", "3.10"),
+            r("2026-08-03", "TRADING", "SELL", "STOCK", "Apple", "US0378331005", "-5.000000", "250.00", "1250.00"),
+            r("2026-05-04", "TRADING", "BUY", "STOCK", "Apple", "US0378331005", "10.000000", "240.00", "-2400.00"),
+            r("2026-03-02", "TRADING", "SELL", "STOCK", "Tesla", "US88160R1014", "-4.000000", "340.00", "1360.00"),
+            r("2025-12-01", "TRADING", "BUY", "STOCK", "Tesla", "US88160R1014", "4.000000", "370.00", "-1480.00"),
+            r("2025-11-03", "TRADING", "BUY", "STOCK", "Apple", "US0378331005", "10.000000", "230.00", "-2300.00")])
+        pos, notes, hist = a.parse_depot_csv_full(csv_)
+        keys = {k["key"]: k for k in hist["keys"]}
+        self.assertAlmostEqual(keys["US0378331005"]["realized"], 5 * (250 - 235))     # Ø-Einstand 235
+        self.assertAlmostEqual(keys["US88160R1014"]["realized"], 4 * (340 - 370))
+        self.assertFalse(keys["US88160R1014"]["open"])                                 # verkauft, zählt aber zur Rendite
+        self.assertEqual(hist["dividends"], [["2026-08-14", "US0378331005", 3.1]])
+        self.assertEqual(keys["US0378331005"]["trades"][-1], ["2026-08-03", -5.0, -1250.0])  # Verkauf: Geld aus dem Depot
+        self.assertIsNone(a.parse_depot_csv_full("ISIN;Stück\nDE0007164600;10\n")[2])       # Bestandsliste: kein Verlauf
+
     def test_checks(self):
         rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
                 {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]

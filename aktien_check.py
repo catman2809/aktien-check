@@ -6542,6 +6542,11 @@ def _depot_num(s, dec_comma):
 
 
 def parse_depot_csv(text, split_fn=None):
+    """Positionen und Hinweise (ohne Buchungsverlauf)."""
+    return parse_depot_csv_full(text, split_fn)[:2]
+
+
+def parse_depot_csv_full(text, split_fn=None):
     """Liest gängige Depot-Exporte (comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic …) oder eine
     eigene CSV mit Spalten wie ISIN/Symbol/Name, Stück, Kaufkurs. Gibt (Positionen, Hinweise) zurück."""
     if not text or not text.strip():
@@ -6589,6 +6594,8 @@ def parse_depot_csv(text, split_fn=None):
                      "price": _depot_num(get("price"), dec_comma), "amount": _depot_num(get("amount"), dec_comma),
                      "cur": (get("cur") or "").upper()[:3] or None,
                      "kind": _tx_kind(f"{get('category')} {get('type')}") if "type" in cols or "category" in cols else None,
+                     "divi": bool(re.search(r"dividend|distribution|ausschütt|ausschuett|ertrag|coupon|kupon",
+                                            f"{get('category')} {get('type')}".lower())),
                      "status": _tx_kind(get("status")) if "status" in cols else None, "date": _depot_date(get("date"))})
     kinds = [r_["kind"] for r_ in recs]
     keys = [r_["key"] for r_ in recs]
@@ -6619,7 +6626,7 @@ def parse_depot_csv(text, split_fn=None):
             break
     if not out:
         raise ValueError("Keine Positionen gefunden – bitte prüfe, ob die Datei Stückzahlen oder Werte enthält.")
-    return out, notes
+    return out, notes, None
 
 
 def _depot_from_transactions(recs, split_fn=None):
@@ -6631,9 +6638,11 @@ def _depot_from_transactions(recs, split_fn=None):
     stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0}
     # chronologisch; Exporte stehen oft mit der neuesten Buchung oben
     order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", i)) if any(r_["date"] for r_ in recs) else range(len(recs))
-    ledger = {}
+    ledger, dividends = {}, []
     for i in order:
         r_ = recs[i]
+        if r_["divi"] and r_["status"] != "skip" and r_["kind"] not in ("skip", "buy", "sell") and (r_["amount"] or 0) > 0:
+            dividends.append([r_["date"], r_["key"], float(r_["amount"])])  # ausgezahlte Dividende/Ausschüttung (Euro)
         if r_["status"] == "skip" or r_["kind"] == "skip":
             stats["skip"] += 1
             continue
@@ -6648,7 +6657,7 @@ def _depot_from_transactions(recs, split_fn=None):
                 stats["split"] += 1
                 L = ledger.setdefault(r_["key"], {"meta": r_, "trades": [], "split_rows": False})
                 L["split_rows"] = True
-                L["trades"].append({"date": r_["date"], "kind": "delta", "q": qty, "cost": 0.0, "price": None})
+                L["trades"].append({"date": r_["date"], "kind": "delta", "q": qty, "cost": 0.0, "price": None, "proceeds": None})
                 continue
             kind = "sell" if qty < 0 else "buy"
         if kind == "other" or not qty:
@@ -6657,9 +6666,10 @@ def _depot_from_transactions(recs, split_fn=None):
         stats[kind] += 1
         q = abs(qty)
         px = r_["price"] or r_["buy"]
-        cost = (q * px if px else abs(r_["amount"] or r_["value"] or 0) or None) if kind == "buy" else None
+        gross = q * px if px else abs(r_["amount"] or r_["value"] or 0) or None
         L = ledger.setdefault(r_["key"], {"meta": r_, "trades": [], "split_rows": False})
-        L["trades"].append({"date": r_["date"], "kind": kind, "q": q, "cost": cost, "price": px})
+        L["trades"].append({"date": r_["date"], "kind": kind, "q": q, "price": px,
+                            "cost": gross if kind == "buy" else None, "proceeds": gross if kind == "sell" else None})
     # Split-Faktoren je Position (parallel, nur mit Datum und ohne eigene Split-Buchungen)
     keys = [k for k, L in ledger.items() if split_fn and not L["split_rows"] and all(t["date"] for t in L["trades"])]
     factors = {}
@@ -6667,10 +6677,10 @@ def _depot_from_transactions(recs, split_fn=None):
         safe(lambda: figi_prefetch([ledger[k]["meta"]["isin"] for k in keys if ledger[k]["meta"]["isin"]]))
         with ThreadPoolExecutor(max_workers=6) as ex:
             factors = dict(zip(keys, ex.map(lambda k: safe(lambda: split_fn(ledger[k])), keys)))
-    out, sold, negative, adjusted = [], 0, [], []
+    out, sold, negative, adjusted, hist_keys = [], 0, [], [], []
     for key, L in ledger.items():
         fac = factors.get(key) or [1.0] * len(L["trades"])
-        qty, cost, cost_ok = 0.0, 0.0, True
+        qty, cost, cost_ok, realized, real_ok, trades = 0.0, 0.0, True, 0.0, True, []
         for t, f in zip(L["trades"], fac):
             q = t["q"] * f
             if t["kind"] == "buy":
@@ -6678,15 +6688,26 @@ def _depot_from_transactions(recs, split_fn=None):
                     cost_ok = False
                 cost += t["cost"] or 0.0
                 qty += q
+                trades.append([t["date"], q, t["cost"] or 0.0])            # Geld ins Depot (Kauf)
             elif t["kind"] == "sell":
-                if qty > 1e-9:
-                    cost -= cost * min(1.0, q / qty)
+                removed = cost * min(1.0, q / qty) if qty > 1e-9 else 0.0
+                if t["proceeds"] is None or not cost_ok:
+                    real_ok = False
+                else:
+                    realized += t["proceeds"] - removed                       # Gewinn/Verlust des Verkaufs (Ø-Einstand)
+                cost -= removed
                 qty -= q
+                trades.append([t["date"], -q, -(t["proceeds"] or 0.0)])     # Geld aus dem Depot (Verkauf)
             else:
                 qty += q
+                trades.append([t["date"], q, 0.0])
             if abs(qty) < 1e-6:
                 qty, cost = 0.0, 0.0
         m_ = L["meta"]
+        if qty > -1e-6:  # Positionen mit mehr Verkäufen als Käufen (Export unvollständig) bleiben außen vor
+            hist_keys.append({"key": key, "isin": m_["isin"], "wkn": m_["wkn"], "symbol": m_["symbol"], "name": m_["name"],
+                              "cur": m_["cur"], "open": qty > 1e-6, "trades": trades,
+                              "realized": realized if real_ok else None})
         if any(abs(f - 1) > 1e-9 for f in fac):
             adjusted.append(m_["name"] or m_["isin"] or m_["symbol"])
         if qty > 1e-6:
@@ -6710,7 +6731,9 @@ def _depot_from_transactions(recs, split_fn=None):
                      + ". Vermutlich fehlen ältere Käufe im Export; bitte den Zeitraum ab Depoteröffnung exportieren.")
     if not out:
         raise ValueError("Nach Verrechnung aller Käufe und Verkäufe ist kein Bestand übrig.")
-    return out[:DEPOT_MAX_POSITIONS], notes
+    good = {h["key"] for h in hist_keys}
+    history = {"keys": hist_keys, "dividends": [d for d in dividends if d[1] in good]}
+    return out[:DEPOT_MAX_POSITIONS], notes, history
 
 
 DEPOT_SPLIT_CACHE = {}
@@ -7005,8 +7028,23 @@ def _depot_share(items):
     return [{"label": k, "value": v, "weight": v / tot} for k, v in sorted(agg.items(), key=lambda kv: -kv[1])]
 
 
-def analyze_depot(positions):
-    """Struktur, Konzentration, Rendite, Risiko, Dividenden und Prüfpunkte eines Depots (Werte in Euro)."""
+def depot_twr(V, F, D):
+    """Zeitgewichtete Rendite (Standard für Depotvergleiche, unabhängig von Ein- und Auszahlungen) aus dem täglichen
+    Depotwert V, Zuflüssen F (Kauf +, Verkauf −, am Buchungstag) und ausgezahlten Dividenden D – alles pd.Series auf
+    demselben Index. Tagesrendite r_t = (V_t + D_t − F_t) / V_{t−1} − 1. Gibt (Rendite, Indexreihe ab 100) zurück."""
+    level, out = 1.0, [100.0]
+    for t in range(1, len(V)):
+        prev = float(V.iloc[t - 1])
+        if prev > 1.0:  # vor dem ersten Kauf (Depotwert 0) gibt es keine Rendite
+            level *= (float(V.iloc[t]) + float(D.iloc[t]) - float(F.iloc[t])) / prev
+        out.append(level * 100)
+    return level - 1, out
+
+
+def analyze_depot(positions, history=None):
+    """Struktur, Konzentration, Rendite, Risiko, Dividenden und Prüfpunkte eines Depots (Werte in Euro). Mit Buchungsverlauf
+    (Umsatzliste) zusätzlich die tatsächliche zeitgewichtete Rendite der letzten 12 Monate, realisierte Gewinne und
+    erhaltene Dividenden."""
     import pandas as pd
     safe(lambda: figi_prefetch([p_.get("isin") for p_ in positions if p_.get("isin") and not p_.get("symbol")]))
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -7031,7 +7069,17 @@ def analyze_depot(positions):
         if count(alt_df, best) > count(pre, h["symbol"]) + 20:
             hits[i_] = dict(h, symbol=best)
             DEPOT_SYM_CACHE[p_.get("symbol") or p_.get("isin")] = (time.time(), hits[i_])
-    syms = sorted({h["symbol"] for h in hits if h})
+    pos_key = lambda p_: p_.get("isin") or p_.get("wkn") or p_.get("symbol") or (p_.get("name") or "").lower()
+    key_sym = {pos_key(p_): h["symbol"] for p_, h in zip(positions, hits) if h}
+    win_start = (datetime.now() - timedelta(days=372)).strftime("%Y-%m-%d")
+    if history:
+        gone = [k for k in history.get("keys") or [] if k["key"] not in key_sym
+                and any(t[0] and t[0] >= win_start for t in k["trades"])]
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for k, h in zip(gone, ex.map(lambda k: safe(lambda: depot_resolve(k)), gone)):
+                if h:
+                    key_sym[k["key"]] = h["symbol"]
+    syms = sorted({h["symbol"] for h in hits if h} | set(key_sym.values()))
     with ThreadPoolExecutor(max_workers=6) as ex:
         curs = dict(zip(syms, ex.map(_depot_listing_currency, syms)))
         etfs = {h["symbol"] for h in hits if h and h.get("etf")}
@@ -7039,12 +7087,16 @@ def analyze_depot(positions):
     fx_needed = sorted({{"GBp": "GBP"}.get(c, c) for c in curs.values() if c and c not in ("EUR",)})
     fx_syms = [f"{c}EUR=X" for c in fx_needed]
     tickers = syms + fx_syms + [DEPOT_BENCH[0]]
-    data = safe(lambda: yf.download(tickers, period="1y", auto_adjust=True, actions=True, progress=False, threads=True))
-    close = data["Close"] if data is not None and "Close" in data else pd.DataFrame()
+    data = safe(lambda: yf.download(tickers, period="1y", auto_adjust=False, actions=True, progress=False, threads=True))
+    has = lambda f: data is not None and f in data.columns.get_level_values(0)
+    close = data["Adj Close"] if has("Adj Close") else data["Close"] if has("Close") else pd.DataFrame()
+    raw = data["Close"] if has("Close") else close
     divs = data["Dividends"] if data is not None and "Dividends" in data else pd.DataFrame()
     if isinstance(close, pd.Series):
         close = close.to_frame(tickers[0])
-    close = close.ffill()
+    if isinstance(raw, pd.Series):
+        raw = raw.to_frame(tickers[0])
+    close, raw = close.ffill(), raw.ffill()
 
     def fx_series(cur):
         c = {"GBp": "GBP"}.get(cur, cur)
@@ -7177,6 +7229,57 @@ def analyze_depot(positions):
                              if c_ >= 0.75][:6]
             vals = [c_ for *_x, c_ in pairs]
             risk["avg_corr"] = sum(vals) / len(vals) if vals else None
+    perf = {}
+    if history and len(raw):
+        idx = raw.index
+        V, F, D = (pd.Series(0.0, index=idx) for _ in range(3))
+        used_value, missing = 0.0, []
+        for k in history.get("keys") or []:
+            sym = key_sym.get(k["key"])
+            if not sym or sym not in raw or raw[sym].dropna().empty:
+                if k["open"] or any(t[0] and t[0] >= win_start for t in k["trades"]):
+                    missing.append(k["name"] or k["isin"] or k["symbol"])
+                continue
+            cur = curs.get(sym)
+            px = raw[sym].ffill().bfill() * fx_series(cur) / (100 if cur == "GBp" else 1)
+            start = idx[0].strftime("%Y-%m-%d")
+            qty0 = sum(t[1] for t in k["trades"] if not t[0] or t[0] < start)
+            dq = pd.Series(0.0, index=idx)
+            for d_, q_, flow in k["trades"]:
+                if d_ and d_ >= start:
+                    i_ = min(int(idx.searchsorted(pd.Timestamp(d_))), len(idx) - 1)
+                    dq.iloc[i_] += q_
+                    F.iloc[i_] += flow
+            for d_, key_, amt in history.get("dividends") or []:
+                if key_ == k["key"] and d_ and d_ >= start:
+                    D.iloc[min(int(idx.searchsorted(pd.Timestamp(d_))), len(idx) - 1)] += amt
+            qty_t = qty0 + dq.cumsum()
+            V += qty_t.clip(lower=0) * px
+            if k["open"]:
+                used_value += float((qty_t * px).iloc[-1])
+        if float(V.max()) > 0:
+            twr, level = depot_twr(V, F, D)
+            perf = {"twr": twr, "pnl": float(V.iloc[-1] - V.iloc[0] - F.iloc[1:].sum() + D.iloc[1:].sum()),
+                    "covered": min(1.0, used_value / total) if total else None, "missing": missing[:12],
+                    "since": idx[0].strftime("%Y-%m-%d")}
+            bench = close.get(DEPOT_BENCH[0])
+            if bench is not None and bench.dropna().size > 10:
+                lv = pd.Series(level, index=idx)
+                weekly = pd.concat([lv.rename("p"), bench.ffill().rename("b")], axis=1).ffill().dropna().resample("W-FRI").last().dropna()
+                weekly = weekly[weekly["p"] > 0]
+                if len(weekly) > 10:
+                    chart = {"dates": [d.strftime("%Y-%m-%d") for d in weekly.index],
+                             "depot": [round(float(x / weekly["p"].iloc[0] * 100), 2) for x in weekly["p"]],
+                             "bench": [round(float(x / weekly["b"].iloc[0] * 100), 2) for x in weekly["b"]],
+                             "bench_name": DEPOT_BENCH[1], "actual": True}
+    realized = None
+    div_received = div_12m = None
+    if history:
+        rs = [k["realized"] for k in history.get("keys") or [] if k["realized"] is not None]
+        realized = sum(rs) if rs else 0.0
+        divs_all = history.get("dividends") or []
+        div_received = sum(d[2] for d in divs_all)
+        div_12m = sum(d[2] for d in divs_all if d[0] and d[0] >= win_start)
     alloc = {"positions": _depot_share((r_["name"], r_["value"]) for r_ in rows),
              "sectors": _depot_share(sec_items), "countries": _depot_share((r_["country"], r_["value"]) for r_ in rows),
              "currencies": _depot_share((r_["currency"], r_["value"]) for r_ in rows),
@@ -7188,7 +7291,12 @@ def analyze_depot(positions):
                "largest": rows[0]["weight"], "largest_name": rows[0]["name"], "top5": sum(w_sorted[:5]),
                "top10": sum(w_sorted[:10]), "hhi": hhi, "eff_n": 1 / hhi if hhi else None, "see_through": see_through / total,
                "eff_stocks": (lambda ws: sum(ws) ** 2 / sum(w * w for w in ws) if ws else None)(
-                   [r_["weight"] for r_ in rows if r_["kind"] == "Aktie"])}
+                   [r_["weight"] for r_ in rows if r_["kind"] == "Aktie"]),
+               "realized": realized, "div_received": div_received, "div_12m": div_12m,
+               "total_gain": ((cost_val - cost_sum) if cost_sum else 0.0) + (realized or 0.0) + (div_received or 0.0)
+               if history and cost_sum else None}
+    risk.update({"twr": perf.get("twr"), "twr_pnl": perf.get("pnl"), "twr_covered": perf.get("covered"),
+                 "twr_missing": perf.get("missing") or [], "twr_since": perf.get("since")})
     for r_ in rows:
         r_.pop("etf_sectors", None)
     return {"summary": summary, "positions": rows, "alloc": alloc, "risk": risk, "chart": chart,
@@ -9171,14 +9279,14 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"ok": True})
                     if not isinstance(body.get("csv"), str):
                         raise ValueError("Bitte eine CSV-Datei hochladen.")
-                    positions, notes = parse_depot_csv(body["csv"], split_fn=depot_split_factors)
-                    res = analyze_depot(positions)
+                    positions, notes, history = parse_depot_csv_full(body["csv"], split_fn=depot_split_factors)
+                    res = analyze_depot(positions, history)
                     res["notes"] = notes
                     res["file"] = str(body.get("filename") or "")[:80]
                     if body.get("save"):
                         with STORE.lock:
-                            user_space(user)["depot"] = {"positions": positions, "saved": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                                                         "file": res["file"]}
+                            user_space(user)["depot"] = {"positions": positions, "history": history,
+                                                         "saved": datetime.now().strftime("%d.%m.%Y %H:%M"), "file": res["file"]}
                             STORE.dirty = True
                         save_async()
                         res["saved"] = user_space(user)["depot"]["saved"]
@@ -9541,7 +9649,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = hit[1]
             else:
                 try:
-                    res = analyze_depot(dep["positions"])
+                    res = analyze_depot(dep["positions"], dep.get("history"))
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
                 res.update(saved=dep.get("saved"), file=dep.get("file") or "", notes=[])
