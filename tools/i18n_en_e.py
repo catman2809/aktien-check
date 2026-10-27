@@ -187,5 +187,5 @@ DEPOT_EXACT.update({
     "Keine Daten": "No data", "Handelstag {0}": "Trading day {0}",
     "{0} im Plus, {1} im Minus": "{0} up, {1} down", "Stand {0}:{1} Uhr, ca. {2} Min. verzögert": "as of {0}:{1}, delayed approx. {2} min",
 })
-DEPOT_EXACT.update({"Top & Flop im letzten Monat": "Top & flop over the past month", "Heute": "Today", "1 Monat": "1 month",
-                    "{0} bis {1}": "{0} to {1}"})
+DEPOT_EXACT.update({"Top & Flop seit Monatsbeginn": "Top & flop month to date", "Heute": "Today", "Monat": "Month",
+                    "seit Monatsbeginn: {0} bis {1}": "month to date: {0} to {1}"})

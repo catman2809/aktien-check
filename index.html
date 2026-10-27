@@ -1897,8 +1897,8 @@ async function moversLoad() {
   if (!box) return;
   const uni = MV_UNIS.some(([k]) => k === mvUni) ? mvUni : "dax";
   const per = mvPer;
-  const head = `<div class="mv-head"><div><h2>${per === "month" ? "Top &amp; Flop im letzten Monat" : "Top &amp; Flop heute"}</h2><span class="stamp" id="mv-stamp">&nbsp;</span></div>
-      <div class="seg" id="mv-per"><button type="button" data-p="day" class="${per === "day" ? "on" : ""}">Heute</button><button type="button" data-p="month" class="${per === "month" ? "on" : ""}">1 Monat</button></div></div>
+  const head = `<div class="mv-head"><div><h2>${per === "month" ? "Top &amp; Flop seit Monatsbeginn" : "Top &amp; Flop heute"}</h2><span class="stamp" id="mv-stamp">&nbsp;</span></div>
+      <div class="seg" id="mv-per"><button type="button" data-p="day" class="${per === "day" ? "on" : ""}">Heute</button><button type="button" data-p="month" class="${per === "month" ? "on" : ""}">Monat</button></div></div>
     <div class="seg mv-unis" id="mv-unis">${MV_UNIS.map(([k, l]) => `<button type="button" data-u="${k}" class="${k === uni ? "on" : ""}">${esc(l)}</button>`).join("")}</div>`;
   box.innerHTML = head + `<div class="card mv-msg"><span class="wl-busy"></span> Kurse werden geladen …</div>`;
   box.querySelectorAll("#mv-per button").forEach(b => b.onclick = () => {
@@ -1922,7 +1922,7 @@ async function moversLoad() {
   }
   if ($("#mv") !== box || mvUni !== uni || mvPer !== per) return;  // inzwischen anderer Index gewählt oder Seite gewechselt
   const dd = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
-  $("#mv-stamp").innerHTML = `<span>${esc(d.index)}</span> · <span>${d.since ? `${dd(d.since)} bis ${dd(d.date)}` : `Handelstag ${dd(d.date)}`}</span> · <span>${d.advancers} im Plus, ${d.decliners} im Minus</span> · <span>Stand ${esc(d.updated)} Uhr, ca. 15 Min. verzögert</span>`;
+  $("#mv-stamp").innerHTML = `<span>${esc(d.index)}</span> · <span>${d.since ? `seit Monatsbeginn: ${dd(d.since)} bis ${dd(d.date)}` : `Handelstag ${dd(d.date)}`}</span> · <span>${d.advancers} im Plus, ${d.decliners} im Minus</span> · <span>Stand ${esc(d.updated)} Uhr, ca. 15 Min. verzögert</span>`;
   const row = (x, i, cls) => `<button type="button" class="mv-row" data-q="${esc(x.symbol)}" title="${esc(x.name)} analysieren">
       <span class="mv-rank num">${i + 1}</span>
       <span class="mv-name"><b>${esc(x.name)}</b><small><span>${esc(x.symbol)}</span> · <span class="num">${nf(x.price, 2)} ${esc(x.currency)}</span></small></span>

@@ -8635,7 +8635,7 @@ def _mover_name(sym):
 
 def market_movers(uni="dax", n=5, period="day"):
     """Die n Werte eines Index mit dem größten Kursanstieg und -verlust (Yahoo, ~15 Min. verzögert): am letzten Handelstag
-    (period="day") oder über einen Monat (period="month": aktueller Kurs gegen den Schlusskurs von vor einem Monat)."""
+    (period="day") oder seit Monatsbeginn (period="month": aktueller Kurs gegen den letzten Schlusskurs des Vormonats)."""
     import pandas as pd
     if uni not in SCREENER_UNIVERSES or period not in ("day", "month"):
         raise ValueError("Unbekannter Index oder Zeitraum")
@@ -8652,7 +8652,7 @@ def market_movers(uni="dax", n=5, period="day"):
         raise ValueError("Keine Kursdaten verfügbar")
     days = pd.Series(list(last.values())).value_counts()
     ref = max(d for d, c in days.items() if c >= 0.5 * len(last))  # letzter Handelstag, an dem die meisten Werte notierten
-    since = ref - pd.DateOffset(months=1) if period == "month" else None
+    since = ref.replace(day=1) if period == "month" else None  # erster Tag des laufenden Monats
     rows = []
     for s_, d in last.items():
         if d != ref:
@@ -8661,7 +8661,7 @@ def market_movers(uni="dax", n=5, period="day"):
         if since is None:
             prev = float(c.iloc[-2])
         else:
-            base = c[c.index <= since]
+            base = c[c.index < since]  # Schlusskurs am letzten Handelstag des Vormonats
             if base.empty:
                 continue  # erst seit Kurzem notiert
             prev = float(base.iloc[-1])
