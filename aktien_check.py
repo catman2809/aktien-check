@@ -4857,7 +4857,7 @@ def _sec_facts(cik):
             return hit[1]
         d = _sec_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", timeout=30)
         cutoff = f"{datetime.now().year - SEC_FACTS_YEARS}-01-01"
-        keep = {}
+        keep, annual_forms = {}, []
         for k, v in ((d.get("facts") or {}).get("us-gaap") or {}).items():
             if k not in SEC_FACTS_KEEP:
                 continue
@@ -4867,12 +4867,17 @@ def _sec_facts(cik):
                 for r_ in rows:
                     if (r_.get("end") or "") < cutoff or r_.get("val") is None:
                         continue
+                    if (r_.get("form") or "")[:4] in ("10-K", "20-F", "40-F"):
+                        annual_forms.append((r_.get("filed") or "", r_["form"][:4]))
                     key_, filed = (r_.get("start"), r_["end"]), r_.get("filed") or ""
                     if key_ not in best or filed > best[key_]["filed"]:
                         best[key_] = {"start": r_.get("start"), "end": r_["end"], "val": r_["val"], "filed": filed}
                 units[u] = list(best.values())
             keep[k] = {"units": units}
         del d
+        # Art des jüngsten Jahresberichts: 10-K = US-Firma (USD); 20-F/40-F = Auslandsfirma (USD-Werte dort oft nur
+        # Umrechnungshilfe, Gewinn je Aktie je Stammaktie statt je ADR, keine Quartalszahlen)
+        keep["_annual_form"] = max(annual_forms)[1] if annual_forms else None
         SEC_CACHE[("facts", cik)] = (time.time(), keep)
         old = sorted((v[0], k) for k, v in list(SEC_CACHE.items()) if isinstance(k, tuple) and k[0] == "facts")
         for _ts, k in old[:-SEC_FACTS_MAX]:
@@ -4958,6 +4963,9 @@ def sec_statements(cik):
         return hit[1]
     import pandas as pd
     facts = _sec_facts(cik)
+    if facts.get("_annual_form") != "10-K":
+        SEC_CACHE[("st", cik)] = (time.time(), None)
+        return None
 
     def flows(concepts, unit="USD", pick=None, derive=True):
         ys, qs = {}, {}
@@ -5117,8 +5125,9 @@ class SecTicker:
     Kurse, Dividenden, Analysten usw. kommen unverändert vom ursprünglichen Ticker."""
     YF_NAMES = {"income": "income_stmt", "balance": "balance_sheet", "cashflow": "cashflow"}
 
-    def __init__(self, t, st):
+    def __init__(self, t, st, yahoo_currency="USD"):
         self._t, self._st, self._memo = t, st, {}
+        self._fill = (yahoo_currency or "USD") == "USD"  # Yahoo-Werte in anderer Währung nie einmischen
 
     def __getattr__(self, name):
         return getattr(self._t, name)
@@ -5126,7 +5135,8 @@ class SecTicker:
     def _get(self, kind, q):
         if (kind, q) not in self._memo:
             yname = ("quarterly_" if q else "") + self.YF_NAMES[kind]
-            self._memo[(kind, q)] = merge_frames(self._st[kind][q], safe(lambda: getattr(self._t, yname)))
+            extra = safe(lambda: getattr(self._t, yname)) if self._fill else None
+            self._memo[(kind, q)] = merge_frames(self._st[kind][q], extra)
         return self._memo[(kind, q)]
 
     def from_sec(self, col):
@@ -6116,7 +6126,7 @@ def analyze(query):
         def gather_primary(t0=t):  # Geschäftszahlen primär aus SEC EDGAR, Yahoo füllt Lücken
             st = safe(lambda: fst.result(timeout=35)) if fst else None
             if st:
-                t_ = SecTicker(t0, st)
+                t_ = SecTicker(t0, st, financial_currency(symbol, info) or "USD")
                 return gather(symbol, t_, sec_info(t_, info)), t_
             return gather(symbol, t0, info), t0
         fm = ex.submit(gather_primary)

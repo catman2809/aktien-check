@@ -1056,7 +1056,7 @@ class TestSecStatements(unittest.TestCase):
                d("2025-01-01", "2025-12-31", 100), d("2024-01-01", "2024-12-31", 80)]
         capex = [dict(r_, val=r_["val"] / 5) for r_ in ocf]
         u = lambda rows, unit="USD": {"units": {unit: rows}}
-        return {"Revenues": u(rev), "NetIncomeLoss": u(ni), "NetCashProvidedByUsedInOperatingActivities": u(ocf),
+        return {"_annual_form": "10-K", "Revenues": u(rev), "NetIncomeLoss": u(ni), "NetCashProvidedByUsedInOperatingActivities": u(ocf),
                 "PaymentsToAcquirePropertyPlantAndEquipment": u(capex),
                 "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest":
                     u([d("2025-01-01", "2025-12-31", 50)]),
@@ -1097,6 +1097,19 @@ class TestSecStatements(unittest.TestCase):
         self.assertEqual(a.first(a.row(bs, "Total Debt")), 232)  # 200 + 20 + 5 + Finanzierungsleasing 7, ohne Operating-Leasing
         self.assertEqual(a.first(a.row(bs, "Capital Lease Obligations")), 37)
         self.assertEqual(a.first(a.row(bs, "Cash Cash Equivalents And Short Term Investments")), 100)
+
+    def test_foreign_filer_not_primary(self):
+        import unittest.mock as um
+        f = dict(self.facts(), _annual_form="20-F")  # z. B. Alibaba: USD-Werte nur als Umrechnungshilfe
+        a.SEC_CACHE.pop(("st", 1), None)
+        with um.patch.object(a, "_sec_facts", return_value=f):
+            self.assertIsNone(a.sec_statements(1))
+        a.SEC_CACHE.pop(("st", 1), None)
+        st = self.build()
+        yq = pd.DataFrame({pd.Timestamp("2026-03-31"): [28.8, 25.5e9]}, index=["Diluted EPS", "Net Income"])  # Yahoo in CNY
+        t = type("T", (), {"quarterly_income_stmt": yq})()
+        self.assertNotIn(pd.Timestamp("2026-03-31"), a.SecTicker(t, st, "CNY").quarterly_income_stmt.columns)
+        self.assertIn(pd.Timestamp("2026-03-31"), a.SecTicker(t, st, "USD").quarterly_income_stmt.columns)
 
     def test_merge_prefers_sec_and_fills_gaps(self):
         sec = pd.DataFrame({pd.Timestamp("2025-12-31"): [400.0, float("nan")]}, index=["Total Revenue", "Net Income"])
