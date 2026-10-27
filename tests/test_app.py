@@ -1380,6 +1380,19 @@ class TestDepotParse(unittest.TestCase):
         self.assertIn("1 Positionen wurden vollständig verkauft", " ".join(notes))     # Tesla
         self.assertIn("1 stornierte", " ".join(notes))                                 # SAP
 
+    def test_resolve_isin_via_openfigi(self):
+        import unittest.mock as um
+        search = lambda q, include_crypto=False: ([{"symbol": "GOOGL", "name": "Alphabet Inc.", "exchange": "NASDAQ",
+                                                     "sector": "Communication Services", "industry": ""}] if q == "GOOGL" else [])
+        figi = lambda id_type, value, exch: [{"ticker": "GOOGL", "securityType": "Common Stock"}] if exch == "US" else []
+        a.DEPOT_SYM_CACHE.pop("US02079K3059", None)
+        with um.patch.object(a, "search_symbols", side_effect=search), um.patch.object(a, "openfigi_map", side_effect=figi):
+            hit = a.depot_resolve({"isin": "US02079K3059", "name": "Alphabet (A)", "symbol": ""})
+        a.DEPOT_SYM_CACHE.pop("US02079K3059", None)
+        self.assertEqual(hit["symbol"], "GOOGL")   # Yahoo kennt die ISIN nicht -> OpenFIGI liefert das Kürzel
+        self.assertEqual(" ".join(a.DEPOT_NAME_NOISE.sub(" ", "TSMC ADR").split()), "TSMC")
+        self.assertEqual(" ".join(a.DEPOT_NAME_NOISE.sub(" ", "Alphabet (A)").split()), "Alphabet")
+
     def test_checks(self):
         rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
                 {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]

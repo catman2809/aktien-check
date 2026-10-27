@@ -6685,23 +6685,58 @@ def _depot_from_transactions(recs):
     return out[:DEPOT_MAX_POSITIONS], notes
 
 
+FIGI_SUFFIX = {"GR": ".DE", "US": ""}
+DEPOT_NAME_NOISE = re.compile(r"\((?:[A-Z]|[A-Z]{1,3} ?\d?)\)|\b(?:ADR|ADS|GDR|Reg\.?|Registered|Shares?|Namens-?Aktien?|"
+                              r"Inhaber-?Aktien?|Vz\.?|St\.?|Cl(?:ass)?\.? ?[A-C]|Inc\.?|Corp\.?|Ltd\.?|plc|SE|AG|N\.?V\.?|"
+                              r"S\.?A\.?|Sp\.?ADR)\b", re.I)
+
+
+def _depot_figi(isin):
+    """ISIN -> Yahoo-Symbol über OpenFIGI, wenn Yahoos Suche die ISIN nicht kennt (z. B. Alphabet A, TSMC-ADR).
+    US-ISINs über die US-Notierung, sonst zuerst Xetra."""
+    for exch in (("US",) if isin.startswith("US") else ("GR", "US")):
+        data = safe(lambda: openfigi_map("ID_ISIN", isin, exch)) or []
+        d = next((x for x in data if x.get("ticker")), None)
+        if not d:
+            continue
+        sym = d["ticker"].replace("/", "-").upper() + FIGI_SUFFIX[exch]
+        res = safe(lambda: search_symbols(sym, include_crypto=False), []) or []
+        hit = next((x for x in res if x["symbol"].upper() == sym), None)
+        if hit:
+            return hit
+        if safe(lambda: yf.Ticker(sym).fast_info.last_price):  # Kurs vorhanden, nur nicht in der Suche
+            etf = (d.get("securityType") or "").upper() in ("ETP", "ETF") or "fund" in (d.get("securityType2") or "").lower()
+            return {"symbol": sym, "name": (d.get("name") or sym).title(), "exchange": exch, "etf": etf or None,
+                    "sector": "ETF" if etf else "", "industry": ""}
+    return None
+
+
 def depot_resolve(p_):
-    """Yahoo-Symbol zu einer Position: Symbol, sonst ISIN, sonst Name (WKN ist bei Yahoo nicht suchbar)."""
+    """Yahoo-Symbol zu einer Position: Symbol, sonst ISIN (Yahoo-Suche, dann OpenFIGI), sonst Name
+    (WKN ist bei Yahoo nicht suchbar)."""
     key = p_.get("symbol") or p_.get("isin") or p_.get("name") or p_.get("wkn")
     hit = DEPOT_SYM_CACHE.get(key)
-    if hit and time.time() - hit[0] < 7 * 86400:
+    if hit and time.time() - hit[0] < (7 * 86400 if hit[1] else 6 * 3600):  # „nicht gefunden“ nur kurz merken
         return hit[1]
     found = None
-    for q in (p_.get("symbol"), p_.get("isin"), p_.get("name")):
+    clean_name = " ".join(DEPOT_NAME_NOISE.sub(" ", p_.get("name") or "").replace(",", " ").split())
+    for q in (p_.get("symbol"), p_.get("isin"), "figi", clean_name):
         if not q:
+            continue
+        if q == "figi":
+            found = _depot_figi(p_["isin"]) if p_.get("isin") else None
+            if found:
+                break
             continue
         res = safe(lambda: search_symbols(q, include_crypto=True), []) or []
         if q == p_.get("symbol"):
             res = [x for x in res if x["symbol"].upper() == q.upper()] or res[:1]
-        elif q == p_.get("name") and not p_.get("isin"):
+        elif q == clean_name:
             # nur über den Namen gesucht: erstes Namenswort muss passen, sonst lieber „nicht zugeordnet“ als ein falsches Papier
             want = _plain_name(clean_company_name(q))[:1]
             res = [x for x in res if want and _plain_name(clean_company_name(x.get("name", "")))[:1] == want]
+            if p_.get("isin", "").startswith("US"):
+                res = [x for x in res if "." not in x["symbol"]] or res
         if res:
             # bei Nicht-US-ISINs bevorzugt die Xetra-Notierung (Euro, gute Datenqualität)
             found = next((x for x in res if x["symbol"].endswith(".DE")), None) if p_.get("isin", "")[:2] not in ("", "US") else None
