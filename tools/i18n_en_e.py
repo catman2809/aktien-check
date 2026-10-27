@@ -132,8 +132,8 @@ DEPOT_WILD += [("Ohne Kursdaten, daher nicht in der {0}-Monats-Rendite: {*}",
                 "No price data, therefore not included in the {0}-month return: {*}")]
 DEPOT_EXACT.update({
     "Gewinn/Verlust gesamt": "Total gain/loss", "Dein Depot (tatsächlich, zeitgewichtet)": "Your portfolio (actual, time-weighted)",
-    "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden sind eingerechnet.":
-        "Actual performance with all purchases and sales from the transaction list, time-weighted (deposits and withdrawals do not distort the return); dividends paid out are included.",
+    "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden und Ordergebühren sind eingerechnet, Steuern nicht.":
+        "Actual performance with all purchases and sales from the transaction list, time-weighted (deposits and withdrawals do not distort the return); dividends paid out and order fees are included, taxes are not.",
     "Rückrechnung mit den heutigen Stückzahlen – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden wieder angelegt). Mit einer Umsatzliste zeigt die App die tatsächliche Entwicklung.":
         "Back-calculation with today's quantities – shows how the current composition would have performed (no purchases/sales, dividends reinvested). With a transaction list the app shows the actual performance.",
     "offen {0} € ({1})": "unrealized {0} € ({1})", "realisiert {0} € · Dividenden {1} €": "realized {0} € · dividends {1} €",
@@ -159,3 +159,9 @@ DEPOT_EXACT.update({
 })
 DEPOT_WILD += [("Der Server ist gerade nicht erreichbar (Fehler {0}). Bitte in einer Minute erneut versuchen.",
                 "The server is currently unavailable (error {0}). Please try again in a minute.")]
+DEPOT_EXACT.update({
+    "Gebühren {0} € (eingerechnet)": "fees {0} € (included)",
+    "Steuern {0} € (nicht abgezogen)": "taxes {0} € (not deducted)",
+})
+DEPOT_WILD += [("Ordergebühren von {0} € sind in Einstand und Verkaufserlöse eingerechnet.",
+                "Order fees of {0} € are included in the cost basis and sale proceeds.")]

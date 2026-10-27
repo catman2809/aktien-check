@@ -1947,7 +1947,7 @@ function dpLine(C) {
       <line class="dp-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--text-3)" stroke-dasharray="3 3" style="display:none"/>
       <rect x="${L}" y="${T}" width="${W - L - Rr}" height="${H - T - B}" fill="transparent" class="dp-hit"/></svg></div>
     <div class="stamp" style="margin-top:6px">${C.actual
-      ? "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden sind eingerechnet."
+      ? "Tatsächliche Entwicklung mit allen Käufen und Verkäufen laut Umsatzliste, zeitgewichtet (Ein- und Auszahlungen verzerren die Rendite nicht); ausgezahlte Dividenden und Ordergebühren sind eingerechnet, Steuern nicht."
       : "Rückrechnung mit den heutigen Stückzahlen – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden wieder angelegt). Mit einer Umsatzliste zeigt die App die tatsächliche Entwicklung."}</div></div>`;
 }
 
@@ -1984,6 +1984,8 @@ function renderDepot() {
       ${S.total_gain != null
         ? dpKpi("Gewinn/Verlust gesamt", sgn(S.total_gain) + eur(S.total_gain),
             `<span>offen ${sgn(S.gain)}${eur(S.gain)} (${pc(S.gain_pct, 1, true)})</span> · <span>realisiert ${sgn(S.realized)}${eur(S.realized)}</span> · <span>Dividenden ${eur(S.div_received)}</span>`
+            + (S.fees ? ` · <span>Gebühren ${eur(-S.fees)} (eingerechnet)</span>` : "")
+            + (Math.abs(S.taxes || 0) >= 0.01 ? ` · <span>Steuern ${eur(S.taxes)} (nicht abgezogen)</span>` : "")
             + (S.cost_coverage < 0.99 ? ` · <span>offen für ${pc(S.cost_coverage, 0)} des Depots</span>` : ""), tone(S.total_gain))
         : dpKpi("Gewinn/Verlust", S.gain != null ? sgn(S.gain) + eur(S.gain) : "–", S.gain_pct != null ? pc(S.gain_pct, 1, true) + " (nicht realisiert)" + (S.cost_coverage < 0.99 ? ` · für ${pc(S.cost_coverage, 0)} des Depots` : "") : "Kaufkurse fehlen in der Datei", tone(S.gain))}
       ${Rk.twr != null

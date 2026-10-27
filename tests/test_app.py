@@ -1329,6 +1329,7 @@ class TestDepotParse(unittest.TestCase):
     def test_transactions_comdirect(self):
         pos, notes = a.parse_depot_csv(self.COMDIRECT_TX)
         self.assertEqual({p_["isin"]: p_["qty"] for p_ in pos}, {"DE0008404005": 5, "DE000BASF111": 20})
+        pos = sorted(pos, key=lambda p_: p_["isin"])
         self.assertAlmostEqual(pos[0]["buy"], (2500 + 1500) / 15)   # Verkauf ändert den Ø-Einstandskurs nicht
         self.assertIsNone(pos[0]["value"])                          # Kurswert eines Auftrags ist kein Depotwert
 
@@ -1444,6 +1445,32 @@ class TestDepotParse(unittest.TestCase):
         self.assertGreater(a.depot_twr(V, F, D2)[0], twr)
         self.assertEqual(a.depot_twr(pd.Series([0.0, 0.0, 100.0], index=idx[:3]),
                                      pd.Series([0.0, 0.0, 100.0], index=idx[:3]), D[:3])[0], 0.0)  # vor dem 1. Kauf keine Rendite
+
+    def test_fees_taxes_and_order(self):
+        # Trade Republic: „amount“ ist brutto (Stück × Kurs), Gebühr und Steuer stehen daneben; neueste Buchung oben
+        def row(ts, dt, typ, name, isin, shares, price, amount, fee="", tax="", cat="TRADING"):
+            return (f'"{ts}","{dt}","DEFAULT","{cat}","{typ}","STOCK","{name}","{isin}","{shares}","{price}","{amount}",'
+                    f'"{fee}","{tax}","EUR","","","","","id-{ts}","","","",""\n')
+        csv_ = self.TR_HEAD + "".join([
+            row("2026-07-15T08:00:00.000Z", "2026-07-15", "DIVIDEND", "Apple", "US0378331005", "1", "", "0.40", tax="-0.06", cat="CASH"),
+            row("2026-03-10T15:00:00.000Z", "2026-03-10", "SELL", "Apple", "US0378331005", "-1.0", "190.00", "190.00", "-1.00", "-2.50"),
+            row("2026-03-10T14:00:00.000Z", "2026-03-10", "BUY", "Apple", "US0378331005", "2.0", "180.50", "-361.00", "-1.00"),
+            row("2026-03-09T09:00:00.000Z", "2026-03-09", "GIFT", "Tesla", "US88160R1014", "0.1", "300.00", "0.00"),
+            row("2026-03-01T09:00:00.000Z", "2026-03-01", "TAX_OPTIMIZATION", "", "", "", "", "0.00", tax="1.20", cat="CASH")])
+        pos, notes, hist = a.parse_depot_csv_full(csv_)
+        by = {p_["isin"]: p_ for p_ in pos}
+        self.assertAlmostEqual(by["US0378331005"]["buy"], 181.0)           # Einstand inkl. 1 € Gebühr
+        self.assertAlmostEqual(by["US88160R1014"]["qty"], 0.1)              # geschenkte Aktie zählt zum Bestand
+        keys = {k["key"]: k for k in hist["keys"]}
+        self.assertAlmostEqual(keys["US0378331005"]["realized"], 189 - 181)  # Kauf vor Verkauf, obwohl unten in der Datei
+        self.assertEqual(keys["US0378331005"]["trades"], [["2026-03-10", 2.0, 362.0], ["2026-03-10", -1.0, -189.0]])
+        self.assertAlmostEqual(hist["fees"], 2.0)
+        self.assertAlmostEqual(hist["taxes"], -2.5 - 0.06 + 1.2)
+        self.assertEqual(hist["dividends"], [["2026-07-15", "US0378331005", 0.4]])
+        self.assertTrue(any("Ordergebühren von 2,00 €" in n for n in notes))
+        # Betrag schon inkl. Gebühr (andere Broker): Endbetrag übernehmen, Gebühr nicht doppelt zählen
+        csv2 = self.TR_HEAD + row("2026-03-10T14:00:00.000Z", "2026-03-10", "BUY", "Apple", "US0378331005", "2.0", "180.50", "-362.00", "-1.00")
+        self.assertAlmostEqual(a.parse_depot_csv_full(csv2)[0][0]["buy"], 181.0)
 
     def test_realized_gains_and_dividends(self):
         r = self.tr_row

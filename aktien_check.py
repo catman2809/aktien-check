@@ -6444,6 +6444,10 @@ DEPOT_COLS = (
     ("isin", ("isin",)),
     ("wkn", ("wkn",)),
     ("symbol", ("symbol", "ticker", "kuerzel", "kürzel")),
+    # Gebühren und Steuern je Buchung (Trade Republic: „fee“ und „tax“ neben dem Bruttobetrag „amount“)
+    ("fee", ("gebühr", "gebuehr", "fee", "fees", "provision", "entgelt", "commission")),
+    ("tax", ("steuer", "tax", "taxes", "withholding")),
+    ("ts", ("datetime", "timestamp", "zeitstempel")),
     # Umsatzlisten: Buchungsart, Status, Datum (kurze Stichwörter nur als ganzes Wort, sonst trifft „type“ auch „assettype“)
     ("type", ("transaktionsart", "geschäftsart", "geschaeftsart", "buchungsart", "umsatzart", "orderart", "transaktion",
               "transaction", "vorgang", "typ", "type", "art", "side", "aktion")),
@@ -6477,7 +6481,7 @@ EQUITY_SECTOR_DE = {"technology": "Technologie", "financial services": "Finanzen
                     "basic materials": "Grundstoffe", "utilities": "Versorger", "real estate": "Immobilien"}
 
 
-DEPOT_SHORT_KW = {"typ", "type", "art", "side", "aktion", "date", "status", "total"}
+DEPOT_SHORT_KW = {"typ", "type", "art", "side", "aktion", "date", "status", "total", "fee", "fees", "tax", "taxes"}
 
 
 def _depot_kw_match(h, kw):
@@ -6499,7 +6503,7 @@ def _tx_kind(v):
                  r"tilgung|rückzahlung|redemption", v):
         return "sell"
     if re.search(r"kauf|buy|purchase|sparplan|savings|saveback|round.?up|zugang|einlieferung|einbuchung|transfer.?in|eingang|"
-                 r"receipt|bonus|gratis|bezug", v):
+                 r"receipt|bonus|gratis|bezug|gift|geschenk|perk|prämie|praemie", v):
         return "buy"
     return "other"
 
@@ -6588,6 +6592,12 @@ def parse_depot_csv_full(text, split_fn=None):
         if sym and re.search(r"crypto|krypto", get("asset").lower()) and "-" not in sym:
             sym = f"{sym}-EUR"
         if not (isin or wkn or sym or name) or re.match(r"(?i)(summe|gesamt|total|depotwert|saldo)", name or sym):
+            tax_ = _depot_num(get("tax"), dec_comma) if "tax" in cols else None
+            if tax_ and not re.match(r"(?i)(summe|gesamt|total)", name or sym):  # Steuerbuchung ohne Wertpapier (z. B. Erstattung)
+                recs.append({"key": "", "isin": "", "wkn": "", "symbol": "", "name": "", "qty": None, "value": None,
+                             "buy": None, "cost": None, "price": None, "amount": None, "cur": None, "kind": "other",
+                             "divi": False, "status": None, "date": _depot_date(get("date")), "ts": get("ts"),
+                             "fee": 0.0, "tax": tax_})
             continue
         recs.append({"key": isin or wkn or sym or name.lower(), "isin": isin, "wkn": wkn, "symbol": sym, "name": name[:80],
                      "qty": _depot_num(get("qty"), dec_comma), "value": _depot_num(get("value"), dec_comma),
@@ -6597,7 +6607,9 @@ def parse_depot_csv_full(text, split_fn=None):
                      "kind": _tx_kind(f"{get('category')} {get('type')}") if "type" in cols or "category" in cols else None,
                      "divi": bool(re.search(r"dividend|distribution|ausschütt|ausschuett|ertrag|coupon|kupon",
                                             f"{get('category')} {get('type')}".lower())),
-                     "status": _tx_kind(get("status")) if "status" in cols else None, "date": _depot_date(get("date"))})
+                     "status": _tx_kind(get("status")) if "status" in cols else None, "date": _depot_date(get("date")),
+                     "ts": get("ts"), "fee": abs(_depot_num(get("fee"), dec_comma) or 0.0),
+                     "tax": _depot_num(get("tax"), dec_comma) or 0.0})
     kinds = [r_["kind"] for r_ in recs]
     keys = [r_["key"] for r_ in recs]
     is_tx = (kinds.count("buy") + kinds.count("sell") > 0) or ("date" in cols and len(set(keys)) < len(keys))
@@ -6638,15 +6650,19 @@ def _depot_from_transactions(recs, split_fn=None):
     Käufe und Verkäufe vor dem Split in heutige Stück um."""
     stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0}
     # chronologisch; Exporte stehen oft mit der neuesten Buchung oben
-    order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", i)) if any(r_["date"] for r_ in recs) else range(len(recs))
-    ledger, dividends = {}, []
+    # Exporte mit der neuesten Buchung oben: am selben Tag dann von unten nach oben lesen (sonst Verkauf vor Kauf)
+    ds = [r_["date"] for r_ in recs if r_["date"]]
+    newest_first = sum(a_ > b_ for a_, b_ in zip(ds, ds[1:])) > sum(a_ < b_ for a_, b_ in zip(ds, ds[1:]))
+    order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", recs[i]["ts"] or "", -i if newest_first else i))         if ds else range(len(recs))
+    ledger, dividends, fees, taxes = {}, [], 0.0, 0.0
     for i in order:
         r_ = recs[i]
-        if r_["divi"] and r_["status"] != "skip" and r_["kind"] not in ("skip", "buy", "sell") and (r_["amount"] or 0) > 0:
-            dividends.append([r_["date"], r_["key"], float(r_["amount"])])  # ausgezahlte Dividende/Ausschüttung (Euro)
         if r_["status"] == "skip" or r_["kind"] == "skip":
             stats["skip"] += 1
             continue
+        taxes += r_["tax"]  # bezahlte (−) bzw. erstattete (+) Steuern, auch auf Dividenden und Steuerbuchungen
+        if r_["divi"] and r_["kind"] not in ("buy", "sell") and (r_["amount"] or 0) > 0:
+            dividends.append([r_["date"], r_["key"], float(r_["amount"])])  # Dividende/Ausschüttung vor Steuern (Euro)
         qty = r_["qty"]
         kind = r_["kind"] or ("sell" if qty is not None and qty < 0 else "buy" if qty else "other")
         L = None
@@ -6667,10 +6683,18 @@ def _depot_from_transactions(recs, split_fn=None):
         stats[kind] += 1
         q = abs(qty)
         px = r_["price"] or r_["buy"]
-        gross = q * px if px else abs(r_["amount"] or r_["value"] or 0) or None
+        gross, booked, fee = q * px if px else None, abs(r_["amount"] or 0) or None, r_["fee"]
+        if booked and (not gross or abs(booked - gross) > max(0.02, 0.002 * gross)):
+            # gebuchter Betrag weicht von Stück × Kurs ab -> er ist schon der Endbetrag (inkl. Gebühren/Umrechnung)
+            cost, proceeds, fee = booked, booked, 0.0
+        else:
+            gross = booked or gross or abs(r_["value"] or 0) or None
+            cost = gross + fee if gross else None        # Einstand inkl. Ordergebühr
+            proceeds = gross - fee if gross else None    # Erlös nach Ordergebühr
+        fees += fee
         L = ledger.setdefault(r_["key"], {"meta": r_, "trades": [], "split_rows": False})
         L["trades"].append({"date": r_["date"], "kind": kind, "q": q, "price": px,
-                            "cost": gross if kind == "buy" else None, "proceeds": gross if kind == "sell" else None})
+                            "cost": cost if kind == "buy" else None, "proceeds": proceeds if kind == "sell" else None})
     # Split-Faktoren je Position (parallel, nur mit Datum und ohne eigene Split-Buchungen)
     keys = [k for k, L in ledger.items() if split_fn and not L["split_rows"] and all(t["date"] for t in L["trades"])]
     factors = {}
@@ -6720,6 +6744,8 @@ def _depot_from_transactions(recs, split_fn=None):
             sold += 1
     notes = [f"Umsatzliste erkannt: {stats['buy']} Käufe und {stats['sell']} Verkäufe verrechnet, "
              f"{stats['other']} andere Buchungen (z. B. Dividenden, Gebühren, Ein- und Auszahlungen) nicht berücksichtigt."]
+    if fees:
+        notes.append(f"Ordergebühren von {fnum(fees, 2)} € sind in Einstand und Verkaufserlöse eingerechnet.")
     if sold:
         notes.append(f"{sold} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.")
     if stats["skip"]:
@@ -6733,7 +6759,7 @@ def _depot_from_transactions(recs, split_fn=None):
     if not out:
         raise ValueError("Nach Verrechnung aller Käufe und Verkäufe ist kein Bestand übrig.")
     good = {h["key"] for h in hist_keys}
-    history = {"keys": hist_keys, "dividends": [d for d in dividends if d[1] in good]}
+    history = {"keys": hist_keys, "dividends": [d for d in dividends if d[1] in good], "fees": fees, "taxes": taxes}
     return out[:DEPOT_MAX_POSITIONS], notes, history
 
 
@@ -7321,6 +7347,7 @@ def analyze_depot(positions, history=None):
                "eff_stocks": (lambda ws: sum(ws) ** 2 / sum(w * w for w in ws) if ws else None)(
                    [r_["weight"] for r_ in rows if r_["kind"] == "Aktie"]),
                "realized": realized, "div_received": div_received, "div_12m": div_12m,
+               "fees": (history or {}).get("fees"), "taxes": (history or {}).get("taxes"),
                "total_gain": ((cost_val - cost_sum) if cost_sum else 0.0) + (realized or 0.0) + (div_received or 0.0)
                if history and cost_sum else None}
     risk.update({"twr": perf.get("twr"), "twr_pnl": perf.get("pnl"), "twr_covered": perf.get("covered"),
