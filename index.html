@@ -1473,7 +1473,9 @@ function maintBanner(on) {
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (r.status === 401) { toLogin(); throw new Error("login"); }
-  const d = await r.json();
+  let d;
+  try { d = await r.json(); }
+  catch (e) { throw new Error(r.ok ? "Die Antwort des Servers war unvollständig. Bitte erneut versuchen." : `Der Server ist gerade nicht erreichbar (Fehler ${r.status}). Bitte in einer Minute erneut versuchen.`); }
   if (r.status === 503 && d.error === "maintenance") { showMaintenance(d.text); throw new Error("Wartungsarbeiten"); }
   if (!r.ok) throw new Error(d.error || "Fehler");
   return d;
@@ -1863,8 +1865,19 @@ function showDepot() {
   navTo("?view=depot");
   renderDepot(); window.scrollTo({top: 0});
   const my = runId;
-  api("/api/depot").then(d => { if (my !== runId) return; DEPOT = d.empty ? null : d; renderDepot(); })
+  api("/api/depot").then(depotWait).then(d => { if (my !== runId) return; DEPOT = d.empty ? null : d; renderDepot(); })
     .catch(e => { if (my !== runId || e.message === "login") return; depotErr = e.message; renderDepot(); });
+}
+
+async function depotWait(d) {
+  // große Depots werden im Hintergrund analysiert: so lange nachfragen, bis das Ergebnis da ist
+  const t0 = Date.now();
+  while (d && d.pending) {
+    if (Date.now() - t0 > 600000) throw new Error("Die Analyse dauert ungewöhnlich lange. Bitte später erneut öffnen.");
+    await new Promise(r => setTimeout(r, 2000));
+    d = await api("/api/depot?job=" + encodeURIComponent(d.pending));
+  }
+  return d;
 }
 
 async function depotUpload(file) {
@@ -1878,7 +1891,7 @@ async function depotUpload(file) {
   depotBusy = "Depot wird eingelesen und analysiert …"; renderDepot();
   const my = runId;
   try {
-    const d = await api("/api/depot", {csv: text, save, filename: file.name});
+    const d = await depotWait(await api("/api/depot", {csv: text, save, filename: file.name}));
     if (my !== runId) return;
     DEPOT = d;
   } catch (e) { if (e.message !== "login") depotErr = e.message; }

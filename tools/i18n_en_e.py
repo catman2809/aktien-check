@@ -153,3 +153,11 @@ DEPOT_EXACT.update({
     "Auch Umsatzlisten mit Käufen und Verkäufen werden verrechnet – dann bitte den gesamten Zeitraum ab Depoteröffnung exportieren.":
         "Transaction lists with purchases and sales are netted too – in that case please export the entire period since the account was opened.",
 })
+DEPOT_EXACT.update({
+    "Die Antwort des Servers war unvollständig. Bitte erneut versuchen.": "The server's response was incomplete. Please try again.",
+    "Die Analyse dauert ungewöhnlich lange. Bitte später erneut öffnen.": "The analysis is taking unusually long. Please open it again later.",
+    "Die Analyse wurde nicht gefunden. Bitte die Datei erneut hochladen.": "The analysis was not found. Please upload the file again.",
+    "Die Depotanalyse ist fehlgeschlagen. Bitte in einigen Minuten erneut versuchen.": "The portfolio analysis failed. Please try again in a few minutes.",
+})
+DEPOT_WILD += [("Der Server ist gerade nicht erreichbar (Fehler {0}). Bitte in einer Minute erneut versuchen.",
+                "The server is currently unavailable (error {0}). Please try again in a minute.")]

@@ -1476,6 +1476,17 @@ class TestDepotParse(unittest.TestCase):
 
 
 class TestDepotHTTP(TestHTTP):
+    def wait(self, op, st, b):
+        """Analysen laufen im Hintergrund: mit der Auftragsnummer nachfragen, bis das Ergebnis da ist."""
+        d = json.loads(b)
+        for _ in range(200):
+            if st != 200 or "pending" not in d:
+                return st, d
+            time.sleep(0.05)
+            st, _, b = self.call(op, "/api/depot?job=" + d["pending"])
+            d = json.loads(b)
+        self.fail("Analyse wurde nicht fertig")
+
     def test_save_load_delete(self):
         import unittest.mock as um
         op = self.client()
@@ -1485,14 +1496,21 @@ class TestDepotHTTP(TestHTTP):
         self.assertEqual(json.loads(self.call(op, "/api/depot")[2]), {"empty": True})
         with um.patch.object(a, "analyze_depot", return_value=dict(fake)) as an:
             st, _, b = self.call(op, "/api/depot", {"csv": "ISIN;Stück\nDE0007164600;10\n", "save": True, "filename": "d.csv"})
-            self.assertEqual(st, 200, b)
+            self.assertIn("pending", json.loads(b))                                          # sofortige Antwort, Analyse läuft
+            st, d = self.wait(op, st, b)
+            self.assertEqual(st, 200, d)
             self.assertEqual(an.call_args[0][0][0]["isin"], "DE0007164600")
             saved = a.user_space("admin")["depot"]
             self.assertEqual((saved["positions"][0]["qty"], saved["file"]), (10, "d.csv"))
             self.assertEqual(json.loads(self.call(op, "/api/depot")[2])["file"], "d.csv")     # aus dem Zwischenspeicher
+            a.DEPOT_CACHE.clear()
+            st, _, b = self.call(op, "/api/depot")                                           # neu berechnen, ebenfalls im Hintergrund
+            self.assertEqual(self.wait(op, st, b)[1]["file"], "d.csv")
         st, _, b = self.call(op, "/api/depot", {"csv": "Datum;Betrag\n1;2\n"})
+        st, d = self.wait(op, st, b)
         self.assertEqual(st, 400)
-        self.assertIn("Kopfzeile", json.loads(b)["error"])
+        self.assertIn("Kopfzeile", d["error"])
+        self.assertEqual(self.call(op, "/api/depot?job=falsch")[0], 404)
         self.assertEqual(self.call(op, "/api/depot", {"action": "delete"})[0], 200)
         self.assertNotIn("depot", a.user_space("admin"))
         self.assertEqual(json.loads(self.call(op, "/api/depot")[2]), {"empty": True})

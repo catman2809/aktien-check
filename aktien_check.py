@@ -6435,6 +6435,7 @@ def analyze(query):
 DEPOT_MAX_POSITIONS = 200
 DEPOT_MAX_CSV = 1_500_000           # Zeichen
 DEPOT_CACHE = {}                    # Benutzer -> (Zeit, Signatur, Ergebnis)
+DEPOT_JOBS = {}                     # Benutzer -> laufende/fertige Analyse (große Depots brauchen länger als ein Request darf)
 DEPOT_SYM_CACHE = {}                # Kennung -> (Zeit, Treffer)
 DEPOT_BENCH = ("EUNL.DE", "MSCI World (iShares Core, EUR)")
 DEPOT_RF = 0.025                    # risikoloser Zins für die Sharpe-Ratio (Euro)
@@ -6734,6 +6735,29 @@ def _depot_from_transactions(recs, split_fn=None):
     good = {h["key"] for h in hist_keys}
     history = {"keys": hist_keys, "dividends": [d for d in dividends if d[1] in good]}
     return out[:DEPOT_MAX_POSITIONS], notes, history
+
+
+def depot_job_start(user, fn):
+    """Führt die Depotanalyse im Hintergrund aus; der Browser fragt mit der Auftragsnummer nach dem Ergebnis."""
+    job = {"id": secrets.token_hex(8), "started": time.time(), "done": False, "res": None, "error": None}
+    DEPOT_JOBS[user] = job
+
+    def run():
+        try:
+            job["res"] = fn()
+        except ValueError as e:
+            job["error"] = str(e)
+        except Exception:
+            LOG.exception("[Depot] Analyse fehlgeschlagen")
+            job["error"] = "Die Depotanalyse ist fehlgeschlagen. Bitte in einigen Minuten erneut versuchen."
+        job["done"] = True
+    threading.Thread(target=run, daemon=True).start()
+    return job
+
+
+def depot_job_running(user):
+    job = DEPOT_JOBS.get(user)
+    return job if job and not job["done"] and time.time() - job["started"] < 900 else None
 
 
 DEPOT_SPLIT_CACHE = {}
@@ -9279,20 +9303,25 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"ok": True})
                     if not isinstance(body.get("csv"), str):
                         raise ValueError("Bitte eine CSV-Datei hochladen.")
-                    positions, notes, history = parse_depot_csv_full(body["csv"], split_fn=depot_split_factors)
-                    res = analyze_depot(positions, history)
-                    res["notes"] = notes
-                    res["file"] = str(body.get("filename") or "")[:80]
-                    if body.get("save"):
-                        with STORE.lock:
-                            user_space(user)["depot"] = {"positions": positions, "history": history,
-                                                         "saved": datetime.now().strftime("%d.%m.%Y %H:%M"), "file": res["file"]}
-                            STORE.dirty = True
-                        save_async()
-                        res["saved"] = user_space(user)["depot"]["saved"]
-                    DEPOT_CACHE[user] = (time.time(), res)
-                    LOG.info("[Depot] %s: %d Positionen, %d nicht zugeordnet", user, len(res["positions"]), len(res["unresolved"]))
-                    return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
+                    csv_text, fname, save = body["csv"], str(body.get("filename") or "")[:80], bool(body.get("save"))
+
+                    def work():
+                        t0 = time.time()
+                        positions, notes, history = parse_depot_csv_full(csv_text, split_fn=depot_split_factors)
+                        res = analyze_depot(positions, history)
+                        res["notes"], res["file"] = notes, fname
+                        if save:
+                            with STORE.lock:
+                                user_space(user)["depot"] = {"positions": positions, "history": history,
+                                                             "saved": datetime.now().strftime("%d.%m.%Y %H:%M"), "file": fname}
+                                STORE.dirty = True
+                            save_async()
+                            res["saved"] = user_space(user)["depot"]["saved"]
+                        DEPOT_CACHE[user] = (time.time(), res)
+                        LOG.info("[Depot] %s: %d Positionen, %d nicht zugeordnet, %.0f s", user, len(res["positions"]),
+                                 len(res["unresolved"]), time.time() - t0)
+                        return res
+                    return self.send_json({"pending": depot_job_start(user, work)["id"]})
                 if u.path == "/api/watchlist":
                     if not isinstance(body.get("items"), list):
                         raise ValueError("Ungültige Watchlist (Liste erwartet).")
@@ -9641,20 +9670,32 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
         if u.path == "/api/depot":
+            job_id = (qs.get("job") or [""])[0]
+            if job_id:
+                job = DEPOT_JOBS.get(user)
+                if not job or job["id"] != job_id:
+                    return self.send_json({"error": "Die Analyse wurde nicht gefunden. Bitte die Datei erneut hochladen."}, 404)
+                if not job["done"]:
+                    return self.send_json({"pending": job_id})
+                if job["error"]:
+                    return self.send_json({"error": job["error"]}, 400)
+                return self.send(200, json.dumps(json_safe(job["res"]), ensure_ascii=False), "application/json; charset=utf-8")
+            running = depot_job_running(user)
+            if running:
+                return self.send_json({"pending": running["id"]})
             dep = user_space(user).get("depot")
             if not dep:
                 return self.send_json({"empty": True})
             hit = DEPOT_CACHE.get(user)
             if hit and time.time() - hit[0] < 900 and hit[1].get("saved") == dep.get("saved"):
-                res = hit[1]
-            else:
-                try:
-                    res = analyze_depot(dep["positions"], dep.get("history"))
-                except ValueError as e:
-                    return self.send_json({"error": str(e)}, 400)
+                return self.send(200, json.dumps(json_safe(hit[1]), ensure_ascii=False), "application/json; charset=utf-8")
+
+            def work():
+                res = analyze_depot(dep["positions"], dep.get("history"))
                 res.update(saved=dep.get("saved"), file=dep.get("file") or "", notes=[])
                 DEPOT_CACHE[user] = (time.time(), res)
-            return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
+                return res
+            return self.send_json({"pending": depot_job_start(user, work)["id"]})
         if u.path == "/api/screener":
             if not self.is_admin():
                 return self.send_json({"error": "Der Screener ist nur für Administratoren verfügbar."}, 403)
