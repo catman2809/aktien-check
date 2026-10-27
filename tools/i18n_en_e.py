@@ -170,3 +170,14 @@ DEPOT_EXACT.update({
     "Die Optionsdaten konnten gerade nicht geladen werden. Bitte die Analyse später erneut öffnen.":
         "The options data could not be loaded right now. Please open the analysis again later.",
 })
+DEPOT_EXACT.update({
+    "Long / Short": "Long / short", "Long": "Long", "Short": "Short",
+    "Offene Positionen": "Open positions", "Delta-gewichtet": "Delta-weighted",
+    "Offene Kontrakte über alle Verfallstermine": "Open contracts across all expiries",
+    "Heute gehandelte Kontrakte": "Contracts traded today",
+    "Heute gehandelter Wert (Prämien)": "Value traded today (premiums)",
+    "Offene Kontrakte gewichtet mit ihrem Delta – entspricht der Zahl der Aktien, auf die sie wirken":
+        "Open contracts weighted by their delta – equals the number of shares they act on",
+    "für 30 Tage": "for 30 days",
+})
+DEPOT_EXACT.update({"Gehandelter Wert": "Value traded", "{0} Aktien (Gegenwert)": "{0} share equivalents"})

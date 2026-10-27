@@ -1606,10 +1606,30 @@ class TestOptions(unittest.TestCase):
 
         class T:
             options = (exp,)
-        with um.patch.object(a.yf, "Ticker", lambda s: T()), um.patch.object(a, "_opt_chain", lambda s, e: (e, calls, puts)):
+        with um.patch.object(a.yf, "Ticker", lambda s: T()), um.patch.object(a, "_opt_chain", lambda s, e: (e, calls, puts)),                 um.patch.object(a, "cboe_options", lambda s, p=None: None):  # Cboe kennt den Wert nicht -> Yahoo
             d = a.options_data("XYZ", price=99.0)
+        self.assertEqual(d["source"], "Yahoo Finance")
         self.assertEqual((d["oi"]["calls"], d["oi"]["puts"], d["vol"]["calls"], d["vol"]["puts"]), (400, 200, 80, 20))
         self.assertAlmostEqual(d["pc_oi"], 0.5)
         self.assertAlmostEqual(d["prem"]["calls"], (50 * 12 + 30 * 4) * 100)
         self.assertAlmostEqual(d["iv_atm"], 0.30)  # Strike 100 am nächsten: (0,25 + 0,35) / 2
         self.assertEqual(a.derivatives("ALV.DE"), {"na": "eu"})
+
+    def test_cboe(self):
+        import unittest.mock as um
+        exp = (a.datetime.now() + a.timedelta(days=20)).strftime("%y%m%d")
+        opts = [{"option": f"XYZ{exp}C00100000", "open_interest": 300, "volume": 50, "delta": 0.6, "last_trade_price": 4.0,
+                 "last_trade_time": "2026-10-27T15:00:00"},
+                {"option": f"XYZ{exp}P00100000", "open_interest": 100, "volume": 10, "delta": -0.4, "last_trade_price": 3.0,
+                 "last_trade_time": "2026-10-27T15:01:00"}]
+        body = json.dumps({"timestamp": "2026-10-27 18:00:00", "data": {"iv30": 31.5, "options": opts}}).encode()
+        with um.patch.object(a, "_fetch", lambda url, **k: body):
+            d = a.options_data("XYZ")
+        self.assertEqual(d["source"], "Cboe")
+        self.assertEqual((d["oi"]["calls"], d["oi"]["puts"], d["vol"]["calls"], d["vol"]["puts"]), (300, 100, 50, 10))
+        self.assertAlmostEqual(d["delta_oi"]["calls"], 180)   # 300 Kontrakte × Delta 0,6
+        self.assertAlmostEqual(d["delta_oi"]["puts"], 40)
+        self.assertAlmostEqual(d["prem"]["puts"], 10 * 3.0 * 100)
+        self.assertAlmostEqual(d["iv_atm"], 0.315)
+        self.assertAlmostEqual(d["near_pc_oi"], 1 / 3)
+        self.assertEqual((d["expiries"], d["asof"]), (1, "2026-10-27"))

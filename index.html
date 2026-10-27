@@ -341,6 +341,17 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 @media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
 .dv-grid > *{min-width:0}
 .dv-split{margin-bottom:14px}
+.dv-ls-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.dv-ls-head h3{margin:0}
+.ls{display:flex;flex-direction:column;gap:12px}
+.ls[hidden]{display:none}
+.ls-row{display:flex;align-items:center;gap:12px;min-width:0}
+.ls-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;box-sizing:border-box;min-width:max-content;
+  height:46px;padding:0 18px;border-radius:12px;font-size:18px;font-weight:700;letter-spacing:-.01em;
+  background:color-mix(in oklab,var(--text) 16%,var(--surface));color:var(--text)}
+.ls-row.major .ls-bar{background:var(--text);color:var(--surface)}
+.ls-out{font-size:18px;font-weight:700;color:var(--text-3)}
+.ls-sub{font-size:12.5px;color:var(--text-2);margin-top:2px}
 .dv-lab{display:flex;justify-content:space-between;gap:8px;font-size:14px;margin-bottom:6px}
 .dv-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
 .dv-bar i{display:block;height:100%;min-width:2px}
@@ -2620,6 +2631,12 @@ function drawValChart() {
 }
 
 /* Derivate: Optionen – Long (Calls) vs. Short (Puts), Volumen, Put/Call */
+document.addEventListener("click", e => {
+  const b = e.target.closest("#dv-seg button");
+  if (!b) return;
+  document.querySelectorAll("#dv-seg button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".ls[data-k]").forEach(x => x.hidden = x.dataset.k !== b.dataset.k);
+});
 function derivSection(d) {
   const D = d.derivatives;
   if (!D || d.asset === "crypto") return "";
@@ -2646,26 +2663,41 @@ function derivSection(d) {
     : "Für diesen Wert werden derzeit keine Optionen gehandelt."}</div>`;
   const date = iso => iso ? new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "–";
   const n0 = v => nf(v, 0), usd = v => big(v).join(" ") + " " + esc(D.currency);
-  const split = (lab, c, p_, fmt) => {
-    const tot = c + p_, cs = tot ? c / tot : 0;
-    return `<div class="dv-split"><div class="dv-lab"><b>${lab}</b><span class="stamp">${fmt(tot)} gesamt</span></div>
-      <div class="dv-bar" role="img" aria-label="${lab}: Calls ${pc(cs, 0)}, Puts ${pc(1 - cs, 0)}"><i class="long" style="width:${cs * 100}%"></i><i class="short" style="width:${(1 - cs) * 100}%"></i></div>
-      <div class="dv-leg"><span><b class="dot long"></b>Long (Calls) <b class="num">${pc(cs, 1)}</b> · ${fmt(c)}</span><span><b class="dot short"></b>Short (Puts) <b class="num">${pc(1 - cs, 1)}</b> · ${fmt(p_)}</span></div></div>`;
+  // Long/Short wie in Broker-Apps: größere Seite hervorgehoben, Prozent im Balken (bei schmalen Balken daneben)
+  const modes = [
+    {k: "oi", lab: "Offene Positionen", c: D.oi.calls, p: D.oi.puts, fmt: x => n0(x) + " Kontrakte",
+     note: "Offene Kontrakte über alle Verfallstermine"},
+    {k: "vol", lab: "Volumen heute", c: D.vol.calls, p: D.vol.puts, fmt: x => n0(x) + " Kontrakte",
+     note: "Heute gehandelte Kontrakte"},
+    {k: "prem", lab: "Gehandelter Wert", c: D.prem.calls, p: D.prem.puts, fmt: usd, note: "Heute gehandelter Wert (Prämien)"},
+  ];
+  if (D.delta_oi) modes.unshift({k: "delta", lab: "Delta-gewichtet", c: D.delta_oi.calls, p: D.delta_oi.puts,
+     fmt: x => n0(x * 100) + " Aktien (Gegenwert)", note: "Offene Kontrakte gewichtet mit ihrem Delta – entspricht der Zahl der Aktien, auf die sie wirken"});
+  const lsBars = (m, hide) => {
+    const tot = m.c + m.p, cs = tot ? m.c / tot : 0.5;
+    const row = (lab, w, val, major) => {
+      const inside = w >= 0.3;
+      return `<div class="ls-row${major ? " major" : ""}"><span class="ls-bar" style="width:${(w * 100).toFixed(1)}%"><span>${lab}</span>${inside ? `<span class="num">${pc(w, 0)}</span>` : ""}</span>${inside ? "" : `<span class="ls-out num">${pc(w, 0)}</span>`}</div>`;
+    };
+    return `<div class="ls" data-k="${m.k}"${hide ? " hidden" : ""} role="img" aria-label="${m.lab}: Long ${pc(cs, 0)}, Short ${pc(1 - cs, 0)}">
+      ${row("Long", cs, m.c, cs >= 0.5)}${row("Short", 1 - cs, m.p, cs < 0.5)}
+      <div class="ls-sub"><span>${m.note}</span> · <span>Long (Calls)</span> <span>${m.fmt(m.c)}</span> · <span>Short (Puts)</span> <span>${m.fmt(m.p)}</span></div></div>`;
   };
   const pcTxt = v => v == null ? "–" : v < 0.7 ? "überwiegend Calls – optimistische Positionierung" : v <= 1.0 ? "ausgeglichen" : v <= 1.5 ? "mehr Puts – eher vorsichtig bzw. abgesichert" : "deutlich mehr Puts – starke Absicherung oder Pessimismus";
   const kpi = (lab, val, sub) => `<div class="qr-k"><small>${lab}</small><b class="num">${val}</b><span>${sub || "&nbsp;"}</span></div>`;
   const sf = d.facts?.short_float;
-  return head + `<p class="section-sub">Optionen auf ${esc(D.symbol)}${D.adr ? " (US-Notierung/ADR)" : ""} an US-Börsen · ${D.expiries} Verfallstermine · Stand ${date(D.asof)} · Quelle: Yahoo Finance.
+  return head + `<p class="section-sub">Optionen auf ${esc(D.symbol)}${D.adr ? " (US-Notierung/ADR)" : ""} an US-Börsen · ${D.expiries} Verfallstermine · Stand ${date(D.asof)} · Quelle: ${esc(D.source || "Yahoo Finance")}.
       Calls setzen auf steigende Kurse (long), Puts auf fallende (short) oder dienen als Absicherung.</p>
     <div class="dv-grid">
-      <div class="card pad">${split("Offene Positionen (Open Interest)", D.oi.calls, D.oi.puts, x => n0(x) + " Kontrakte")}
-        ${split("Volumen heute", D.vol.calls, D.vol.puts, x => n0(x) + " Kontrakte")}
-        ${split("Gehandelter Wert heute (Prämien)", D.prem.calls, D.prem.puts, usd)}</div>
+      <div class="card pad">
+        <div class="dv-ls-head"><h3>Long / Short</h3>
+          <div class="seg" id="dv-seg">${modes.map((m, i) => `<button type="button" data-k="${m.k}" class="${i ? "" : "on"}">${m.lab}</button>`).join("")}</div></div>
+        ${modes.map((m, i) => lsBars(m, i > 0)).join("")}</div>
       <div class="card pad"><div class="qr-kpis dv-kpis">
           ${kpi("Put/Call (offen)", D.pc_oi != null ? nf(D.pc_oi, 2) : "–", D.near_pc_oi != null ? "nächste 30 Tage: " + nf(D.near_pc_oi, 2) : "")}
           ${kpi("Put/Call (Volumen)", D.pc_vol != null ? nf(D.pc_vol, 2) : "–", "heute")}
           ${kpi("Volumen heute", usd(D.prem.calls + D.prem.puts), n0(D.vol.calls + D.vol.puts) + " Kontrakte")}
-          ${kpi("Implizite Volatilität", D.iv_atm != null ? pc(D.iv_atm, 1) : "–", "am Geld, ~1–2 Monate")}
+          ${kpi("Implizite Volatilität", D.iv_atm != null ? pc(D.iv_atm, 1) : "–", D.source === "Cboe" ? "für 30 Tage" : "am Geld, ~1–2 Monate")}
         </div>
         <div class="dv-read"><b>Einordnung:</b> ${pcTxt(D.pc_oi)}.${sf != null ? ` Leerverkaufsquote der Aktie: <b class="num">${pc(sf, 1)}</b> des Streubesitzes.` : ""}</div>
         <div class="peer-scroll"><table class="trk dv-tbl"><thead><tr><th>Verfall</th><th class="num">Calls offen</th><th class="num">Puts offen</th><th class="num">Put/Call</th><th class="num">Volumen C / P</th></tr></thead>

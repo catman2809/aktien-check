@@ -5551,7 +5551,63 @@ def _opt_chain(sym, exp):
     return exp, ch.calls, ch.puts
 
 
+CBOE_OPT_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{}.json"
+
+
+def cboe_options(sym, price=None):
+    """Alle Optionen eines US-Werts mit einer Anfrage (Cboe, verzögerte Kurse): Open Interest, Volumen, Delta je Serie.
+    Gleiches Ergebnisformat wie die Yahoo-Variante; None, wenn Cboe den Wert nicht kennt."""
+    d = json.loads(_fetch(CBOE_OPT_URL.format(urllib.parse.quote(sym.replace("-", "."))), timeout=25))
+    data = (d or {}).get("data") or {}
+    opts = data.get("options") or []
+    if not opts:
+        return None
+    today = datetime.now().date()
+    tot = {k: 0.0 for k in ("c_oi", "p_oi", "c_vol", "p_vol", "c_prem", "p_prem", "c_oival", "p_oival", "c_doi", "p_doi")}
+    by_exp, last_trade = {}, ""
+    for o in opts:
+        m_ = re.match(r"^[A-Z.]+(\d{6})([CP])\d{8}$", o.get("option") or "")
+        if not m_:
+            continue
+        exp = f"20{m_.group(1)[:2]}-{m_.group(1)[2:4]}-{m_.group(1)[4:]}"
+        side = "c" if m_.group(2) == "C" else "p"
+        oi, vol = float(o.get("open_interest") or 0), float(o.get("volume") or 0)
+        lp = float(o.get("last_trade_price") or 0)
+        r_ = by_exp.setdefault(exp, {"date": exp, "days": (datetime.strptime(exp, "%Y-%m-%d").date() - today).days,
+                                     "c_oi": 0.0, "p_oi": 0.0, "c_vol": 0.0, "p_vol": 0.0})
+        r_[f"{side}_oi"] += oi
+        r_[f"{side}_vol"] += vol
+        tot[f"{side}_oi"] += oi
+        tot[f"{side}_vol"] += vol
+        tot[f"{side}_prem"] += vol * lp * 100
+        tot[f"{side}_oival"] += oi * lp * 100
+        tot[f"{side}_doi"] += oi * abs(float(o.get("delta") or 0))  # wie viele Aktien die offenen Kontrakte bewegen
+        last_trade = max(last_trade, str(o.get("last_trade_time") or "")) if vol else last_trade
+    rows = sorted(by_exp.values(), key=lambda r_: r_["date"])
+    if tot["c_oi"] + tot["p_oi"] <= 0 and tot["c_vol"] + tot["p_vol"] <= 0:
+        return None
+    near = [r_ for r_ in rows if r_["days"] <= 30]
+    near_c = sum(r_["c_oi"] for r_ in near)
+    iv30 = num(data.get("iv30"))
+    return {"symbol": sym, "currency": "USD", "expiries": len(rows), "source": "Cboe",
+            "asof": (last_trade or str(d.get("timestamp") or ""))[:10] or None,
+            "oi": {"calls": tot["c_oi"], "puts": tot["p_oi"]}, "vol": {"calls": tot["c_vol"], "puts": tot["p_vol"]},
+            "prem": {"calls": tot["c_prem"], "puts": tot["p_prem"]}, "oi_value": {"calls": tot["c_oival"], "puts": tot["p_oival"]},
+            "delta_oi": {"calls": tot["c_doi"], "puts": tot["p_doi"]},
+            "pc_oi": tot["p_oi"] / tot["c_oi"] if tot["c_oi"] else None,
+            "pc_vol": tot["p_vol"] / tot["c_vol"] if tot["c_vol"] else None,
+            "iv_atm": iv30 / 100 if iv30 else None,
+            "near_pc_oi": sum(r_["p_oi"] for r_ in near) / near_c if near_c else None,
+            "by_expiry": rows[:8]}
+
+
 def options_data(sym, price=None):
+    """Optionen über alle Verfallstermine: zuerst Cboe (eine Anfrage), sonst Yahoo (eine Anfrage je Verfallstermin)."""
+    od = safe(lambda: cboe_options(sym, price))
+    return od or yahoo_options(sym, price)
+
+
+def yahoo_options(sym, price=None):
     """Aggregiert alle Verfallstermine (Yahoo, US-Optionsbörsen). None, wenn es keine Optionen gibt."""
     exps = list(safe(lambda: yf.Ticker(sym).options, ()) or ())[:OPT_MAX_EXP]
     if not exps:
@@ -5596,7 +5652,7 @@ def options_data(sym, price=None):
     pc_oi = tot["p_oi"] / tot["c_oi"] if tot["c_oi"] else None
     pc_vol = tot["p_vol"] / tot["c_vol"] if tot["c_vol"] else None
     near = [r_ for r_ in rows if r_["days"] <= 30]
-    return {"symbol": sym, "currency": cur or "USD", "expiries": len(rows),
+    return {"symbol": sym, "currency": cur or "USD", "expiries": len(rows), "source": "Yahoo Finance",
             "asof": last_trade.strftime("%Y-%m-%d") if hasattr(last_trade, "strftime") else None,
             "oi": {"calls": tot["c_oi"], "puts": tot["p_oi"]}, "vol": {"calls": tot["c_vol"], "puts": tot["p_vol"]},
             "prem": {"calls": tot["c_prem"], "puts": tot["p_prem"]}, "oi_value": {"calls": tot["c_oival"], "puts": tot["p_oival"]},
