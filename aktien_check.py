@@ -6663,7 +6663,8 @@ def _depot_from_transactions(recs, split_fn=None):
     # Split-Faktoren je Position (parallel, nur mit Datum und ohne eigene Split-Buchungen)
     keys = [k for k, L in ledger.items() if split_fn and not L["split_rows"] and all(t["date"] for t in L["trades"])]
     factors = {}
-    if keys:
+    if keys:  # ISINs gebündelt bei OpenFIGI abfragen, statt einzeln (Minutenlimit)
+        safe(lambda: figi_prefetch([ledger[k]["meta"]["isin"] for k in keys if ledger[k]["meta"]["isin"]]))
         with ThreadPoolExecutor(max_workers=6) as ex:
             factors = dict(zip(keys, ex.map(lambda k: safe(lambda: split_fn(ledger[k])), keys)))
     out, sold, negative, adjusted = [], 0, [], []
@@ -6756,21 +6757,80 @@ def depot_split_factors(L):
     return out
 
 
-FIGI_SUFFIX = {"GR": ".DE", "US": ""}
+FIGI_SUFFIX = {"GR": ".DE", "GF": ".F", "US": ""}
+FIGI_CACHE = {}           # (ISIN, Börse) -> (Zeit, Treffer)
+FIGI_LOCK = threading.Lock()
 DEPOT_NAME_NOISE = re.compile(r"\((?:[A-Z]|[A-Z]{1,3} ?\d?)\)|\b(?:ADR|ADS|GDR|Reg\.?|Registered|Shares?|Namens-?Aktien?|"
                               r"Inhaber-?Aktien?|Vz\.?|St\.?|Cl(?:ass)?\.? ?[A-C]|Inc\.?|Corp\.?|Ltd\.?|plc|SE|AG|N\.?V\.?|"
                               r"S\.?A\.?|Sp\.?ADR)\b", re.I)
+HOME_SUFFIX = {"GB": ".L", "FR": ".PA", "NL": ".AS", "IT": ".MI", "ES": ".MC", "CH": ".SW", "DK": ".CO", "SE": ".ST",
+               "FI": ".HE", "NO": ".OL", "BE": ".BR", "AT": ".VI", "PT": ".LS", "JP": ".T", "HK": ".HK", "CA": ".TO",
+               "AU": ".AX", "IE": ".IR"}
+
+
+def _figi_chain(isin):
+    return ("US",) if isin.startswith("US") else ("GR", "GF", "US")
+
+
+def figi_prefetch(isins):
+    """OpenFIGI-Zuordnung vieler ISINs auf einmal: bis zu 10 je Anfrage (ohne API-Schlüssel max. 25 Anfragen/Minute),
+    bei Überlastung (429) kurz warten. Füllt FIGI_CACHE für _depot_figi."""
+    todo = {i: list(_figi_chain(i)) for i in dict.fromkeys(i for i in isins if i)}
+    with FIGI_LOCK:
+        while todo:
+            jobs = []
+            for isin, chain in list(todo.items()):
+                while chain and (isin, chain[0]) in FIGI_CACHE and time.time() - FIGI_CACHE[(isin, chain[0])][0] < 7 * 86400:
+                    if FIGI_CACHE[(isin, chain[0])][1]:
+                        chain.clear()
+                        break
+                    chain.pop(0)
+                if not chain:
+                    todo.pop(isin)
+                elif len(jobs) < 10:
+                    jobs.append((isin, chain[0]))
+            if not jobs:
+                break
+            body = json.dumps([{"idType": "ID_ISIN", "idValue": i, "exchCode": e} for i, e in jobs]).encode()
+            data = None
+            for attempt in range(3):
+                try:
+                    req = urllib.request.Request("https://api.openfigi.com/v3/mapping", data=body,
+                                                 headers={**UA, "Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, timeout=15) as r:
+                        data = json.loads(r.read())
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code != 429:
+                        break
+                    wait = num(e.headers.get("ratelimit-reset") or e.headers.get("Retry-After")) or 20
+                    time.sleep(min(65, wait + 1))  # Minutenlimit erreicht -> Freigabe abwarten
+                except Exception:
+                    break
+            if data is None:
+                return  # OpenFIGI nicht erreichbar -> Einzelabfragen bzw. Yahoo-Suche übernehmen
+            for (isin, exch), res in zip(jobs, data):
+                hit = next((x for x in (res or {}).get("data") or [] if x.get("ticker")), None)
+                FIGI_CACHE[(isin, exch)] = (time.time(), hit)
+            time.sleep(0.3)
 
 
 def _depot_figi(isin):
-    """ISIN -> Yahoo-Symbol über OpenFIGI, wenn Yahoos Suche die ISIN nicht kennt (z. B. Alphabet A, TSMC-ADR).
-    US-ISINs über die US-Notierung, sonst zuerst Xetra."""
-    for exch in (("US",) if isin.startswith("US") else ("GR", "US")):
-        data = safe(lambda: openfigi_map("ID_ISIN", isin, exch)) or []
-        d = next((x for x in data if x.get("ticker")), None)
+    """ISIN -> Yahoo-Symbol über OpenFIGI (Hauptnotierung: US-ISINs in den USA, sonst Xetra, dann Frankfurt).
+    Yahoos ISIN-Suche kennt manche Papiere nicht (Alphabet A, TSMC-ADR) oder nennt eine Randbörse zuerst (NextEra -> London)."""
+    for exch in _figi_chain(isin):
+        c = FIGI_CACHE.get((isin, exch))
+        if c and time.time() - c[0] < 7 * 86400:
+            d = c[1]
+        else:
+            data = safe(lambda: openfigi_map("ID_ISIN", isin, exch))
+            if data is None:
+                continue
+            d = next((x for x in data if x.get("ticker")), None)
+            FIGI_CACHE[(isin, exch)] = (time.time(), d)
         if not d:
             continue
-        sym = d["ticker"].replace("/", "-").upper() + FIGI_SUFFIX[exch]
+        sym = d["ticker"].replace("/", "-").replace(" ", "-").upper() + FIGI_SUFFIX[exch]
         res = safe(lambda: search_symbols(sym, include_crypto=False), []) or []
         hit = next((x for x in res if x["symbol"].upper() == sym), None)
         if hit:
@@ -6782,39 +6842,140 @@ def _depot_figi(isin):
     return None
 
 
+def _figi_symbol(isin, exch, suffix):
+    c = FIGI_CACHE.get((isin, exch))
+    if c and time.time() - c[0] < 7 * 86400:
+        d = c[1]
+    else:
+        data = safe(lambda: openfigi_map("ID_ISIN", isin, exch))
+        if data is None:
+            return None
+        d = next((x for x in data if x.get("ticker")), None)
+        FIGI_CACHE[(isin, exch)] = (time.time(), d)
+    return d["ticker"].replace("/", "-").replace(" ", "-").upper() + suffix if d else None
+
+
+def depot_alt_listings(isin):
+    """Weitere Notierungen einer ISIN: USA, Heimatbörse, Xetra, Frankfurt (OpenFIGI)."""
+    cc = (isin or "")[:2]
+    home = [(fx, "." + suf) for suf, (c_, fx) in SUFFIX_MARKET.items() if suf and c_ == cc and fx not in ("GR",)][:1]
+    out = []
+    for exch, suffix in [("US", "")] + home + [("GR", ".DE"), ("GF", ".F")]:
+        sym = _figi_symbol(isin, exch, suffix)
+        if sym and sym not in out:
+            out.append(sym)
+    return out
+
+
+def _pick_listing(res, isin):
+    """Beste Notierung aus Yahoo-Suchtreffern: US-ISIN -> US-Börse, sonst Xetra, dann Heimatbörse; keine Londoner
+    Auslandscodes (0XXX.L) und keine Randbörsen, wenn es Besseres gibt."""
+    cc = (isin or "")[:2]
+    good = [x for x in res if not re.fullmatch(r"0[A-Z0-9]{3}\.L", x["symbol"])] or res
+
+    def rank(x):
+        sym = x["symbol"]
+        suf = "." + sym.rsplit(".", 1)[1] if "." in sym else ""
+        if x.get("crypto"):
+            return 0
+        if cc == "US":
+            return 0 if not suf else 2
+        if suf == ".DE":
+            return 0
+        if suf == HOME_SUFFIX.get(cc):
+            return 1
+        if suf == ".F":
+            return 2
+        return 3 if not suf else 4
+    return sorted(good, key=rank)[0] if good else None
+
+
+def _depot_name_hits(name, isin=""):
+    """Yahoo-Suche über den (bereinigten) Firmennamen; nur Treffer mit gleichem erstem Namenswort."""
+    clean = " ".join(DEPOT_NAME_NOISE.sub(" ", name or "").replace(",", " ").split())
+    if not clean:
+        return []
+    res = safe(lambda: search_symbols(clean, include_crypto=not isin), []) or []
+    want = _plain_name(clean_company_name(clean))[:1]
+    return [x for x in res if want and _plain_name(clean_company_name(x.get("name", "")))[:1] == want]
+
+
+def _listing_rank(x, isin):
+    cc = (isin or "")[:2]
+    sym = x["symbol"]
+    suf = "." + sym.rsplit(".", 1)[1] if "." in sym else ""
+    if x.get("crypto"):
+        return 0
+    if re.fullmatch(r"0[A-Z0-9]{3}\.L", sym):
+        return 9
+    if cc == "US":
+        return 0 if not suf else 5
+    if suf == ".DE":
+        return 0
+    if suf == HOME_SUFFIX.get(cc):
+        return 1
+    if suf == ".F":
+        return 2
+    return 3 if not suf else 4
+
+
 def depot_resolve(p_):
-    """Yahoo-Symbol zu einer Position: Symbol, sonst ISIN (Yahoo-Suche, dann OpenFIGI), sonst Name
-    (WKN ist bei Yahoo nicht suchbar)."""
+    """Yahoo-Symbol zu einer Position. Mit Symbol: genau dieses. Mit ISIN: Kandidaten aus OpenFIGI, Yahoos ISIN-Suche
+    und (falls nötig) der Namenssuche; gewählt wird die beste Notierung (US-Aktien an der US-Börse, sonst Xetra/Heimatbörse).
+    OpenFIGI allein reicht nicht (Bloomberg-Kürzel weichen teils ab, z. B. iShares Core DAX: DAXEX statt EXS1),
+    Yahoos ISIN-Suche allein auch nicht (kennt manche ISINs nicht, nennt teils Randbörsen zuerst)."""
     key = p_.get("symbol") or p_.get("isin") or p_.get("name") or p_.get("wkn")
     hit = DEPOT_SYM_CACHE.get(key)
     if hit and time.time() - hit[0] < (7 * 86400 if hit[1] else 6 * 3600):  # „nicht gefunden“ nur kurz merken
         return hit[1]
-    found = None
-    clean_name = " ".join(DEPOT_NAME_NOISE.sub(" ", p_.get("name") or "").replace(",", " ").split())
-    for q in (p_.get("symbol"), p_.get("isin"), "figi", clean_name):
-        if not q:
-            continue
-        if q == "figi":
-            found = _depot_figi(p_["isin"]) if p_.get("isin") else None
-            if found:
-                break
-            continue
+    found, isin = None, p_.get("isin") or ""
+    if p_.get("symbol"):
+        q = p_["symbol"]
         res = safe(lambda: search_symbols(q, include_crypto=True), []) or []
-        if q == p_.get("symbol"):
-            res = [x for x in res if x["symbol"].upper() == q.upper()] or res[:1]
-        elif q == clean_name:
-            # nur über den Namen gesucht: erstes Namenswort muss passen, sonst lieber „nicht zugeordnet“ als ein falsches Papier
-            want = _plain_name(clean_company_name(q))[:1]
-            res = [x for x in res if want and _plain_name(clean_company_name(x.get("name", "")))[:1] == want]
-            if p_.get("isin", "").startswith("US"):
-                res = [x for x in res if "." not in x["symbol"]] or res
-        if res:
-            # bei Nicht-US-ISINs bevorzugt die Xetra-Notierung (Euro, gute Datenqualität)
-            found = next((x for x in res if x["symbol"].endswith(".DE")), None) if p_.get("isin", "")[:2] not in ("", "US") else None
-            found = found or res[0]
-            break
+        found = next((x for x in res if x["symbol"].upper() == q.upper()), None) or (res[0] if res else None)
+    if not found and isin:
+        cands = []
+        f_ = safe(lambda: _depot_figi(isin))
+        if f_:
+            cands.append(f_)
+        cands += safe(lambda: search_symbols(isin, include_crypto=False), []) or []
+        best = min(cands, key=lambda x: _listing_rank(x, isin)) if cands else None
+        # Namenssuche nur, wenn zur ISIN keine Xetra-/Heimat-/Frankfurt-Notierung bekannt ist – sie kann eine andere
+        # Aktiengattung liefern (Alibaba: ADR statt Hongkong-Aktie, 1 ADR = 8 Aktien)
+        if best is None or _listing_rank(best, isin) >= 3:
+            cands += _depot_name_hits(p_.get("name"), isin)
+            best = min(cands, key=lambda x: _listing_rank(x, isin)) if cands else None
+        found = best
+    if not found and not isin:
+        res = _depot_name_hits(p_.get("name"))
+        found = res[0] if res else None
+    if found and found.get("name"):
+        found = dict(found, name=" ".join(found["name"].split()))
     DEPOT_SYM_CACHE[key] = (time.time(), found)
     return found
+
+
+DEPOT_META_CACHE = {}
+
+
+def depot_main_listing(name, isin=""):
+    """Hauptnotierung über die Namenssuche (für Branche und Land, wenn die gewählte Notierung sie nicht liefert)."""
+    k = (name or "").lower()
+    hit = DEPOT_META_CACHE.get(k)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1]
+    res = _depot_name_hits(name, isin or "x")
+    best = None
+    for x in res:
+        suf = "." + x["symbol"].rsplit(".", 1)[1] if "." in x["symbol"] else ""
+        score = (0 if x.get("sector") else 1, 0 if suf in (".HK", ".SS", ".SZ", ".TW") else 1 if suf == "" else 2)
+        if best is None or score < best[0]:
+            best = (score, x)
+    DEPOT_META_CACHE[k] = (time.time(), best[1] if best else None)
+    return best[1] if best else None
+
+
+SUFFIX_COUNTRY_ISO = {".HK": "CN", ".SS": "CN", ".SZ": "CN", ".TW": "TW", ".SI": "SG", "": "US"}
 
 
 def _depot_listing_currency(sym):
@@ -6847,8 +7008,29 @@ def _depot_share(items):
 def analyze_depot(positions):
     """Struktur, Konzentration, Rendite, Risiko, Dividenden und Prüfpunkte eines Depots (Werte in Euro)."""
     import pandas as pd
+    safe(lambda: figi_prefetch([p_.get("isin") for p_ in positions if p_.get("isin") and not p_.get("symbol")]))
     with ThreadPoolExecutor(max_workers=6) as ex:
         hits = list(ex.map(lambda p_: safe(lambda: depot_resolve(p_)), positions))
+    # Notierungen mit lückenhafter Kurshistorie (z. B. Accenture auf Xetra) gegen die beste Notierung derselben ISIN tauschen
+    syms = sorted({h["symbol"] for h in hits if h and not h.get("crypto")})
+    pre = safe(lambda: yf.download(syms, period="6mo", auto_adjust=True, progress=False, threads=True)["Close"]) if syms else None
+    if pre is not None and isinstance(pre, pd.Series):
+        pre = pre.to_frame(syms[0])
+    count = (lambda df_, s_: int(df_[s_].dropna().size) if df_ is not None and s_ in df_ else 0)
+    for i_, (p_, h) in enumerate(zip(positions, hits)):
+        if not h or h.get("crypto") or not p_.get("isin") or count(pre, h["symbol"]) >= 115:
+            continue
+        alts = [x for x in safe(lambda: depot_alt_listings(p_["isin"]), []) or [] if x != h["symbol"]]
+        alts += [x["symbol"] for x in _depot_name_hits(p_.get("name"), p_["isin"]) if x["symbol"] not in alts + [h["symbol"]]][:4]
+        if not alts:
+            continue
+        alt_df = safe(lambda: yf.download(alts, period="6mo", auto_adjust=True, progress=False, threads=True)["Close"])
+        if alt_df is not None and isinstance(alt_df, pd.Series):
+            alt_df = alt_df.to_frame(alts[0])
+        best = max(alts, key=lambda x: count(alt_df, x))
+        if count(alt_df, best) > count(pre, h["symbol"]) + 20:
+            hits[i_] = dict(h, symbol=best)
+            DEPOT_SYM_CACHE[p_.get("symbol") or p_.get("isin")] = (time.time(), hits[i_])
     syms = sorted({h["symbol"] for h in hits if h})
     with ThreadPoolExecutor(max_workers=6) as ex:
         curs = dict(zip(syms, ex.map(_depot_listing_currency, syms)))
@@ -6901,8 +7083,14 @@ def analyze_depot(positions):
         cost = p_["cost"] * buy_fx if p_.get("cost") else (p_["buy"] * buy_fx * qty if p_.get("buy") and qty else None)
         kind = "Krypto" if h and h.get("crypto") else "ETF" if h and h.get("etf") else "Aktie" if h else "Nicht zugeordnet"
         iso = (p_.get("isin") or "")[:2]
-        if iso in TAX_HAVEN_ISO and sym and "." in sym:  # Sitz in Steueroase -> Land der Börsennotierung
-            iso = (SUFFIX_MARKET.get(sym.rsplit(".", 1)[1]) or (iso,))[0]
+        main = None
+        if kind == "Aktie" and (iso in TAX_HAVEN_ISO or not (h or {}).get("sector")):
+            main = safe(lambda: depot_main_listing((h or {}).get("name") or p_.get("name"), p_.get("isin")))
+        if iso in TAX_HAVEN_ISO:  # Sitz in Steueroase -> Land der Hauptnotierung (Tencent, Alibaba: Hongkong -> China)
+            msym = (main or {}).get("symbol") or ""
+            iso = SUFFIX_COUNTRY_ISO.get("." + msym.rsplit(".", 1)[1] if "." in msym else "", iso) if msym else iso
+        if main and not (h or {}).get("sector"):
+            h = dict(h, sector=main.get("sector") or "", industry=main.get("industry") or "")
         if not iso and sym and kind == "Aktie":
             suf = sym.rsplit(".", 1)[1] if "." in sym else ""
             iso = (SUFFIX_MARKET.get(suf) or (None,))[0] if suf else "US"
@@ -8289,7 +8477,9 @@ def cache_rules():
             ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300),
             ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200), ("Depot-Symbole", DEPOT_SYM_CACHE, 7 * 86400, 3000),
             ("Depot-Analysen", DEPOT_CACHE, 900, 30),
-            ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500)]
+            ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500),
+            ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
+            ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000)]
 
 
 def prune_caches():
