@@ -6435,7 +6435,7 @@ def analyze(query):
 DEPOT_MAX_POSITIONS = 200
 DEPOT_MAX_CSV = 1_500_000           # Zeichen
 DEPOT_CACHE = {}                    # Benutzer -> (Zeit, Signatur, Ergebnis)
-DEPOT_JOBS = {}                     # Benutzer -> laufende/fertige Analyse (große Depots brauchen länger als ein Request darf)
+DEPOT_JOBS = {}                     # Auftragsnummer -> laufende/fertige Analyse (große Depots brauchen länger als ein Request darf)
 DEPOT_SYM_CACHE = {}                # Kennung -> (Zeit, Treffer)
 DEPOT_BENCH = ("EUNL.DE", "MSCI World (iShares Core, EUR)")
 DEPOT_RF = 0.025                    # risikoloser Zins für die Sharpe-Ratio (Euro)
@@ -6739,8 +6739,11 @@ def _depot_from_transactions(recs, split_fn=None):
 
 def depot_job_start(user, fn):
     """Führt die Depotanalyse im Hintergrund aus; der Browser fragt mit der Auftragsnummer nach dem Ergebnis."""
-    job = {"id": secrets.token_hex(8), "started": time.time(), "done": False, "res": None, "error": None}
-    DEPOT_JOBS[user] = job
+    now = time.time()
+    for k in [k for k, j in list(DEPOT_JOBS.items()) if now - j["started"] > 1800]:
+        DEPOT_JOBS.pop(k, None)  # abgeholte bzw. vergessene Ergebnisse aufräumen
+    job = {"id": secrets.token_hex(8), "user": user, "started": now, "done": False, "res": None, "error": None}
+    DEPOT_JOBS[job["id"]] = job
 
     def run():
         try:
@@ -6756,8 +6759,9 @@ def depot_job_start(user, fn):
 
 
 def depot_job_running(user):
-    job = DEPOT_JOBS.get(user)
-    return job if job and not job["done"] and time.time() - job["started"] < 900 else None
+    """Neuester noch laufender Auftrag des Benutzers (z. B. ein Upload, während die Seite neu geladen wird)."""
+    jobs = [j for j in list(DEPOT_JOBS.values()) if j["user"] == user and not j["done"] and time.time() - j["started"] < 900]
+    return max(jobs, key=lambda j: j["started"]) if jobs else None
 
 
 DEPOT_SPLIT_CACHE = {}
@@ -9672,8 +9676,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/depot":
             job_id = (qs.get("job") or [""])[0]
             if job_id:
-                job = DEPOT_JOBS.get(user)
-                if not job or job["id"] != job_id:
+                job = DEPOT_JOBS.get(job_id)
+                if not job or job["user"] != user:
                     return self.send_json({"error": "Die Analyse wurde nicht gefunden. Bitte die Datei erneut hochladen."}, 404)
                 if not job["done"]:
                     return self.send_json({"pending": job_id})

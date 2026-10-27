@@ -1511,6 +1511,17 @@ class TestDepotHTTP(TestHTTP):
         self.assertEqual(st, 400)
         self.assertIn("Kopfzeile", d["error"])
         self.assertEqual(self.call(op, "/api/depot?job=falsch")[0], 404)
+        # Seite öffnen startet eine Analyse, ein Upload direkt danach eine zweite: beide bleiben abrufbar
+        import unittest.mock as um
+        a.user_space("admin")["depot"] = {"positions": [{"isin": "DE0007164600", "qty": 1}], "saved": "x", "file": "d.csv"}
+        a.DEPOT_CACHE.clear()
+        slow = lambda *x: (time.sleep(0.3), {"positions": [], "unresolved": []})[1]
+        with um.patch.object(a, "analyze_depot", side_effect=slow):
+            st1, _, b1 = self.call(op, "/api/depot")
+            st2, _, b2 = self.call(op, "/api/depot", {"csv": "ISIN;Stück\nDE0007164600;10\n", "filename": "e.csv"})
+            self.assertNotEqual(json.loads(b1)["pending"], json.loads(b2)["pending"])
+            self.assertEqual(self.wait(op, st1, b1)[0], 200)
+            self.assertEqual(self.wait(op, st2, b2)[1]["file"], "e.csv")
         self.assertEqual(self.call(op, "/api/depot", {"action": "delete"})[0], 200)
         self.assertNotIn("depot", a.user_space("admin"))
         self.assertEqual(json.loads(self.call(op, "/api/depot")[2]), {"empty": True})

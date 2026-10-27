@@ -1863,15 +1863,16 @@ function showDepot() {
   $("#subnav").style.display = "none";
   navTo("?view=depot");
   renderDepot(); window.scrollTo({top: 0});
-  const my = runId;
-  api("/api/depot").then(depotWait).then(d => { if (my !== runId) return; DEPOT = d.empty ? null : d; renderDepot(); })
-    .catch(e => { if (my !== runId || e.message === "login") return; depotErr = e.message; renderDepot(); });
+  const my = runId, seq = ++depotSeq;
+  api("/api/depot").then(d => depotWait(d, seq)).then(d => { if (my !== runId || seq !== depotSeq) return; DEPOT = d.empty ? null : d; depotBusy = ""; renderDepot(); })
+    .catch(e => { if (my !== runId || seq !== depotSeq || e.message === "login") return; depotErr = e.message; renderDepot(); });
 }
 
-async function depotWait(d) {
+let depotSeq = 0;  // jede neue Anfrage (Seite öffnen, Upload) löst die vorherige ab
+async function depotWait(d, seq) {
   // große Depots werden im Hintergrund analysiert: so lange nachfragen, bis das Ergebnis da ist
   const t0 = Date.now();
-  while (d && d.pending) {
+  while (d && d.pending && seq === depotSeq) {
     if (Date.now() - t0 > 600000) throw new Error("Die Analyse dauert ungewöhnlich lange. Bitte später erneut öffnen.");
     await new Promise(r => setTimeout(r, 2000));
     d = await api("/api/depot?job=" + encodeURIComponent(d.pending));
@@ -1888,12 +1889,12 @@ async function depotUpload(file) {
   try { text = new TextDecoder("utf-8", {fatal: true}).decode(buf); } catch (e) { text = new TextDecoder("windows-1252").decode(buf); }
   const save = true;  // Depot immer (verschlüsselt) im Konto speichern
   depotBusy = "Depot wird eingelesen und analysiert …"; renderDepot();
-  const my = runId;
+  const my = runId, seq = ++depotSeq;
   try {
-    const d = await depotWait(await api("/api/depot", {csv: text, save, filename: file.name}));
-    if (my !== runId) return;
+    const d = await depotWait(await api("/api/depot", {csv: text, save, filename: file.name}), seq);
+    if (my !== runId || seq !== depotSeq) return;
     DEPOT = d;
-  } catch (e) { if (e.message !== "login") depotErr = e.message; }
+  } catch (e) { if (seq !== depotSeq) return; if (e.message !== "login") depotErr = e.message; }
   depotBusy = ""; renderDepot();
 }
 
