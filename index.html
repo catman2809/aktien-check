@@ -334,8 +334,6 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-line svg{width:100%;height:auto;display:block} .dp-ax{font-size:11px;fill:var(--text-3)}
 .dp-line-leg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--text-2);margin-bottom:6px}
 .dp-line-leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
-.dp-rate-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
-.dp-groups{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
 .dp-tbl td,.dp-tbl th{white-space:nowrap} .dp-tbl td small{display:block}
 .dp-intro ul{margin:6px 0 10px;padding-left:20px;font-size:14px;color:var(--text-2)}
 @media (max-width:600px){.dp-donut-body{flex-direction:column;align-items:stretch}.dp-donut svg{align-self:center}.dp-kpi b{font-size:18px}}
@@ -1855,7 +1853,7 @@ function welcome() {
 }
 
 /* Depot-Analyse: CSV-Export des Brokers hochladen -> Struktur, Risiko, Dividenden, Prüfpunkte */
-let DEPOT = null, depotView = false, depotBusy = "", depotErr = "", depotRatings = {};
+let DEPOT = null, depotView = false, depotBusy = "", depotErr = "";
 const DP_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
 const DP_TEMPLATE = "ISIN;Name;Stück;Kaufkurs\nDE0007164600;SAP SE;10;120,00\nUS0378331005;Apple Inc.;5;145,30\nIE00B4L5Y983;iShares Core MSCI World;40;75,20\n";
 
@@ -1877,12 +1875,12 @@ async function depotUpload(file) {
   let text;
   try { text = new TextDecoder("utf-8", {fatal: true}).decode(buf); } catch (e) { text = new TextDecoder("windows-1252").decode(buf); }
   const save = $("#dp-save") ? $("#dp-save").checked : true;
-  depotBusy = "Depot wird eingelesen und analysiert … (je nach Größe 5–30 Sekunden)"; renderDepot();
+  depotBusy = "Depot wird eingelesen und analysiert …"; renderDepot();
   const my = runId;
   try {
     const d = await api("/api/depot", {csv: text, save, filename: file.name});
     if (my !== runId) return;
-    DEPOT = d; depotRatings = {};
+    DEPOT = d;
   } catch (e) { if (e.message !== "login") depotErr = e.message; }
   depotBusy = ""; renderDepot();
 }
@@ -1962,9 +1960,6 @@ function renderDepot() {
   let body = "";
   if (D && S) {
     const P = D.positions, A = D.alloc;
-    const rated = P.filter(p => depotRatings[p.symbol]?.label);
-    const groupShare = g => rated.filter(p => depotRatings[p.symbol].group === g).reduce((a, p) => a + p.weight, 0);
-    const ratedW = rated.reduce((a, p) => a + p.weight, 0);
     body = `
     ${(D.unresolved || []).length ? `<div class="note dp-note">Nicht zugeordnet (fehlen in der Auswertung): ${esc(D.unresolved.join(", "))}</div>` : ""}
     ${(D.notes || []).map(n => `<div class="note dp-note">${esc(n)}</div>`).join("")}
@@ -1997,21 +1992,14 @@ function renderDepot() {
     ${dpLine(D.chart)}
     <h2 class="section">Positionen</h2>
     <div class="card pad">
-      <div class="dp-rate-bar">
-        <button class="btn" id="dp-rate" type="button" ${depotBusy ? "disabled" : ""}>${rated.length ? "Einschätzungen aktualisieren" : "Einschätzungen der App laden"}</button>
-        <span class="stamp" id="dp-rate-st">${rated.length ? `${rated.length} von ${P.filter(p => p.symbol).length} bewertet` : "Analysiert jede Position einzeln (dauert etwa 5–10 Sekunden je Position)."}</span></div>
-      ${ratedW > 0 ? `<div class="dp-groups">${[["Kaufen", "pos"], ["Halten", "neu"], ["Verkaufen", "neg"]].map(([g, t]) =>
-        `<span class="tone ${t}">${g} ${pc(groupShare(g) / ratedW, 0)}</span>`).join("")}<span class="stamp">nach Depotanteil der bewerteten Positionen</span></div>` : ""}
       <div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
-        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th><th>Branche</th><th>Land</th><th>Einschätzung</th></tr></thead>
-      <tbody>${P.map(p => { const R_ = depotRatings[p.symbol];
-        return `<tr><td><span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
+        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th><th>Branche</th><th>Land</th></tr></thead>
+      <tbody>${P.map(p => `<tr><td><span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
         <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
         <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
         <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
         <td class="num ${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</td>
-        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td><td>${esc(p.sector)}</td><td>${esc(p.country)}</td>
-        <td>${R_ ? (R_.label ? `<span class="tone ${groupTone[R_.group] || ""}">${esc(R_.label)}</span>${R_.fair != null ? `<small class="stamp">fair ${pc(R_.fair, 0, true)}</small>` : ""}` : `<span class="stamp">${esc(R_.err || "…")}</span>`) : "–"}</td></tr>`; }).join("")}</tbody></table></div>
+        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td><td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>
       <div class="stamp" style="margin-top:8px"><span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
         ${D.file ? `<span>Datei:</span> <span translate="no">${esc(D.file)}</span>` : ""}${D.saved ? ` <span>· gespeichert am ${esc(D.saved)}</span>` : ""}
         <span>Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.</span></div></div>`;
@@ -2020,8 +2008,7 @@ function renderDepot() {
       <li>Aufteilung nach Einzelpositionen, Branchen (mit Durchschau in ETFs), Ländern, Anlageklassen und Währungen</li>
       <li>Depotwert, Gewinn/Verlust je Position, erwartete Dividenden pro Jahr</li>
       <li>Rendite, Schwankung, größter Rückgang, Beta und Sharpe-Ratio der letzten 12 Monate im Vergleich zum MSCI World</li>
-      <li>Depot-Check: Klumpenrisiken, Streuung, Heimatmarkt-Neigung, Währungsrisiko, ähnlich verlaufende Positionen</li>
-      <li>Auf Wunsch die Einschätzung der App für jede Position</li></ul>
+      <li>Depot-Check: Klumpenrisiken, Streuung, Heimatmarkt-Neigung, Währungsrisiko, ähnlich verlaufende Positionen</li></ul>
       <p class="stamp">Die Datei wird nur auf dem Server ausgewertet. Gespeichert werden – wenn du es möchtest – nur Wertpapier, Stückzahl und Kaufkurs, verschlüsselt in deinem Konto.</p></div>`;
   }
   $("#out").innerHTML = `<section class="dp">
@@ -2048,10 +2035,9 @@ function bindDepot() {
   };
   if ($("#dp-del")) $("#dp-del").onclick = async () => {
     if (!confirm("Gespeichertes Depot wirklich löschen?")) return;
-    try { await api("/api/depot", {action: "delete"}); DEPOT = null; depotRatings = {}; } catch (e) { depotErr = e.message; }
+    try { await api("/api/depot", {action: "delete"}); DEPOT = null; } catch (e) { depotErr = e.message; }
     renderDepot();
   };
-  if ($("#dp-rate")) $("#dp-rate").onclick = () => depotRate();
   document.querySelectorAll(".dp-tbl a[data-q]").forEach(a => a.onclick = e => { e.preventDefault(); depotView = false; $("#q").value = a.dataset.q; run(a.dataset.q); });
   // Tooltips: Kreisdiagramme und Verlaufslinie
   let tip = $("#dp-tip");
@@ -2077,31 +2063,6 @@ function bindDepot() {
     };
     hit.onmouseleave = () => { cross.style.display = "none"; hide(); };
   }
-}
-
-async function depotRate() {
-  if (!DEPOT) return;
-  const todo = DEPOT.positions.filter(p => p.symbol);
-  const my = runId;
-  let done = 0;
-  const total = todo.length;
-  const st = () => { const el = $("#dp-rate-st"); if (el) el.textContent = `${done} von ${total} bewertet …`; };
-  todo.forEach(p => { depotRatings[p.symbol] = {label: null}; });
-  renderDepot(); st();
-  const worker = async () => {
-    while (todo.length) {
-      const p = todo.shift();
-      try {
-        const r = await api("/api/analyze?q=" + encodeURIComponent(p.symbol));
-        depotRatings[p.symbol] = {label: r.rating?.label, group: r.rating?.group, fair: r.fair?.upside};
-      } catch (e) { depotRatings[p.symbol] = {label: null, err: "nicht verfügbar"}; }
-      done++;
-      if (my !== runId) return;
-      renderDepot(); st();
-    }
-  };
-  await Promise.all([worker(), worker()]);
-  renderDepot();
 }
 
 /* Glossar: Fachbegriffe antippen -> kurze Erklärung */
