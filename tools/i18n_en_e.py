@@ -124,6 +124,12 @@ DEPOT_WILD = [
     ("Umsatzliste erkannt: {0} Käufe und {1} Verkäufe verrechnet, {2} andere Buchungen (z. B. Dividenden, Gebühren, Ein- und Auszahlungen) nicht berücksichtigt.",
      "Transaction list detected: {0} purchases and {1} sales netted, {2} other bookings (e.g. dividends, fees, deposits and withdrawals) ignored."),
 ]
+DEPOT_WILD += [
+    ("Aktiensplits berücksichtigt (Käufe/Verkäufe vor dem Split in heutige Stück umgerechnet): {*}.",
+     "Stock splits taken into account (purchases/sales before the split converted into today's shares): {*}."),
+    ("Mehr Verkäufe als Käufe in der Datei – nicht angezeigt: {*}. Vermutlich fehlen ältere Käufe im Export; bitte den Zeitraum ab Depoteröffnung exportieren.",
+     "More sales than purchases in the file – not shown: {*}. Older purchases are probably missing from the export; please export the period since the account was opened."),
+]
 DEPOT_EXACT.update({
     "{0} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.": "{0} positions were sold completely and are no longer in the portfolio.",
     "{0} stornierte oder abgelehnte Aufträge übersprungen.": "{0} cancelled or rejected orders skipped.",

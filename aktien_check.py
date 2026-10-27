@@ -6541,7 +6541,7 @@ def _depot_num(s, dec_comma):
     return num(s)
 
 
-def parse_depot_csv(text):
+def parse_depot_csv(text, split_fn=None):
     """Liest gängige Depot-Exporte (comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic …) oder eine
     eigene CSV mit Spalten wie ISIN/Symbol/Name, Stück, Kaufkurs. Gibt (Positionen, Hinweise) zurück."""
     if not text or not text.strip():
@@ -6594,7 +6594,7 @@ def parse_depot_csv(text):
     keys = [r_["key"] for r_ in recs]
     is_tx = (kinds.count("buy") + kinds.count("sell") > 0) or ("date" in cols and len(set(keys)) < len(keys))
     if is_tx:
-        return _depot_from_transactions(recs)
+        return _depot_from_transactions(recs, split_fn)
     out, notes, seen = [], [], {}
     for rec in recs:
         qty, val, key = rec["qty"], rec["value"], rec["key"]
@@ -6622,14 +6622,16 @@ def parse_depot_csv(text):
     return out, notes
 
 
-def _depot_from_transactions(recs):
+def _depot_from_transactions(recs, split_fn=None):
     """Umsatzliste (Käufe, Verkäufe, Sparpläne, Dividenden …) -> aktueller Bestand. Käufe erhöhen, Verkäufe senken den
     Bestand; vollständig verkaufte Positionen entfallen. Einstandskurs nach der Durchschnittsmethode (ein Verkauf senkt
-    den Einstand anteilig). Dividenden, Gebühren, Ein-/Auszahlungen und stornierte Aufträge werden ignoriert."""
-    stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0, "corp": 0}
+    den Einstand anteilig). Dividenden, Gebühren, Ein-/Auszahlungen und stornierte Aufträge werden ignoriert.
+    Aktiensplits: Split-Buchungen mit Stückzahl zählen als Zu-/Abgang; sonst rechnet split_fn (Split-Historie von Yahoo)
+    Käufe und Verkäufe vor dem Split in heutige Stück um."""
+    stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0}
     # chronologisch; Exporte stehen oft mit der neuesten Buchung oben
     order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", i)) if any(r_["date"] for r_ in recs) else range(len(recs))
-    pos = {}
+    ledger = {}
     for i in order:
         r_ = recs[i]
         if r_["status"] == "skip" or r_["kind"] == "skip":
@@ -6637,36 +6639,60 @@ def _depot_from_transactions(recs):
             continue
         qty = r_["qty"]
         kind = r_["kind"] or ("sell" if qty is not None and qty < 0 else "buy" if qty else "other")
-        if kind == "corp":
-            kind = "sell" if qty and qty < 0 else "buy" if qty else "other"
-        if kind in ("other", "split") or not qty:
-            stats["split" if kind == "split" else "other"] += 1
+        L = None
+        if kind in ("split", "corp"):
+            if not qty:
+                stats["split" if kind == "split" else "other"] += 1
+                continue
+            if kind == "split":  # Split mit Stückzahl: Zu-/Abgang ohne Einstand
+                stats["split"] += 1
+                L = ledger.setdefault(r_["key"], {"meta": r_, "trades": [], "split_rows": False})
+                L["split_rows"] = True
+                L["trades"].append({"date": r_["date"], "kind": "delta", "q": qty, "cost": 0.0, "price": None})
+                continue
+            kind = "sell" if qty < 0 else "buy"
+        if kind == "other" or not qty:
+            stats["other"] += 1
             continue
         stats[kind] += 1
         q = abs(qty)
-        p_ = pos.setdefault(r_["key"], {"isin": r_["isin"], "wkn": r_["wkn"], "symbol": r_["symbol"], "name": r_["name"],
-                                        "qty": 0.0, "cost": 0.0, "cur": r_["cur"], "cost_ok": True})
-        if kind == "buy":
-            px = r_["price"] or r_["buy"]
-            trade = q * px if px else abs(r_["amount"] or r_["value"] or 0) or None
-            if trade is None:
-                p_["cost_ok"] = False
-            p_["cost"] += trade or 0.0
-            p_["qty"] += q
-        else:
-            if p_["qty"] > 1e-9:
-                p_["cost"] -= p_["cost"] * min(1.0, q / p_["qty"])
-            p_["qty"] -= q
-        if abs(p_["qty"]) < 1e-6:
-            p_["qty"], p_["cost"] = 0.0, 0.0
-    out, sold, negative = [], 0, 0
-    for p_ in pos.values():
-        if p_["qty"] > 1e-6:
-            out.append({"isin": p_["isin"], "wkn": p_["wkn"], "symbol": p_["symbol"], "name": p_["name"], "qty": p_["qty"],
-                        "buy": p_["cost"] / p_["qty"] if p_["cost_ok"] and p_["cost"] > 0 else None, "cost": None,
-                        "value": None, "cur": p_["cur"]})
-        elif p_["qty"] < -1e-6:
-            negative += 1
+        px = r_["price"] or r_["buy"]
+        cost = (q * px if px else abs(r_["amount"] or r_["value"] or 0) or None) if kind == "buy" else None
+        L = ledger.setdefault(r_["key"], {"meta": r_, "trades": [], "split_rows": False})
+        L["trades"].append({"date": r_["date"], "kind": kind, "q": q, "cost": cost, "price": px})
+    # Split-Faktoren je Position (parallel, nur mit Datum und ohne eigene Split-Buchungen)
+    keys = [k for k, L in ledger.items() if split_fn and not L["split_rows"] and all(t["date"] for t in L["trades"])]
+    factors = {}
+    if keys:
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            factors = dict(zip(keys, ex.map(lambda k: safe(lambda: split_fn(ledger[k])), keys)))
+    out, sold, negative, adjusted = [], 0, [], []
+    for key, L in ledger.items():
+        fac = factors.get(key) or [1.0] * len(L["trades"])
+        qty, cost, cost_ok = 0.0, 0.0, True
+        for t, f in zip(L["trades"], fac):
+            q = t["q"] * f
+            if t["kind"] == "buy":
+                if t["cost"] is None:
+                    cost_ok = False
+                cost += t["cost"] or 0.0
+                qty += q
+            elif t["kind"] == "sell":
+                if qty > 1e-9:
+                    cost -= cost * min(1.0, q / qty)
+                qty -= q
+            else:
+                qty += q
+            if abs(qty) < 1e-6:
+                qty, cost = 0.0, 0.0
+        m_ = L["meta"]
+        if any(abs(f - 1) > 1e-9 for f in fac):
+            adjusted.append(m_["name"] or m_["isin"] or m_["symbol"])
+        if qty > 1e-6:
+            out.append({"isin": m_["isin"], "wkn": m_["wkn"], "symbol": m_["symbol"], "name": m_["name"], "qty": qty,
+                        "buy": cost / qty if cost_ok and cost > 0 else None, "cost": None, "value": None, "cur": m_["cur"]})
+        elif qty < -1e-6:
+            negative.append(m_["name"] or m_["isin"] or m_["symbol"])
         else:
             sold += 1
     notes = [f"Umsatzliste erkannt: {stats['buy']} Käufe und {stats['sell']} Verkäufe verrechnet, "
@@ -6675,14 +6701,59 @@ def _depot_from_transactions(recs):
         notes.append(f"{sold} Positionen wurden vollständig verkauft und sind nicht mehr im Depot.")
     if stats["skip"]:
         notes.append(f"{stats['skip']} stornierte oder abgelehnte Aufträge übersprungen.")
+    if adjusted:
+        notes.append("Aktiensplits berücksichtigt (Käufe/Verkäufe vor dem Split in heutige Stück umgerechnet): "
+                     + ", ".join(adjusted[:12]) + ".")
     if negative:
-        notes.append(f"Bei {negative} Positionen enthält die Datei mehr Verkäufe als Käufe – vermutlich fehlen ältere Käufe "
-                     "im Export. Diese Positionen werden nicht angezeigt; bitte den Zeitraum ab Depoteröffnung exportieren.")
-    if stats["split"]:
-        notes.append(f"{stats['split']} Aktiensplits in der Datei – die Stückzahl der betroffenen Positionen kann abweichen.")
+        notes.append("Mehr Verkäufe als Käufe in der Datei – nicht angezeigt: " + ", ".join(negative[:12])
+                     + ". Vermutlich fehlen ältere Käufe im Export; bitte den Zeitraum ab Depoteröffnung exportieren.")
     if not out:
         raise ValueError("Nach Verrechnung aller Käufe und Verkäufe ist kein Bestand übrig.")
     return out[:DEPOT_MAX_POSITIONS], notes
+
+
+DEPOT_SPLIT_CACHE = {}
+
+
+def depot_split_factors(L):
+    """Umrechnungsfaktor je Buchung für Aktiensplits nach dem Buchungsdatum (Split-Historie von Yahoo).
+    Manche Broker rechnen alte Buchungen bereits auf die neue Stückzahl um – daher wird bei Buchungen mit Kurs geprüft,
+    ob der Kurs zum Vor-Split-Kurs passt (dann umrechnen) oder schon zum angepassten Kurs (dann nicht)."""
+    hit = depot_resolve(L["meta"])
+    if not hit or hit.get("crypto"):
+        return None
+    sym = hit["symbol"]
+    c = DEPOT_SPLIT_CACHE.get(sym)
+    if not c or time.time() - c[0] > 7 * 86400:
+        sp = safe(lambda: yf.Ticker(sym).splits)
+        splits = [(d.strftime("%Y-%m-%d"), float(v)) for d, v in sp.items() if num(v) and float(v) > 0] if sp is not None else []
+        DEPOT_SPLIT_CACHE[sym] = c = (time.time(), splits)
+    splits = c[1]
+    first_ = min(t["date"] for t in L["trades"])
+    splits = [(d, r) for d, r in splits if d > first_ and abs(r - 1) > 1e-9]
+    if not splits:
+        return None
+    hist = None
+    if any(t["price"] for t in L["trades"]):  # split-bereinigte Schlusskurse für die Plausibilitätsprüfung
+        hist = safe(lambda: yf.Ticker(sym).history(start=first_, auto_adjust=False)["Close"])
+        if hist is not None:
+            hist.index = hist.index.tz_localize(None) if hist.index.tz is not None else hist.index
+    k_cur = fx_rate(safe(lambda: yf.Ticker(sym).fast_info.currency) or "USD", L["meta"].get("cur") or "EUR")
+    out = []
+    for t in L["trades"]:
+        ratio = 1.0
+        for d, r in splits:
+            if t["date"] < d:
+                ratio *= r
+        f = ratio
+        if ratio != 1.0 and t["price"] and hist is not None and len(hist):
+            near = hist[hist.index >= datetime.fromisoformat(t["date"])]
+            adj = num(near.iloc[0]) if len(near) else None
+            if adj:
+                rel = t["price"] / (adj * k_cur)   # ≈ ratio: Vor-Split-Stück; ≈ 1: schon umgerechnet
+                f = ratio if abs(math.log(rel / ratio)) < abs(math.log(rel)) else 1.0
+        out.append(f)
+    return out
 
 
 FIGI_SUFFIX = {"GR": ".DE", "US": ""}
@@ -8217,7 +8288,8 @@ def cache_rules():
             ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50),
             ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300),
             ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200), ("Depot-Symbole", DEPOT_SYM_CACHE, 7 * 86400, 3000),
-            ("Depot-Analysen", DEPOT_CACHE, 900, 30)]
+            ("Depot-Analysen", DEPOT_CACHE, 900, 30),
+            ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500)]
 
 
 def prune_caches():
@@ -8909,7 +8981,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_json({"ok": True})
                     if not isinstance(body.get("csv"), str):
                         raise ValueError("Bitte eine CSV-Datei hochladen.")
-                    positions, notes = parse_depot_csv(body["csv"])
+                    positions, notes = parse_depot_csv(body["csv"], split_fn=depot_split_factors)
                     res = analyze_depot(positions)
                     res["notes"] = notes
                     res["file"] = str(body.get("filename") or "")[:80]

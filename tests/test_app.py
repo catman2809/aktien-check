@@ -1393,6 +1393,44 @@ class TestDepotParse(unittest.TestCase):
         self.assertEqual(" ".join(a.DEPOT_NAME_NOISE.sub(" ", "TSMC ADR").split()), "TSMC")
         self.assertEqual(" ".join(a.DEPOT_NAME_NOISE.sub(" ", "Alphabet (A)").split()), "Alphabet")
 
+    def test_split_row_with_quantity(self):
+        r = self.tr_row
+        csv_ = self.TR_HEAD + "".join([
+            r("2024-03-01", "TRADING", "SELL", "STOCK", "Alphabet (A)", "US02079K3059", "-5.000000", "130.00", "650.00"),
+            r("2022-07-18", "CORPORATE_ACTION", "STOCK_SPLIT", "STOCK", "Alphabet (A)", "US02079K3059", "19.000000"),
+            r("2021-05-03", "TRADING", "BUY", "STOCK", "Alphabet (A)", "US02079K3059", "1.000000", "2000.00", "-2000.00")])
+        pos, notes = a.parse_depot_csv(csv_)
+        self.assertEqual(pos[0]["qty"], 15)                         # 1 + 19 (Split) − 5
+        self.assertAlmostEqual(pos[0]["buy"], 2000 * 0.75 / 15)
+
+    def alphabet_csv(self, qty_2021, price_2021):
+        r = self.tr_row
+        return self.TR_HEAD + "".join([
+            r("2024-03-01", "TRADING", "SELL", "STOCK", "Alphabet (A)", "US02079K3059", "-5.000000", "130.00", "650.00"),
+            r("2021-05-03", "TRADING", "BUY", "STOCK", "Alphabet (A)", "US02079K3059", qty_2021, price_2021, "-2000.00")])
+
+    def test_split_from_yahoo_history(self):
+        import unittest.mock as um
+        fake_t = type("T", (), {})()
+        fake_t.splits = pd.Series({pd.Timestamp("2022-07-18"): 20.0})
+        fake_t.fast_info = type("F", (), {"currency": "USD"})()
+        fake_t.history = lambda **kw: pd.DataFrame({"Close": [100.0, 100.0]},
+                                                   index=[pd.Timestamp("2021-05-03"), pd.Timestamp("2024-03-01")])
+        a.DEPOT_SPLIT_CACHE.clear()
+        with um.patch.object(a, "depot_resolve", return_value={"symbol": "GOOGL"}), \
+                um.patch.object(a.yf, "Ticker", return_value=fake_t), um.patch.object(a, "fx_rate", return_value=1.0):
+            # ohne Split-Prüfung: 1 − 5 < 0 -> Position fehlt (der gemeldete Fehler)
+            with self.assertRaises(ValueError):
+                a.parse_depot_csv(self.alphabet_csv("1.000000", "2000.00"))
+            pos, notes = a.parse_depot_csv(self.alphabet_csv("1.000000", "2000.00"), split_fn=a.depot_split_factors)
+            self.assertEqual(pos[0]["qty"], 15)                     # 1 Aktie vor dem 20:1-Split = 20 − 5
+            self.assertIn("Aktiensplits berücksichtigt", " ".join(notes))
+            a.DEPOT_SPLIT_CACHE.clear()
+            # Broker hat alte Buchung schon umgerechnet (20 Stück zu 100) -> nicht noch einmal mal 20
+            pos, _ = a.parse_depot_csv(self.alphabet_csv("20.000000", "100.00"), split_fn=a.depot_split_factors)
+            self.assertEqual(pos[0]["qty"], 15)
+        a.DEPOT_SPLIT_CACHE.clear()
+
     def test_checks(self):
         rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
                 {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]
