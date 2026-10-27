@@ -1180,6 +1180,60 @@ class TestEsef(unittest.TestCase):
             self.assertEqual(a.esef_check({"isin": "FR0000000001"}, t, "USD", "X.PA")["checked"], 0)  # andere Währung
 
 
+class TestCurrencyGuards(unittest.TestCase):
+    """Keine Mischung von Börsen- und Bilanzwährung (ADRs wie Alibaba: Kurs USD, Bilanz CNY)."""
+
+    def test_finnhub_currency(self):
+        self.assertTrue(a.finnhub_currency_ok("AAPL", {"currency": "USD"}))
+        self.assertFalse(a.finnhub_currency_ok("BABA", {"currency": "CNY"}))
+        self.assertTrue(a.finnhub_currency_ok("SAP.DE", {"currency": "EUR"}))  # Börsenwährung unbekannt -> nicht sperren
+
+    def test_peer_falls_back_to_yahoo_for_adr(self):
+        import unittest.mock as um
+        calls = {"stock/metric": {"metric": {"peTTM": 3.5}}, "stock/profile2": {"currency": "CNY", "name": "Alibaba"}}
+        a.PEER_CACHE.pop("BABA", None)
+        fake_t = type("T", (), {"info": {}})()
+        with um.patch.object(a, "finnhub_key", return_value="x"),                 um.patch.object(a, "finnhub", side_effect=lambda path, **kw: calls.get(path)),                 um.patch.object(a.yf, "Ticker", return_value=fake_t),                 um.patch.object(a, "fill_info", return_value={"currentPrice": 100.0, "trailingPE": 24.0, "currency": "USD"}):
+            p_ = a.peer_metrics("BABA")
+        a.PEER_CACHE.pop("BABA", None)
+        self.assertEqual((p_["source"], p_["pe"]), ("Yahoo", 24.0))
+
+    def test_finnhub_target_other_currency_ignored(self):
+        import unittest.mock as um
+        from collections import defaultdict
+        m = defaultdict(lambda: None, {"price": 100.0, "upside": None})
+        calls = {"stock/recommendation": [{"buy": 5, "hold": 1, "period": "2026-10-01"}],
+                 "stock/price-target": {"targetMean": 900.0}, "stock/quote": {"c": 100.0}, "stock/metric": {"metric": {}}}
+        with um.patch.object(a, "finnhub_key", return_value="x"),                 um.patch.object(a, "finnhub", side_effect=lambda path, **kw: calls.get(path)):
+            a.finnhub_enrich(m, "TSM", [])
+        self.assertIsNone(m["upside"])  # Kursziel 9-fach = andere Währung
+
+    def test_revenue_estimate_sanity(self):
+        from collections import defaultdict
+        import unittest.mock as um
+        bad = {"0y": {"growth": 15.1, "ago": 0.8e12, "avg": 12.9e12, "cur": "JPY"},
+               "+1y": {"growth": -0.01, "ago": 12.9e12, "avg": 12.8e12, "cur": "JPY"}}
+        m = defaultdict(lambda: None, {"currency": "USD", "fin_currency": "JPY", "revenues": [None, 83e9], "est_rev": bad})
+        with um.patch.object(a, "usd_rate", side_effect=lambda c: {"USD": 1.0, "JPY": 1 / 150}.get(c)):
+            a.check_revenue_estimates(m)            # Vorjahr 0,8 statt ~12,5 Bio. JPY -> Prognose verworfen
+            self.assertEqual(m["est_rev"], {})
+            good = {"0y": {"growth": 0.04, "ago": 12.48e12, "avg": 12.9e12, "cur": "JPY"}}
+            m2 = defaultdict(lambda: None, {"currency": "USD", "fin_currency": "JPY", "revenues": [83e9], "est_rev": good})
+            a.check_revenue_estimates(m2)
+            self.assertIn("0y", m2["est_rev"])
+            self.assertAlmostEqual(a.est_fx(m2, good["0y"]), 1 / 150)
+        self.assertIsNone(a.est_fx(defaultdict(lambda: None, {"currency": "USD", "fin_currency": "CNY"}), {}))
+
+    def test_forward_earnings_needs_same_currency(self):
+        from collections import defaultdict
+        eps = {"0y": {"avg": 40.0, "n": 10}, "+1y": {"avg": 60.0, "n": 10}}
+        base = {"price": 900.0, "currency": "USD", "est_eps": eps}
+        m_usd = defaultdict(lambda: None, dict(base, fin_currency="USD"))
+        m_cny = defaultdict(lambda: None, dict(base, fin_currency="CNY"))
+        self.assertIsNotNone(a.forward_earnings(m_usd, 1e9))
+        self.assertIsNone(a.forward_earnings(m_cny, 1e9))
+
+
 class TestQuarterAI(Isolated):
     def test_summary_cached(self):
         import unittest.mock as um

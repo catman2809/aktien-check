@@ -956,6 +956,32 @@ def pd_ts(v):
     return ts.tz_localize(None).to_pydatetime() if ts.tzinfo else ts.to_pydatetime()
 
 
+def est_fx(m, e):
+    """Umrechnungsfaktor einer Analystenschätzung in die Börsenwährung. Yahoo liefert Schätzungen teils in der
+    Bilanzwährung (Sony: Umsatz in JPY), teils in der Börsenwährung (Gewinn je ADR in USD)."""
+    cur = (e or {}).get("cur")
+    if cur:
+        return fx_rate(cur, m["currency"])
+    return 1.0 if (m.get("fin_currency") or m["currency"]) == m["currency"] else None  # unbekannt -> nicht nutzbar
+
+
+def check_revenue_estimates(m):
+    """Fehlerhafte Umsatzprognosen verwerfen: Der Vorjahreswert der Prognose für das laufende Geschäftsjahr muss zum
+    gemeldeten Umsatz des letzten Geschäftsjahres passen (Yahoo-Fehler z. B. Sony: 0,8 statt 12,5 Bio. JPY ->
+    angeblich +1.510 % Wachstum). Unplausible Wachstumsraten (über +300 % / unter −80 %) werden ebenfalls verworfen."""
+    R = m.get("est_rev") or {}
+    last = first(m.get("revenues") or [])
+    r0 = R.get("0y") or {}
+    k = est_fx(m, r0)
+    if r0.get("ago") and last and k and not 0.75 <= r0["ago"] * k / last <= 1.33:
+        R.pop("0y", None)
+        R.pop("+1y", None)  # baut auf der fehlerhaften Basis auf
+        m["est_rev_dropped"] = True
+    for per, e in list(R.items()):
+        if e.get("growth") is not None and not -0.8 <= e["growth"] <= 3.0:
+            e["growth"] = None
+
+
 def expectations(m, t):
     """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
     m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = m["eps_quarters"] = None
@@ -983,10 +1009,12 @@ def expectations(m, t):
                 r_ = df.loc[per]
                 out[per] = {"avg": num(r_.get("avg")), "low": num(r_.get("low")), "high": num(r_.get("high")),
                             "growth": num(r_.get(col_growth)), "n": num(r_.get("numberOfAnalysts")),
-                            "ago": num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps"))}
+                            "ago": num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps")),
+                            "cur": str(r_.get("currency")) if isinstance(r_.get("currency"), str) else None}
         return out
     m["est_rev"] = est(safe(lambda: t.revenue_estimate))
     m["est_eps"] = est(safe(lambda: t.earnings_estimate))
+    check_revenue_estimates(m)
     eh = safe(lambda: t.earnings_history)
     if eh is not None and not eh.empty and "epsActual" in eh:
         m["eps_quarters"] = [{"q": str(getattr(q_, "date", lambda: q_)())[:10], "est": num(r_.get("epsEstimate")),
@@ -1227,10 +1255,12 @@ def chart_extras(m, t, inc, bs, divs):
                     eps.append([col.strftime("%Y-%m-%d"), round(v, 4)])
     # Prognosen (dieses / nächstes GJ) – nur wenn Größenordnung zur Historie passt (Währung!)
     est = []
-    if eps:
+    kx = est_fx(m, (m.get("est_eps") or {}).get("+1y"))
+    if eps and kx:
         last_d = datetime.strptime(eps[-1][0], "%Y-%m-%d")
         for i_, per in enumerate(("0y", "+1y"), start=1):
             avg = ((m.get("est_eps") or {}).get(per) or {}).get("avg")
+            avg = avg * kx if avg else None
             if avg and eps[-1][1] > 0 and 0.33 < avg / eps[-1][1] < 3:
                 est.append([(last_d.replace(year=last_d.year + i_)).strftime("%Y-%m-%d"), round(avg, 4)])
     # Monatskurse (unbereinigt) für Bewertungschart und KGV-Verlauf
@@ -1430,6 +1460,10 @@ def gather(symbol, t, info):
     m["equity"] = equity
     m["assets"] = first(row(bs, "Total Assets"))
     m["equity_ratio"] = equity / m["assets"] if equity and m["assets"] else None
+    # Börsenwert / Eigenkapital (letztes Quartal) – Yahoos priceToBook ist bei ADRs oft falsch (ASML 1.366 statt ~28)
+    eq_now = first(row(convert_df(safe(lambda: t.quarterly_balance_sheet), k), "Stockholders Equity", "Common Stock Equity")) or equity
+    if m["mcap"] and eq_now:
+        m["pb"] = m["mcap"] / eq_now if eq_now > 0 else None
     m["ltv"] = m["net_debt"] / m["assets"] if m["net_debt"] is not None and m["assets"] else None
     ni_ok = [n for n in nis if n is not None]
     m["avg_ni"] = sum(ni_ok) / len(ni_ok) if len(ni_ok) >= 3 else None
@@ -1669,11 +1703,12 @@ def forward_factor(m):
         avg = ((1 - q) * fy0 + q * fy1) / ((1 - q) + q * fy0)
         spread = ((r1["high"] - r1["low"]) / r1["avg"] / 2) if r1.get("avg") and r1.get("high") and r1.get("low") else 0.05
         rev = {"avg": avg, "low": avg * (1 - spread), "high": avg * (1 + spread)}
-    ttm, last, ago = m.get("eps_ttm"), m.get("eps_fy_last"), e0.get("ago")
-    same_basis = bool(ago and last and ago * last > 0 and 0.85 <= ago / last <= 1.15)  # gleiche Währung/Aktienbasis
+    ttm, last, kx = m.get("eps_ttm"), m.get("eps_fy_last"), est_fx(m, e1)
+    ago = e0.get("ago") * kx if e0.get("ago") and kx else None
+    same_basis = bool(ago and last and ago * last > 0 and 0.85 <= ago / last <= 1.15)  # gleiche Aktienbasis (ADR!)
     eps = None
     if e0.get("avg") and e1.get("avg") and e1["avg"] > 0 and ttm and ttm > 0 and same_basis:
-        eps = {k: ((1 - q) * (e0.get(k) or e0["avg"]) + q * (e1.get(k) or e1["avg"])) / ttm for k in ("low", "avg", "high")}
+        eps = {k: ((1 - q) * (e0.get(k) or e0["avg"]) + q * (e1.get(k) or e1["avg"])) * kx / ttm for k in ("low", "avg", "high")}
         eps = eps if eps["avg"] > 0 else None
     if eps and rev:
         f, src = {k: (min(eps[k], rev[k] * 1.6) + rev[k]) / 2 for k in eps}, "eps+rev"
@@ -1693,14 +1728,16 @@ def forward_earnings(m, shares):
     e0, e1 = E.get("0y") or {}, E.get("+1y") or {}
     if not (e1.get("avg") and e1["avg"] > 0 and e0.get("avg") is not None and (e1.get("n") or 0) >= 3 and m["price"]):
         return None
-    q = fy_progress(m)
-    nxt = {k: (1 - q) * (e0.get(k) if e0.get(k) is not None else e0["avg"]) + q * (e1.get(k) or e1["avg"])
+    q, kx = fy_progress(m), est_fx(m, e1)
+    if not kx:
+        return None  # Währung der Prognose unbekannt
+    nxt = {k: ((1 - q) * (e0.get(k) if e0.get(k) is not None else e0["avg"]) + q * (e1.get(k) or e1["avg"])) * kx
            for k in ("low", "avg", "high")}
     if not 0.002 <= nxt["avg"] / m["price"] <= 0.25:
         return None  # KGV unter 4 oder über 500 -> vermutlich andere Währung/Aktienbasis
-    last, ago = m.get("eps_fy_last"), e0.get("ago")
+    last, ago = m.get("eps_fy_last"), (e0.get("ago") * kx if e0.get("ago") else None)
     if last and ago and not (ago * last > 0 and 0.85 <= ago / last <= 1.15):
-        return None
+        return None  # andere Aktienbasis (z. B. Gewinn je Stammaktie statt je ADR)
     return {k: max(0.0, v) * shares for k, v in nxt.items()}
 
 
@@ -2794,6 +2831,15 @@ def finnhub(path, **params):
     return data
 
 
+def finnhub_currency_ok(sym, prof):
+    """Finnhub-Kennzahlen mit Kursbezug (KGV) nur übernehmen, wenn die Berichtswährung der Firma (profile2
+    'currency') der Börsenwährung der Notierung entspricht – bei ADRs wie Alibaba (Kurs USD, Bilanz CNY)
+    sind solche Quoten sonst nicht verlässlich."""
+    listing = "USD" if "." not in sym else None
+    cur = (prof or {}).get("currency")
+    return not (listing and cur and cur != listing)
+
+
 def finnhub_enrich(m, symbol, alternatives):
     """Füllt fehlende Analysten- und Kennzahlen aus Finnhub. Vorhandene Yahoo-Werte bleiben unverändert.
 
@@ -2824,12 +2870,14 @@ def finnhub_enrich(m, symbol, alternatives):
             q = finnhub("quote", symbol=sym)
             tgt = num((pt or {}).get("targetMean"))
             px = num((q or {}).get("c"))
-            if tgt and px and m.get("price"):
+            if tgt and px and m.get("price") and 0.33 < tgt / px < 3:  # sonst Kursziel vermutlich in anderer Währung
                 m["upside"] = tgt / px - 1
                 m["target"] = m["price"] * (1 + m["upside"])
                 m["finnhub"].append(f"Kursziel ({sym})")
         # Kennzahlen (Quoten sind währungsneutral, daher auch von einer ADR übertragbar)
         met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
+        if m.get("pe") is None and met.get("peTTM") is not None and not finnhub_currency_ok(sym, finnhub("stock/profile2", symbol=sym)):
+            met = {k: v for k, v in met.items() if k != "peTTM"}  # Quoten ohne Kursbezug bleiben nutzbar
         filled = []
         for key, src, scale in (("pe", "peTTM", 1), ("beta", "beta", 1), ("roe", "roeTTM", 100),
                                 ("op_m", "operatingMarginTTM", 100), ("gross_m", "grossMarginTTM", 100),
@@ -2892,8 +2940,10 @@ def peer_metrics(sym, name_hint=None):
     out = None
     if finnhub_key():
         met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
+        prof = (finnhub("stock/profile2", symbol=sym) or {}) if met else {}
+        if met and not finnhub_currency_ok(sym, prof):
+            met = {}  # Auslandsfirma mit US-Notierung: Kennzahlen selbst aus Yahoo rechnen (Währungen getrennt umgerechnet)
         if met:
-            prof = finnhub("stock/profile2", symbol=sym) or {}
             pct = lambda k: (num(met.get(k)) / 100) if num(met.get(k)) is not None else None
             mc = num(prof.get("marketCapitalization"))
             out = {"symbol": sym, "name": prof.get("name") or name_hint or sym, "currency": prof.get("currency") or "",
