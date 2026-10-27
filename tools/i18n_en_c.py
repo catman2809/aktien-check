@@ -315,4 +315,5 @@ C = {
     "Fairer Wert (Discounted-Cashflow ({0} Jahre), ab Prognose für die nächsten {1} Monate, Basisszenario) {2} {3} → {4} · Spanne – bis {5}": "Fair value (discounted cash flow ({0} years), starting from the forecast for the next {1} months, base case) {2} {3} → {4} · range – to {5}",
     "Startwert nächste {0} Monate: {1} {2} / {3} {4} / {5} {6} – Cashflow × erwartete Entwicklung laut Analysten ({7} ggü. den letzten {8} Monaten)": "Starting value next {0} months: {1} {2} / {3} {4} / {5} {6} – cash flow × development expected by analysts ({7} vs. the last {8} months)",
     "Startwert nächste {0} Monate: {1} des erwarteten Gewinns ({2} {3}) – der Free Cashflow ist heute noch negativ": "Starting value next {0} months: {1} of expected earnings ({2} {3}) – free cash flow is still negative today",
+    "Russland": "Russia",
 }

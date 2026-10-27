@@ -1584,6 +1584,7 @@ def gather(symbol, t, info):
     m["target_low"], m["target_high"] = num(g("targetLowPrice")), num(g("targetHighPrice"))
     m["target_median"] = num(g("targetMedianPrice"))
     expectations(m, t)
+    m["crp"] = safe(lambda: country_risk(m))
     safe(lambda: chart_extras(m, t, inc, bs, divs))
     return m
 
@@ -1608,8 +1609,103 @@ def gather_macro(currency):
 # ---------------------------------------------------------------------------
 # Bewertungslogik: jede Kategorie -> Score (-1..+1), Adjektiv, Begründungen
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Länderrisiko: Aufschlag auf den Diskontsatz je Land (Aswath Damodaran, NYU Stern – „Country Risk Premium“),
+# gerechnet relativ zu den USA, damit US-Aktien unverändert bleiben
+# ---------------------------------------------------------------------------
+CRP_URL = "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html"
+CRP_STATE = {"t": 0.0, "table": {}, "asof": None}
+CRP_FALLBACK = {  # Stand Februar 2026, falls die Tabelle nicht abrufbar ist
+    "united states": 0.0023, "germany": 0.0, "netherlands": 0.0, "switzerland": 0.0, "denmark": 0.0, "sweden": 0.0,
+    "norway": 0.0, "canada": 0.0, "australia": 0.0, "singapore": 0.0, "luxembourg": 0.0, "ireland": 0.0078,
+    "united kingdom": 0.0078, "france": 0.0078, "austria": 0.0039, "finland": 0.0039, "belgium": 0.0078,
+    "spain": 0.0137, "portugal": 0.0137, "italy": 0.0246, "japan": 0.0091, "china": 0.0091, "hong kong": 0.0078,
+    "taiwan": 0.0078, "korea": 0.0078, "india": 0.0285, "brazil": 0.0324, "mexico": 0.0285, "cayman islands": 0.0078}
+CURRENCY_COUNTRY = {
+    "CNY": "china", "HKD": "hong kong", "TWD": "taiwan", "KRW": "korea", "JPY": "japan", "INR": "india", "IDR": "indonesia",
+    "THB": "thailand", "MYR": "malaysia", "PHP": "philippines", "VND": "vietnam", "SGD": "singapore", "AUD": "australia",
+    "NZD": "new zealand", "BRL": "brazil", "MXN": "mexico", "ARS": "argentina", "CLP": "chile", "COP": "colombia",
+    "PEN": "peru", "ZAR": "south africa", "TRY": "turkey", "ILS": "israel", "SAR": "saudi arabia",
+    "AED": "united arab emirates", "EGP": "egypt", "NGN": "nigeria", "RUB": "russia", "PLN": "poland",
+    "CZK": "czech republic", "HUF": "hungary", "RON": "romania", "GBP": "united kingdom", "CHF": "switzerland",
+    "NOK": "norway", "SEK": "sweden", "DKK": "denmark", "CAD": "canada", "KZT": "kazakhstan"}
+ISO2_COUNTRY = {"US": "united states", "DE": "germany", "GB": "united kingdom", "FR": "france", "NL": "netherlands",
+                "IT": "italy", "CH": "switzerland", "DK": "denmark", "SE": "sweden", "FI": "finland", "NO": "norway",
+                "ES": "spain", "AT": "austria", "BE": "belgium", "PT": "portugal", "IE": "ireland", "CA": "canada",
+                "JP": "japan", "HK": "hong kong", "AU": "australia"}
+COUNTRY_ALIAS = {"south korea": "korea", "republic of korea": "korea", "türkiye": "turkey", "turkiye": "turkey",
+                 "czechia": "czech republic", "macau": "macao", "north macedonia": "macedonia", "usa": "united states",
+                 "united states of america": "united states", "uk": "united kingdom", "great britain": "united kingdom",
+                 "eswatini": "swaziland", "people's republic of china": "china", "republic of china": "taiwan",
+                 "taiwan, province of china": "taiwan", "korea, republic of": "korea", "kingdom of the netherlands": "netherlands",
+                 "kingdom of denmark": "denmark", "hong kong sar": "hong kong"}
+CRP_DE = {"united states": "USA", "china": "China", "hong kong": "Hongkong", "taiwan": "Taiwan", "korea": "Südkorea",
+          "japan": "Japan", "india": "Indien", "brazil": "Brasilien", "mexico": "Mexiko", "italy": "Italien",
+          "spain": "Spanien", "portugal": "Portugal", "france": "Frankreich", "united kingdom": "Großbritannien",
+          "ireland": "Irland", "belgium": "Belgien", "austria": "Österreich", "finland": "Finnland", "turkey": "Türkei",
+          "south africa": "Südafrika", "indonesia": "Indonesien", "israel": "Israel", "poland": "Polen",
+          "argentina": "Argentinien", "chile": "Chile", "russia": "Russland", "greece": "Griechenland",
+          "cayman islands": "Kaimaninseln", "saudi arabia": "Saudi-Arabien"}
+
+
+def _crp_norm(name):
+    n = " ".join(re.sub(r"\(.*?\)", " ", name or "").lower().split())
+    return COUNTRY_ALIAS.get(n, n)
+
+
+def crp_table():
+    """Länderrisikoprämien je Land (Damodaran), wöchentlich aktualisiert; bei Fehlern der eingebaute Stand."""
+    if CRP_STATE["table"] and time.time() - CRP_STATE["t"] < 7 * 86400:
+        return CRP_STATE["table"]
+    try:
+        import html as html_
+        raw = _fetch(CRP_URL, headers={"User-Agent": "Aktien-Check/1.0"}, timeout=20).decode("utf-8", "replace")
+        table = {}
+        for row_ in re.findall(r"<tr[^>]*>(.*?)</tr>", raw, re.S | re.I):
+            c = [html_.unescape(re.sub(r"<[^>]+>", "", x)).strip()
+                 for x in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_, re.S | re.I)]
+            if len(c) >= 4 and re.fullmatch(r"-?\d+(\.\d+)?%", c[3]):
+                table[_crp_norm(c[0])] = float(c[3][:-1]) / 100
+        if len(table) < 100 or "united states" not in table:
+            raise ValueError(f"nur {len(table)} Länder gelesen")
+        CRP_STATE.update(t=time.time(), table=table, asof=datetime.now().strftime("%Y-%m-%d"))
+        LOG.info("[Länderrisiko] %d Länder geladen (Damodaran)", len(table))
+    except Exception as e:
+        LOG.warning("[Länderrisiko] Tabelle nicht abrufbar (%s) – eingebauter Stand", e)
+        CRP_STATE["t"] = time.time() - 6 * 86400  # in einem Tag erneut versuchen
+    return CRP_STATE["table"] or CRP_FALLBACK
+
+
+def country_risk(m):
+    """Länderrisiko-Aufschlag ggü. den USA. Maßgeblich ist das riskantere Land aus Firmensitz und Bilanzwährung –
+    die Bilanzwährung zeigt, wo das Geschäft überwiegend stattfindet (PDD: Sitz Irland, Bilanz in CNY -> China)."""
+    tab = crp_table()
+    us = tab.get("united states", 0.0)
+    cands = []
+    hq = _crp_norm(m.get("country") or m.get("country_alt"))
+    if not hq or hq not in tab:  # Sitzland fehlt (z. B. Yahoo-Sperre): Land der Börsennotierung
+        suf = m["symbol"].rsplit(".", 1)[1] if "." in m.get("symbol", "") else ""
+        hq = ISO2_COUNTRY.get((SUFFIX_MARKET.get(suf) or (None,))[0]) if suf else None
+    if hq in tab:
+        cands.append((tab[hq] - us, hq, "Firmensitz"))
+    fin = m.get("fin_currency") or ""
+    cc = CURRENCY_COUNTRY.get(fin)
+    if cc in tab:
+        cands.append((tab[cc] - us, cc, f"Bilanzwährung {fin}"))
+    if not cands:
+        return None
+    prem, land, basis = max(cands)
+    if prem < 0.0005:
+        return None
+    return {"premium": prem, "country": CRP_DE.get(land, land.title()), "basis": basis}
+
+
+def crp_premium(m):
+    return ((m.get("crp") or {}).get("premium") or 0.0) if hasattr(m, "get") else 0.0
+
+
 def cost_of_equity(m, mac):
-    return clamp((mac["rf"] or 4.0) / 100 + (m["beta"] or 1.0) * 0.05, 0.07, 0.13)
+    return clamp((mac["rf"] or 4.0) / 100 + (m["beta"] or 1.0) * 0.05, 0.07, 0.13) + crp_premium(m)
 
 
 def growth_estimate(m):
@@ -1757,7 +1853,9 @@ def fair_value(m, mac):
         out.update(method="Kurs-Buchwert aus Eigenkapitalrendite",
                    bear=val(m["roe"] - 0.02, coe + 0.01), base=val(m["roe"], coe), bull=val(m["roe"] + 0.02, coe - 0.01))
         out["assumptions"] = [f"Buchwert je Aktie {fnum(book, 2)}", f"ROE {pct(m['roe'])} (±2 Prozentpunkte)",
-                              f"Eigenkapitalkosten {pct(coe)} (±1 Prozentpunkt)"]
+                              f"Eigenkapitalkosten {pct(coe)} (±1 Prozentpunkt)"
+                              + (f", davon Länderrisiko {m['crp']['country']} +{fnum(m['crp']['premium'] * 100, 2)} Prozentpunkte"
+                                 if m.get("crp") else "")]
     elif biz == "real_estate":
         if not (m["ocf"] and m["ocf"] > 0):
             return None
@@ -1827,6 +1925,8 @@ def fair_value(m, mac):
         # Diskontsatz: angepasstes Beta (Blume: 2/3 Beta + 1/3) und 4,5 % Marktrisikoprämie
         beta_adj = 0.67 * clamp(m["beta"] or 1.0, 0.3, 2.5) + 0.33
         r = clamp((mac["rf"] or 4.0) / 100 + beta_adj * 0.045, 0.075, 0.12)  # Untergrenze: auch „sichere“ Aktien sind keine Anleihe
+        crp = m.get("crp") or {}
+        r += crp.get("premium") or 0.0  # Länderrisiko (Damodaran) obendrauf
         out.update(method="Discounted-Cashflow (10 Jahre)" + (", ab Prognose für die nächsten 12 Monate" if start else ""),
                    bear=dcf_value(base_fcf, max(-0.10, g_base - d), r + 0.01, 0.02, nd, shares, first=start.get("low")),
                    base=dcf_value(base_fcf, g_base, r, 0.025, nd, shares, first=start.get("avg")),
@@ -1843,6 +1943,8 @@ def fair_value(m, mac):
             *([f"Leasing: Zahlungen ≈ {money(lease_pay, m['currency'])} p. a. abgezogen, Leasingschulden nicht doppelt gezählt"]
               if lease_pay else []),
             *([f"Minderheitsanteile {money(m['minority'], m['currency'])} abgezogen"] if (m.get("minority") or 0) > 0.02 * (m["mcap"] or 1) else []),
+            *([f"Länderrisiko {crp['country']}: +{fnum(crp['premium'] * 100, 2)} Prozentpunkte im Diskontsatz "
+                 f"(Damodaran, maßgeblich: {crp['basis']})"] if crp else []),
             f"Diskontsatz {pct(r + 0.01)} / {pct(r)} / {pct(max(0.07, r - 0.01))}"]
     if out["base"] is None:
         return None
@@ -4721,6 +4823,10 @@ SEC_FACTS_MAX = 6         # Rohdaten höchstens so vieler Firmen gleichzeitig (d
 SEC_FACTS_LOCKS = {}
 
 
+US_STATES = set("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND "
+                 "OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR".split())
+
+
 def sec_cik(symbol):
     hit = SEC_CACHE.get("tickers")
     if not hit or time.time() - hit[0] > 86400:
@@ -5735,6 +5841,13 @@ def sec_company(symbol, alternatives=(), name=""):
     rc = (sub.get("filings") or {}).get("recent") or {}
     forms, dates, accs, docs = rc.get("form") or [], rc.get("filingDate") or [], rc.get("accessionNumber") or [], rc.get("primaryDocument") or []
     items_ = rc.get("items") or [""] * len(forms)
+    biz_addr = (sub.get("addresses") or {}).get("business") or {}
+    sec_country = None
+    for code, desc in ((biz_addr.get("stateOrCountry"), biz_addr.get("stateOrCountryDescription")),
+                       (sub.get("stateOfIncorporation"), sub.get("stateOfIncorporationDescription"))):
+        if code and desc:
+            sec_country = "United States" if code in US_STATES else desc
+            break
     earn = next(({"acc": a_, "date": d_, "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/"}
                  for f_, d_, a_, i_ in zip(forms, dates, accs, items_) if f_ in ("8-K", "6-K") and "2.02" in (i_ or "")), None)
     del sub
@@ -5756,6 +5869,7 @@ def sec_company(symbol, alternatives=(), name=""):
         segs = safe(lambda: fseg.result(timeout=45)) if fseg else None
         annual, quarters = (safe(lambda: ffin.result(timeout=45)) or ([], [])) if ffin else ([], [])
     out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4, "domestic": domestic, "us_symbol": us_sym,
+           "country": sec_country,
            "earnings_8k": earn,
            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=&dateb=&owner=include&count=40",
            "annual": annual, "segments": segs,
@@ -5791,13 +5905,14 @@ def wikidata_company(ticker, company, isin_cc):
     """Stammdaten über das Börsenkürzel aus Wikidata; nur wenn der Firmenname passt."""
     variants = {ticker, ticker.replace("-", " "), ticker.replace("-", "."), ticker.replace("-", "")}
     vals = " ".join('"%s"' % v.replace('"', "") for v in variants)
-    q = '''SELECT ?c ?cLabel ?isin ?inc ?ceoLabel ?hqLabel ?web WHERE {
+    q = '''SELECT ?c ?cLabel ?isin ?inc ?ceoLabel ?hqLabel ?web ?ctyEn WHERE {
       VALUES ?t { %s } ?c p:P414 ?st. ?st pq:P249 ?t.
       OPTIONAL { ?c wdt:P946 ?isin }
       OPTIONAL { ?c wdt:P571 ?inc }
       OPTIONAL { ?c p:P169 ?cs. ?cs ps:P169 ?ceo. FILTER NOT EXISTS { ?cs pq:P582 ?end } }
       OPTIONAL { ?c wdt:P159 ?hq }
       OPTIONAL { ?c wdt:P856 ?web }
+      OPTIONAL { ?c wdt:P17 ?cty. ?cty rdfs:label ?ctyEn FILTER(lang(?ctyEn) = "en") }
       SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". } } LIMIT 80''' % vals
     url = "https://query.wikidata.org/sparql?format=json&query=" + urllib.parse.quote(q)
     req = urllib.request.Request(url, headers={"User-Agent": "Aktien-Check/1.0 (private Analyse-App)"})
@@ -5813,8 +5928,9 @@ def wikidata_company(ticker, company, isin_cc):
         # Erster Namensbestandteil muss übereinstimmen (verhindert z. B. SAP -> Sappi, ALV -> Autoliv/Allianz)
         if not got or got[0] != want[0]:
             continue
-        e = best.setdefault(v["c"], {"isins": set(), "inc": None, "ceo": None, "hq": None, "web": None})
+        e = best.setdefault(v["c"], {"isins": set(), "inc": None, "ceo": None, "hq": None, "web": None, "cty": None})
         e["web"] = e["web"] or v.get("web")
+        e["cty"] = e["cty"] or v.get("ctyEn")
         if v.get("isin"):
             e["isins"].add(v["isin"])
         e["inc"] = e["inc"] or v.get("inc")
@@ -5827,7 +5943,7 @@ def wikidata_company(ticker, company, isin_cc):
     e = next(iter(best.values()))
     isins = sorted(e["isins"], key=lambda i: (not i.startswith(isin_cc), i))
     return {"isins": isins, "founded": e["inc"][:4] if e["inc"] and e["inc"][:1] != "-" else None,
-            "ceo": e["ceo"], "hq": e["hq"], "website": e["web"]}
+            "ceo": e["ceo"], "hq": e["hq"], "website": e["web"], "country_en": e["cty"]}
 
 
 def openfigi_map(id_type, value, exch):
@@ -5898,6 +6014,7 @@ def company_profile(symbol, info, company):
         "isin": isin,
         # ISIN einer anderen Börse (z. B. US-Hinterlegungsschein auf eine deutsche Aktie)
         "isin_home": bool(isin and not isin_ok and isin_cc and not isin.startswith(isin_cc)),
+        "country_en": info.get("country") or wd.get("country_en"),
         "cusip": isin[2:11] if isin and isin[:2] in ("US", "CA") else None,
         "figi": figi,
         "sources": [s for s, ok in (("Yahoo Finance", True), ("Wikidata", bool(wd)), ("OpenFIGI", bool(figi)),
@@ -6207,6 +6324,11 @@ def analyze(query):
         esef_ = safe(lambda: fesef.result(timeout=60)) if fesef else None
         sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
         der_ = safe(lambda: fder.result(timeout=40)) if fder else None
+    if not m.get("country"):
+        alt_country = (profile or {}).get("country_en") or (sec_ or {}).get("country")
+        if alt_country:  # nur für das Länderrisiko, die Anzeige bleibt unverändert
+            m["country_alt"] = alt_country
+            m["crp"] = safe(lambda: country_risk(m))
     finnhub_enrich(m, symbol, alternatives)
     own_row = {"symbol": symbol, "name": m["name"], "currency": m["currency"], "mcap": m["mcap"],
                "pe": m["pe"] if (m["pe"] or 0) > 0 else None, "op_m": m["op_m"],

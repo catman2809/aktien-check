@@ -1240,6 +1240,33 @@ class TestCurrencyGuards(unittest.TestCase):
         self.assertIsNone(a.forward_earnings(m_cny, 1e9))
 
 
+class TestCountryRisk(unittest.TestCase):
+    """Länderrisiko-Aufschlag (Damodaran) relativ zu den USA."""
+    TAB = {"united states": 0.0023, "china": 0.0091, "ireland": 0.0078, "italy": 0.0246, "germany": 0.0}
+
+    def crp(self, **kw):
+        import unittest.mock as um
+        from collections import defaultdict
+        m = defaultdict(lambda: None, {"symbol": "X", **kw})
+        with um.patch.object(a, "crp_table", return_value=self.TAB):
+            return a.country_risk(m)
+
+    def test_premium(self):
+        self.assertIsNone(self.crp(country="United States", fin_currency="USD"))      # USA unverändert
+        self.assertIsNone(self.crp(country="Germany", fin_currency="EUR"))
+        it = self.crp(country="Italy", fin_currency="EUR")
+        self.assertAlmostEqual(it["premium"], 0.0223)
+        pdd = self.crp(country="Ireland", fin_currency="CNY")                        # Sitz Irland, Geschäft China
+        self.assertEqual((pdd["country"], pdd["basis"]), ("China", "Bilanzwährung CNY"))
+        self.assertEqual(self.crp(country_alt="People's Republic of China")["country"], "China")
+        self.assertEqual(self.crp(symbol="ENI.MI")["country"], "Italien")             # Sitzland fehlt -> Börsenplatz
+
+    def test_discount_rate_includes_premium(self):
+        mac = {"rf": 4.0}
+        base = {"beta": 1.0}
+        self.assertAlmostEqual(a.cost_of_equity(dict(base, crp={"premium": 0.02}), mac) - a.cost_of_equity(base, mac), 0.02)
+
+
 class TestQuarterAI(Isolated):
     def test_summary_cached(self):
         import unittest.mock as um
