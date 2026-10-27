@@ -6447,6 +6447,8 @@ DEPOT_COLS = (
     ("type", ("transaktionsart", "geschäftsart", "geschaeftsart", "buchungsart", "umsatzart", "orderart", "transaktion",
               "transaction", "vorgang", "typ", "type", "art", "side", "aktion")),
     ("status", ("status",)),
+    ("category", ("category", "kategorie")),
+    ("asset", ("asset_class", "assetclass", "asset class", "anlageklasse")),
     ("date", ("datum", "date", "buchtag", "handelstag", "geschäftstag", "valuta", "zeitpunkt")),
     ("name", ("wertpapiername", "wertpapier", "bezeichnung", "instrument", "produkt", "security", "description")),
     ("qty", ("stueck", "stück", "stk", "anzahl", "menge", "bestand", "quantity", "shares", "nominal", "units")),
@@ -6479,7 +6481,7 @@ DEPOT_SHORT_KW = {"typ", "type", "art", "side", "aktion", "date", "status", "tot
 
 def _depot_kw_match(h, kw):
     if kw in DEPOT_SHORT_KW:
-        return re.search(rf"(?<![a-zäöü]){re.escape(kw)}(?![a-zäöü])", h) is not None
+        return re.search(rf"(?<![a-z0-9_äöü]){re.escape(kw)}(?![a-z0-9_äöü])", h) is not None
     return kw in h
 
 
@@ -6490,11 +6492,13 @@ def _tx_kind(v):
         return "skip"
     if re.search(r"split", v):
         return "split"
+    if re.search(r"corporate|kapitalmaßnahme|kapitalmassnahme|spin.?off|stock.?dividend|unbundling|write.?off|delivery", v):
+        return "corp"  # Kapitalmaßnahmen, Ein-/Auslieferungen: Richtung ergibt sich aus dem Vorzeichen der Stückzahl
     if re.search(r"verkauf|sell|\bsale\b|abgang|auslieferung|ausbuchung|transfer.?out|ausgang|fälligkeit|faelligkeit|"
                  r"tilgung|rückzahlung|redemption", v):
         return "sell"
-    if re.search(r"kauf|buy|purchase|sparplan|savings|zugang|einlieferung|einbuchung|transfer.?in|eingang|bonus|gratis|bezug",
-                 v):
+    if re.search(r"kauf|buy|purchase|sparplan|savings|saveback|round.?up|zugang|einlieferung|einbuchung|transfer.?in|eingang|"
+                 r"receipt|bonus|gratis|bezug", v):
         return "buy"
     return "other"
 
@@ -6573,13 +6577,18 @@ def parse_depot_csv(text):
         isin = isin if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", isin) else ""
         wkn = get("wkn").upper() if re.fullmatch(r"[A-Z0-9]{6}", get("wkn").upper()) else ""
         sym, name = get("symbol").upper(), get("name")
+        if not isin and re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", sym):
+            isin, sym = sym, ""  # Trade Republic: ISIN steht in der Spalte „symbol“
+        if sym and re.search(r"crypto|krypto", get("asset").lower()) and "-" not in sym:
+            sym = f"{sym}-EUR"
         if not (isin or wkn or sym or name) or re.match(r"(?i)(summe|gesamt|total|depotwert|saldo)", name or sym):
             continue
         recs.append({"key": isin or wkn or sym or name.lower(), "isin": isin, "wkn": wkn, "symbol": sym, "name": name[:80],
                      "qty": _depot_num(get("qty"), dec_comma), "value": _depot_num(get("value"), dec_comma),
                      "buy": _depot_num(get("buy"), dec_comma), "cost": _depot_num(get("cost"), dec_comma),
                      "price": _depot_num(get("price"), dec_comma), "amount": _depot_num(get("amount"), dec_comma),
-                     "cur": (get("cur") or "").upper()[:3] or None, "kind": _tx_kind(get("type")) if "type" in cols else None,
+                     "cur": (get("cur") or "").upper()[:3] or None,
+                     "kind": _tx_kind(f"{get('category')} {get('type')}") if "type" in cols or "category" in cols else None,
                      "status": _tx_kind(get("status")) if "status" in cols else None, "date": _depot_date(get("date"))})
     kinds = [r_["kind"] for r_ in recs]
     keys = [r_["key"] for r_ in recs]
@@ -6617,7 +6626,7 @@ def _depot_from_transactions(recs):
     """Umsatzliste (Käufe, Verkäufe, Sparpläne, Dividenden …) -> aktueller Bestand. Käufe erhöhen, Verkäufe senken den
     Bestand; vollständig verkaufte Positionen entfallen. Einstandskurs nach der Durchschnittsmethode (ein Verkauf senkt
     den Einstand anteilig). Dividenden, Gebühren, Ein-/Auszahlungen und stornierte Aufträge werden ignoriert."""
-    stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0}
+    stats = {"buy": 0, "sell": 0, "other": 0, "skip": 0, "split": 0, "corp": 0}
     # chronologisch; Exporte stehen oft mit der neuesten Buchung oben
     order = sorted(range(len(recs)), key=lambda i: (recs[i]["date"] or "", i)) if any(r_["date"] for r_ in recs) else range(len(recs))
     pos = {}
@@ -6628,6 +6637,8 @@ def _depot_from_transactions(recs):
             continue
         qty = r_["qty"]
         kind = r_["kind"] or ("sell" if qty is not None and qty < 0 else "buy" if qty else "other")
+        if kind == "corp":
+            kind = "sell" if qty and qty < 0 else "buy" if qty else "other"
         if kind in ("other", "split") or not qty:
             stats["split" if kind == "split" else "other"] += 1
             continue

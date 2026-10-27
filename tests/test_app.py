@@ -1348,6 +1348,38 @@ class TestDepotParse(unittest.TestCase):
         self.assertEqual([p_["qty"] for p_ in pos], [10, 5])
         self.assertEqual(notes, [])
 
+    TR_HEAD = ('"datetime","date","account_type","category","type","asset_class","name","symbol","shares","price","amount",'
+               '"fee","tax","currency","original_amount","original_currency","fx_rate","description","transaction_id",'
+               '"counterparty_name","counterparty_iban","payment_reference","mcc_code"\n')
+
+    @classmethod
+    def tr_row(cls, dt, cat, typ, asset="", name="", sym="", shares="", price="", amount="0.00"):
+        return (f'"{dt}T10:00:00.000Z","{dt}","DEFAULT","{cat}","{typ}","{asset}","{name}","{sym}","{shares}","{price}",'
+                f'"{amount}","","","EUR","","","","{name}","id-{dt}-{typ}","","","",""\n')
+
+    def test_trade_republic_export(self):
+        r = self.tr_row
+        csv_ = self.TR_HEAD + "".join([
+            r("2026-09-01", "TRADING", "SELL", "STOCK", "Apple", "US0378331005", "-5.000000", "200.00", "1000.00"),
+            r("2026-08-15", "CASH", "DIVIDEND", "STOCK", "Apple", "US0378331005", "15.000000", "", "3.20"),
+            r("2026-07-01", "TRADING", "BUY_CANCELLED", "STOCK", "SAP", "DE0007164600", "100.000000", "150.00", "-15000.00"),
+            r("2026-06-01", "CORPORATE_ACTION", "SPIN_OFF", "STOCK", "Siemens Energy", "DE000ENER6Y0", "2.000000"),
+            r("2026-05-01", "TRADING", "BUY", "CRYPTO", "Ethereum", "ETH", "0.500000", "2000.00", "-1000.00"),
+            r("2026-03-01", "TRADING", "SELL", "STOCK", "Tesla", "US88160R1014", "-3.000000", "250.00", "750.00"),
+            r("2026-02-01", "TRADING", "BUY", "STOCK", "Tesla", "US88160R1014", "3.000000", "180.00", "-540.00"),
+            r("2026-02-01", "SAVINGS_PLAN", "BUY", "FUND", "iShares Core MSCI World", "IE00B4L5Y983", "10.000000", "100.00", "-1000.00"),
+            r("2026-01-02", "TRADING", "BUY", "STOCK", "Apple", "US0378331005", "20.000000", "150.00", "-3000.00"),
+            r("2026-01-01", "CASH", "CUSTOMER_INBOUND", amount="10000.00"),
+            r("2026-01-01", "CASH", "INTEREST_PAYOUT", amount="12.00"),
+        ])
+        pos, notes = a.parse_depot_csv(csv_)
+        got = {(p_["isin"] or p_["symbol"]): round(p_["qty"], 6) for p_ in pos}
+        self.assertEqual(got, {"US0378331005": 15, "DE000ENER6Y0": 2, "ETH-EUR": 0.5, "IE00B4L5Y983": 10})
+        apple = next(p_ for p_ in pos if p_["isin"] == "US0378331005")
+        self.assertAlmostEqual(apple["buy"], 150.0)
+        self.assertIn("1 Positionen wurden vollständig verkauft", " ".join(notes))     # Tesla
+        self.assertIn("1 stornierte", " ".join(notes))                                 # SAP
+
     def test_checks(self):
         rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
                 {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]
