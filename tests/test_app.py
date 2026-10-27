@@ -883,6 +883,12 @@ class TestForecastAndFairValue(unittest.TestCase):
         self.assertTrue(f["forward"])
         self.assertIn("na", a.fair_value(self.m(fcf=-1e9, est_rev={}, est_eps={}), self.MAC))
 
+    def test_forecast_outweighs_history(self):
+        slow = {"0y": {"growth": 0.10, "n": 20}, "+1y": {"growth": 0.10, "n": 20}}
+        f = a.fair_value(self.m(est_rev=slow, rev_cagr=0.55), self.MAC)
+        g = [x for x in f["assumptions"] if x.startswith("Wachstum Jahre")][0]
+        self.assertIn("/ 13,0 % /", g)  # 0,8 × 10 % + 0,2 × (10 % + 15 Pp.) statt früher 0,6 × 10 % + 0,4 × 50 % = 26 %
+
     def test_forecast_growth(self):
         self.assertAlmostEqual(a.est_growth(self.m(), "est_rev"), 0.09)
         loss_base = {"0y": {"growth": 3.0, "ago": -0.5}, "+1y": {"growth": 0.2, "ago": 1.0}}

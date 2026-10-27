@@ -1807,7 +1807,14 @@ def fair_value(m, mac):
         start = start or {}
         frg = est_growth(m, "est_rev")
         hist_g = m["rev_cagr"]
-        parts_ = [(frg, 0.6), (hist_g, 0.4)] if frg is not None and hist_g is not None else [(frg if frg is not None else hist_g, 1)]
+        if frg is not None and hist_g is not None:
+            # Die Prognose hat Vorrang: 80 % bei mindestens 3 Analysten (sonst 60 %); die Vergangenheit darf höchstens
+            # 15 Prozentpunkte von der Prognose abweichen (sonst trägt z. B. PDD +50 % aus früheren Jahren weiter,
+            # obwohl nur noch ~10 % erwartet werden)
+            w_f = 0.8 if est_analysts(m) >= 3 else 0.6
+            parts_ = [(frg, w_f), (clamp(hist_g, frg - 0.15, frg + 0.15), 1 - w_f)]
+        else:
+            parts_ = [(frg if frg is not None else hist_g, 1)]
         g_base = wavg([(clamp(x, -0.1, 0.5), w) for x, w in parts_ if x is not None])
         if g_base is None:
             g_base = 0.04
