@@ -14,6 +14,7 @@ import i18n_en_a as a  # noqa: E402
 import i18n_en_b as b  # noqa: E402
 import i18n_en_c as c  # noqa: E402
 import i18n_en_d as d  # noqa: E402
+import i18n_en_e as e  # noqa: E402  (Depot-Analyse)
 
 
 def norm(t):
@@ -22,13 +23,13 @@ def norm(t):
 
 def main():
     tpl, problems = {}, []
-    for part in (a.ADJ, a.COUNTRIES, a.SECTORS, a.A, b.B, c.C, d.PROFILES, d.D):
+    for part in (a.ADJ, a.COUNTRIES, a.SECTORS, a.A, b.B, c.C, d.PROFILES, d.D, e.DEPOT_EXACT):
         for de, en in part.items():
             k = norm(de)
             if k in tpl and tpl[k] != en:
                 problems.append(f"unterschiedlich doppelt: {k!r}")
             tpl[k] = en
-    wild = list(d.WILD)
+    wild = list(e.DEPOT_WILD) + list(d.WILD)  # spezifischere Depot-Muster zuerst
     # Geschäftsmodell-Sätze mit Firmennamen: „{Name} <Erlösmodell>.“
     for de, en in d.PROFILES.items():
         if de[:1].islower():

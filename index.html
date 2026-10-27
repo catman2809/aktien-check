@@ -24,6 +24,7 @@
   --neu:#b54708; --neu-soft:#fffaeb; --neu-line:#fedf89;
   --neg:#b42318; --neg-soft:#fef3f2; --neg-line:#fecdca;
   --track:#eaecf0; --shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#008300; --c7:#6250d6; --c8:#e34948; --c-other:#98a2b3;
   --sma50:#eb6834; --sma200:#6250d6;
   --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834;
   --radius:12px;
@@ -37,6 +38,7 @@
     --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
     --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
     --track:#232c3f; --shadow:none;
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767; --c-other:#667085;
     --sma50:#d95926; --sma200:#9085e9;
     --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
   }
@@ -49,6 +51,7 @@
   --neu:#fdb022; --neu-soft:#2d230f; --neu-line:#5c4514;
   --neg:#f97066; --neg-soft:#2f1414; --neg-line:#6b2621;
   --track:#232c3f; --shadow:none;
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767; --c-other:#667085;
   --sma50:#d95926; --sma200:#9085e9;
   --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
 }
@@ -297,6 +300,44 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .bizm{margin-top:16px}
 .lang-btn{font-size:12.5px;font-weight:700;letter-spacing:.02em;width:auto;min-width:38px;padding:0 9px}
 .qr-card{margin-top:16px}
+.dp-teaser{border-color:var(--accent)}
+.dp-upload{margin-bottom:16px}
+.dp-drop{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:22px 16px;border:2px dashed var(--border-strong);border-radius:12px;cursor:pointer}
+.dp-drop span{font-size:13.5px;color:var(--text-2);max-width:620px}
+.dp-drop.over,.dp-drop:focus-visible{border-color:var(--accent);background:var(--accent-soft);outline:none}
+.dp-save{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--text-2);margin:12px 0 6px}
+.dp-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dp-note{margin-top:10px} .dp-err{border-color:var(--neg-line);background:var(--neg-soft)}
+.dp-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:4px 0 8px}
+.dp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;min-width:0}
+.dp-kpi small{display:block;font-size:12px;color:var(--text-3)} .dp-kpi b{display:block;font-size:20px;margin:2px 0}
+.dp-kpi span{display:block;font-size:12px;color:var(--text-3);overflow-wrap:anywhere}
+.dp-kpi b.pos,.dp-tbl .pos{color:var(--pos)} .dp-kpi b.neg,.dp-tbl .neg{color:var(--neg)}
+.dp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px}
+.dp-grid > *,.dp-donut-body > *{min-width:0}
+.dp-donut-body{display:flex;gap:14px;align-items:center}
+.dp-donut svg{flex:0 0 128px} .dp-donut path{cursor:pointer;outline:none} .dp-donut path:hover,.dp-donut path:focus{opacity:.82}
+.dp-leg{list-style:none;margin:0;padding:0;flex:1;font-size:13px}
+.dp-leg li{display:flex;align-items:center;gap:8px;padding:2px 0}
+.dp-leg i{flex:0 0 10px;height:10px;border-radius:3px}
+.dp-leg span{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.3}
+.dp-tip{position:fixed;z-index:60;display:none;pointer-events:none;background:var(--text);color:var(--surface);font-size:12.5px;padding:6px 9px;border-radius:8px;max-width:280px}
+.dp-checks{display:flex;flex-direction:column;gap:10px}
+.dp-check{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+.dp-check b{display:block} .dp-check span{color:var(--text-2)}
+.dp-ico{flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:13px}
+.dp-check.ok .dp-ico{background:var(--pos-soft);color:var(--pos)} .dp-check.warn .dp-ico{background:var(--neg-soft);color:var(--neg)}
+.dp-check.info .dp-ico{background:var(--accent-soft);color:var(--accent)}
+.dp-pairs{margin-top:6px;padding-top:10px;border-top:1px solid var(--border)}
+.dp-wide{margin-top:16px}
+.dp-line svg{width:100%;height:auto;display:block} .dp-ax{font-size:11px;fill:var(--text-3)}
+.dp-line-leg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--text-2);margin-bottom:6px}
+.dp-line-leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.dp-rate-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.dp-groups{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.dp-tbl td,.dp-tbl th{white-space:nowrap} .dp-tbl td small{display:block}
+.dp-intro ul{margin:6px 0 10px;padding-left:20px;font-size:14px;color:var(--text-2)}
+@media (max-width:600px){.dp-donut-body{flex-direction:column;align-items:stretch}.dp-donut svg{align-self:center}.dp-kpi b{font-size:18px}}
 .src-badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:var(--surface-2);color:var(--text);margin-left:2px}
 .dv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px}
 @media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
@@ -1760,7 +1801,7 @@ function bindPushGuide() {
 }
 
 function welcome() {
-  wlView = false;
+  wlView = false; depotView = false;
   $("#subnav").style.display = "none";
   $("#out").innerHTML = `<section class="welcome">
     <h1>Kaufen, halten oder verkaufen?</h1>
@@ -1773,6 +1814,11 @@ function welcome() {
       <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
       <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
       <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
+    </div>
+    <div class="trk-teaser card dp-teaser">
+      <div><b>Mein Depot analysieren</b>
+        <span>CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Risiko, Dividenden und ein Depot-Check auf Klumpenrisiken.</span></div>
+      <button class="btn primary" id="dpopen">Depot hochladen</button>
     </div>
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
@@ -1797,6 +1843,7 @@ function welcome() {
     </section>`;
   const ad_ = $("#admopen"); if (ad_) ad_.onclick = () => showAdmin();
   $("#trkopen").onclick = () => showTrack();
+  $("#dpopen").onclick = () => showDepot();
   const so_ = $("#scropen"); if (so_) so_.onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
   wlBind($("#out"));
@@ -1804,6 +1851,249 @@ function welcome() {
   const wa = $("#wlall"); if (wa) wa.onclick = () => showWatchlist();
   document.querySelectorAll(".quick button").forEach(b => b.onclick = () => { $("#q").value = b.dataset.q; run(b.dataset.q); });
   bindA2hs();
+}
+
+/* Depot-Analyse: CSV-Export des Brokers hochladen -> Struktur, Risiko, Dividenden, Prüfpunkte */
+let DEPOT = null, depotView = false, depotBusy = "", depotErr = "", depotRatings = {};
+const DP_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
+const DP_TEMPLATE = "ISIN;Name;Stück;Kaufkurs\nDE0007164600;SAP SE;10;120,00\nUS0378331005;Apple Inc.;5;145,30\nIE00B4L5Y983;iShares Core MSCI World;40;75,20\n";
+
+function showDepot() {
+  runId++; wlView = false; depotView = true;
+  $("#subnav").style.display = "none";
+  navTo("?view=depot");
+  renderDepot(); window.scrollTo({top: 0});
+  const my = runId;
+  api("/api/depot").then(d => { if (my !== runId) return; DEPOT = d.empty ? null : d; renderDepot(); })
+    .catch(e => { if (my !== runId || e.message === "login") return; depotErr = e.message; renderDepot(); });
+}
+
+async function depotUpload(file) {
+  depotErr = "";
+  if (!file) return;
+  if (file.size > 1_500_000) { depotErr = "Die Datei ist zu groß (höchstens 1,5 MB)."; return renderDepot(); }
+  const buf = await file.arrayBuffer();
+  let text;
+  try { text = new TextDecoder("utf-8", {fatal: true}).decode(buf); } catch (e) { text = new TextDecoder("windows-1252").decode(buf); }
+  const save = $("#dp-save") ? $("#dp-save").checked : true;
+  depotBusy = "Depot wird eingelesen und analysiert … (je nach Größe 5–30 Sekunden)"; renderDepot();
+  const my = runId;
+  try {
+    const d = await api("/api/depot", {csv: text, save, filename: file.name});
+    if (my !== runId) return;
+    DEPOT = d; depotRatings = {};
+  } catch (e) { if (e.message !== "login") depotErr = e.message; }
+  depotBusy = ""; renderDepot();
+}
+
+function dpDonut(title, items, sub) {
+  if (!items || !items.length) return "";
+  const top = items.slice(0, 7), rest = items.slice(7);
+  const segs = top.map((x, i) => ({label: x.label, weight: x.weight, value: x.value, color: DP_COLORS[i]}));
+  if (rest.length) segs.push({label: `Sonstige (${rest.length})`, weight: rest.reduce((a, x) => a + x.weight, 0),
+    value: rest.reduce((a, x) => a + x.value, 0), color: "var(--c-other)"});
+  const R = 52, r0 = 32, cx = 64, cy = 64;
+  let a0 = -Math.PI / 2;
+  const arc = (s, w) => {
+    const a1 = a0 + Math.max(w, 0.0005) * 2 * Math.PI - (segs.length > 1 ? 0.0001 : 0);
+    const big_ = a1 - a0 > Math.PI ? 1 : 0, p = (rad, a) => [cx + rad * Math.cos(a), cy + rad * Math.sin(a)].map(v => v.toFixed(2)).join(" ");
+    const d = segs.length === 1 ? `M ${cx} ${cy - R} A ${R} ${R} 0 1 1 ${cx - 0.01} ${cy - R} L ${cx - 0.01} ${cy - r0} A ${r0} ${r0} 0 1 0 ${cx} ${cy - r0} Z`
+      : `M ${p(R, a0)} A ${R} ${R} 0 ${big_} 1 ${p(R, a1)} L ${p(r0, a1)} A ${r0} ${r0} 0 ${big_} 0 ${p(r0, a0)} Z`;
+    a0 = a1;
+    return d;
+  };
+  const paths = segs.map((s, i) => `<path d="${arc(s, s.weight)}" fill="${s.color}" stroke="var(--surface)" stroke-width="2"
+      data-tip="${esc(s.label)}: ${pc(s.weight, 1)} · ${nf(s.value, 0)} €" tabindex="0"></path>`).join("");
+  return `<div class="card pad dp-donut"><h3>${esc(title)}</h3>${sub ? `<div class="stamp" style="margin:-4px 0 8px">${esc(sub)}</div>` : ""}
+    <div class="dp-donut-body"><svg viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="${esc(title)}: ${esc(segs.map(s => s.label + " " + pc(s.weight, 0)).join(", "))}">${paths}</svg>
+    <ul class="dp-leg">${segs.map(s => `<li><i style="background:${s.color}"></i><span title="${esc(s.label)}">${esc(s.label)}</span><b class="num">${pc(s.weight, 1)}</b></li>`).join("")}</ul></div></div>`;
+}
+
+function dpLine(C) {
+  if (!C || !C.dates || C.dates.length < 2) return "";
+  const W = 640, H = 220, L = 44, Rr = 12, T = 12, B = 26;
+  const all = C.depot.concat(C.bench), lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.08 || 1;
+  const y0 = lo - pad, y1 = hi + pad, n = C.dates.length;
+  const X = i => L + (W - L - Rr) * i / (n - 1), Y = v => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
+  const path = arr => arr.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
+  const ticks = [0, 0.5, 1].map(f => y0 + (y1 - y0) * f);
+  const months = C.dates.map((d, i) => [d, i]).filter(([d], i, a) => i === 0 || d.slice(5, 7) !== a[i - 1][0].slice(5, 7)).filter((_, k) => k % 2 === 0);
+  const mon = d => new Date(d + "T00:00:00").toLocaleDateString("de-DE", {month: "short", year: "2-digit"});
+  return `<div class="card pad dp-wide"><h3>Entwicklung der letzten 12 Monate <span class="stamp">indexiert auf 100</span></h3>
+    <div class="dp-line-leg"><span><i style="background:var(--c1)"></i>Dein Depot (heutige Stückzahlen)</span><span><i style="background:var(--c2)"></i>${esc(C.bench_name)}</span></div>
+    <div class="dp-line" data-n="${n}"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Depot ${nf(C.depot[n - 1], 1)}, ${esc(C.bench_name)} ${nf(C.bench[n - 1], 1)} (Start = 100)">
+      ${ticks.map(v => `<line x1="${L}" x2="${W - Rr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--track)"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" class="dp-ax">${nf(v, 0)}</text>`).join("")}
+      ${months.map(([d, i]) => `<text x="${X(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="dp-ax">${mon(d)}</text>`).join("")}
+      <path d="${path(C.bench)}" fill="none" stroke="var(--c2)" stroke-width="2"/>
+      <path d="${path(C.depot)}" fill="none" stroke="var(--c1)" stroke-width="2"/>
+      <line class="dp-cross" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--text-3)" stroke-dasharray="3 3" style="display:none"/>
+      <rect x="${L}" y="${T}" width="${W - L - Rr}" height="${H - T - B}" fill="transparent" class="dp-hit"/></svg></div>
+    <div class="stamp" style="margin-top:6px">Rückrechnung mit den heutigen Stückzahlen und Wechselkursen je Tag – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden nicht wieder angelegt).</div></div>`;
+}
+
+function dpKpi(label, value, sub, tone) {
+  return `<div class="dp-kpi"><small>${esc(label)}</small><b class="num ${tone || ""}">${value}</b><span>${sub || "&nbsp;"}</span></div>`;
+}
+
+function renderDepot() {
+  if (!depotView || !location.search.includes("view=depot")) return;
+  const D = DEPOT, S = D?.summary, Rk = D?.risk || {};
+  const eur = v => v == null ? "–" : nf(v, v >= 1000 ? 0 : 2) + " €";
+  const tone = v => v == null ? "" : v >= 0 ? "pos" : "neg";
+  const upload = `<div class="card pad dp-upload">
+    <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="CSV-Datei auswählen">
+      <b>${D ? "Neue Depot-Datei hochladen" : "CSV-Datei deines Depots hierher ziehen oder auswählen"}</b>
+      <span>Export aus deinem Online-Depot (z. B. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) oder eine eigene Tabelle mit den Spalten ISIN (oder Symbol/Name), Stück und optional Kaufkurs.</span>
+      <input type="file" id="dp-file" accept=".csv,.txt,text/csv" hidden>
+      <button class="btn primary" id="dp-pick" type="button">Datei auswählen</button></div>
+    <label class="dp-save"><input type="checkbox" id="dp-save" checked> Depot in meinem Konto speichern (verschlüsselt), damit es beim nächsten Besuch wieder da ist</label>
+    <div class="dp-actions"><button class="btn xs" id="dp-tpl" type="button">Vorlage herunterladen</button>
+      ${D?.saved ? `<button class="btn xs" id="dp-del" type="button">Gespeichertes Depot löschen</button>` : ""}</div>
+    ${depotBusy ? `<div class="note dp-note"><span class="wl-busy"></span> ${esc(depotBusy)}</div>` : ""}
+    ${depotErr ? `<div class="note dp-note dp-err">${esc(depotErr)}</div>` : ""}</div>`;
+  let body = "";
+  if (D && S) {
+    const P = D.positions, A = D.alloc;
+    const rated = P.filter(p => depotRatings[p.symbol]?.label);
+    const groupShare = g => rated.filter(p => depotRatings[p.symbol].group === g).reduce((a, p) => a + p.weight, 0);
+    const ratedW = rated.reduce((a, p) => a + p.weight, 0);
+    body = `
+    ${(D.unresolved || []).length ? `<div class="note dp-note">Nicht zugeordnet (fehlen in der Auswertung): ${esc(D.unresolved.join(", "))}</div>` : ""}
+    ${(D.notes || []).map(n => `<div class="note dp-note">${esc(n)}</div>`).join("")}
+    <div class="dp-kpis">
+      ${dpKpi("Depotwert", eur(S.total), `${S.n} Positionen`)}
+      ${dpKpi("Gewinn/Verlust", S.gain != null ? (S.gain >= 0 ? "+" : "") + eur(S.gain) : "–", S.gain_pct != null ? pc(S.gain_pct, 1, true) + (S.cost_coverage < 0.99 ? ` · für ${pc(S.cost_coverage, 0)} des Depots` : "") : "Kaufkurse fehlen in der Datei", tone(S.gain))}
+      ${dpKpi("Rendite 12 Monate", Rk.perf_1y != null ? pc(Rk.perf_1y, 1, true) : "–", Rk.bench_perf != null ? `MSCI World ${pc(Rk.bench_perf, 1, true)}` : "", tone(Rk.perf_1y))}
+      ${dpKpi("Dividenden pro Jahr", eur(S.div), `Rendite ${pc(S.div_yield, 2)}${S.div_yoc != null ? " · auf Einstand " + pc(S.div_yoc, 2) : ""}`)}
+      ${dpKpi("Schwankung (Volatilität)", Rk.vol != null ? pc(Rk.vol, 1) : "–", Rk.bench_vol != null ? `MSCI World ${pc(Rk.bench_vol, 1)}` : "pro Jahr")}
+      ${dpKpi("Größter Rückgang", Rk.max_dd != null ? pc(Rk.max_dd, 1) : "–", "vom Hoch, letzte 12 Monate", Rk.max_dd != null ? "neg" : "")}
+      ${dpKpi("Beta zum MSCI World", Rk.beta != null ? nf(Rk.beta, 2) : "–", Rk.beta != null ? (Rk.beta > 1.1 ? "schwankt stärker als der Markt" : Rk.beta < 0.9 ? "schwankt weniger als der Markt" : "etwa wie der Markt") : "")}
+      ${dpKpi("Sharpe-Ratio", Rk.sharpe != null ? nf(Rk.sharpe, 2) : "–", "Rendite je Risikoeinheit (über 1 = gut)")}
+      ${dpKpi("Größte Position", pc(S.largest, 1), S.largest_name)}
+      ${dpKpi("Top 5 / Top 10", `${pc(S.top5, 0)} / ${pc(S.top10, 0)}`, "Anteil am Depot")}
+    </div>
+    <h2 class="section">Aufteilung</h2>
+    <div class="dp-grid">
+      ${dpDonut("Einzelpositionen", A.positions)}
+      ${dpDonut("Branchen", A.sectors, S.see_through > 0.02 ? `inkl. Durchschau in ETFs (${pc(S.see_through, 0)} des Depots)` : "")}
+      ${dpDonut("Länder", A.countries, "Sitz der Unternehmen")}
+      ${dpDonut("Anlageklassen", A.kinds)}
+      ${dpDonut("Währungen", A.currencies, "Heimatwährung der Unternehmen")}
+    </div>
+    <h2 class="section">Depot-Check</h2>
+    <div class="card pad dp-checks">${(D.checks || []).map(c => `<div class="dp-check ${c.level}"><span class="dp-ico" aria-hidden="true">${c.level === "ok" ? "✓" : c.level === "warn" ? "!" : "i"}</span>
+      <div><b>${esc(c.title)}</b><span>${esc(c.text)}</span></div></div>`).join("")}
+      ${(Rk.pairs || []).length ? `<div class="dp-pairs"><b>Ähnlich verlaufende Positionen</b> <span class="stamp">(Korrelation der Tagesrenditen, 12 Monate)</span>
+        ${Rk.pairs.map(p => `<div class="adm-row"><span>${esc(p.a)} ↔ ${esc(p.b)}</span><b class="num">${nf(p.corr, 2)}</b></div>`).join("")}</div>` : ""}
+      ${Rk.avg_corr != null ? `<div class="stamp" style="margin-top:8px">Durchschnittliche Korrelation der größeren Positionen: ${nf(Rk.avg_corr, 2)} (unter 0,5 = gute Streuung).</div>` : ""}</div>
+    ${dpLine(D.chart)}
+    <h2 class="section">Positionen</h2>
+    <div class="card pad">
+      <div class="dp-rate-bar">
+        <button class="btn" id="dp-rate" type="button" ${depotBusy ? "disabled" : ""}>${rated.length ? "Einschätzungen aktualisieren" : "Einschätzungen der App laden"}</button>
+        <span class="stamp" id="dp-rate-st">${rated.length ? `${rated.length} von ${P.filter(p => p.symbol).length} bewertet` : "Analysiert jede Position einzeln (dauert etwa 5–10 Sekunden je Position)."}</span></div>
+      ${ratedW > 0 ? `<div class="dp-groups">${[["Kaufen", "pos"], ["Halten", "neu"], ["Verkaufen", "neg"]].map(([g, t]) =>
+        `<span class="tone ${t}">${g} ${pc(groupShare(g) / ratedW, 0)}</span>`).join("")}<span class="stamp">nach Depotanteil der bewerteten Positionen</span></div>` : ""}
+      <div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
+        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th><th>Branche</th><th>Land</th><th>Einschätzung</th></tr></thead>
+      <tbody>${P.map(p => { const R_ = depotRatings[p.symbol];
+        return `<tr><td><span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
+        <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
+        <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
+        <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
+        <td class="num ${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</td>
+        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td><td>${esc(p.sector)}</td><td>${esc(p.country)}</td>
+        <td>${R_ ? (R_.label ? `<span class="tone ${groupTone[R_.group] || ""}">${esc(R_.label)}</span>${R_.fair != null ? `<small class="stamp">fair ${pc(R_.fair, 0, true)}</small>` : ""}` : `<span class="stamp">${esc(R_.err || "…")}</span>`) : "–"}</td></tr>`; }).join("")}</tbody></table></div>
+      <div class="stamp" style="margin-top:8px"><span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
+        ${D.file ? `<span>Datei:</span> <span translate="no">${esc(D.file)}</span>` : ""}${D.saved ? ` <span>· gespeichert am ${esc(D.saved)}</span>` : ""}
+        <span>Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.</span></div></div>`;
+  } else if (!depotBusy) {
+    body = `<div class="card pad dp-intro"><h3>Was die Depot-Analyse zeigt</h3><ul>
+      <li>Aufteilung nach Einzelpositionen, Branchen (mit Durchschau in ETFs), Ländern, Anlageklassen und Währungen</li>
+      <li>Depotwert, Gewinn/Verlust je Position, erwartete Dividenden pro Jahr</li>
+      <li>Rendite, Schwankung, größter Rückgang, Beta und Sharpe-Ratio der letzten 12 Monate im Vergleich zum MSCI World</li>
+      <li>Depot-Check: Klumpenrisiken, Streuung, Heimatmarkt-Neigung, Währungsrisiko, ähnlich verlaufende Positionen</li>
+      <li>Auf Wunsch die Einschätzung der App für jede Position</li></ul>
+      <p class="stamp">Die Datei wird nur auf dem Server ausgewertet. Gespeichert werden – wenn du es möchtest – nur Wertpapier, Stückzahl und Kaufkurs, verschlüsselt in deinem Konto.</p></div>`;
+  }
+  $("#out").innerHTML = `<section class="dp">
+    <div class="wl-head"><div><div class="eyebrow">Depot-Analyse</div><h1>Mein Depot</h1></div></div>
+    ${upload}${body}</section>`;
+  bindDepot();
+}
+
+function bindDepot() {
+  const inp = $("#dp-file"), drop = $("#dp-drop");
+  if (inp) inp.onchange = () => depotUpload(inp.files[0]);
+  if ($("#dp-pick")) $("#dp-pick").onclick = e => { e.stopPropagation(); inp.click(); };
+  if (drop) {
+    drop.onclick = () => inp.click();
+    drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inp.click(); } };
+    drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); depotUpload(e.dataTransfer.files[0]); };
+  }
+  if ($("#dp-tpl")) $("#dp-tpl").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + DP_TEMPLATE], {type: "text/csv"}));
+    a.download = "depot-vorlage.csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  if ($("#dp-del")) $("#dp-del").onclick = async () => {
+    if (!confirm("Gespeichertes Depot wirklich löschen?")) return;
+    try { await api("/api/depot", {action: "delete"}); DEPOT = null; depotRatings = {}; } catch (e) { depotErr = e.message; }
+    renderDepot();
+  };
+  if ($("#dp-rate")) $("#dp-rate").onclick = () => depotRate();
+  document.querySelectorAll(".dp-tbl a[data-q]").forEach(a => a.onclick = e => { e.preventDefault(); depotView = false; $("#q").value = a.dataset.q; run(a.dataset.q); });
+  // Tooltips: Kreisdiagramme und Verlaufslinie
+  let tip = $("#dp-tip");
+  if (!tip) { tip = document.createElement("div"); tip.id = "dp-tip"; tip.className = "dp-tip"; document.body.appendChild(tip); }
+  const show = (txt, x, y) => { tip.textContent = txt; tip.style.display = "block"; tip.style.left = Math.min(x + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (y + 12) + "px"; };
+  const hide = () => { tip.style.display = "none"; };
+  document.querySelectorAll(".dp-donut path[data-tip]").forEach(p => {
+    p.onmousemove = e => show(p.dataset.tip, e.clientX, e.clientY);
+    p.onmouseleave = hide;
+    p.onfocus = () => { const r = p.getBoundingClientRect(); show(p.dataset.tip, r.right, r.top); };
+    p.onblur = hide;
+  });
+  const C = DEPOT?.chart, wrap = document.querySelector(".dp-line");
+  if (C && wrap) {
+    const svg = wrap.querySelector("svg"), hit = wrap.querySelector(".dp-hit"), cross = wrap.querySelector(".dp-cross");
+    hit.onmousemove = e => {
+      const box = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal, x = (e.clientX - box.left) / box.width * vb.width;
+      const L = +hit.getAttribute("x"), w = +hit.getAttribute("width"), n = C.dates.length;
+      const i = Math.max(0, Math.min(n - 1, Math.round((x - L) / w * (n - 1)))), xi = L + w * i / (n - 1);
+      cross.setAttribute("x1", xi); cross.setAttribute("x2", xi); cross.style.display = "";
+      const d = new Date(C.dates[i] + "T00:00:00").toLocaleDateString("de-DE");
+      show(`${d} · Depot ${nf(C.depot[i], 1)} · ${C.bench_name.split(" (")[0]} ${nf(C.bench[i], 1)}`, e.clientX, e.clientY);
+    };
+    hit.onmouseleave = () => { cross.style.display = "none"; hide(); };
+  }
+}
+
+async function depotRate() {
+  if (!DEPOT) return;
+  const todo = DEPOT.positions.filter(p => p.symbol);
+  const my = runId;
+  let done = 0;
+  const total = todo.length;
+  const st = () => { const el = $("#dp-rate-st"); if (el) el.textContent = `${done} von ${total} bewertet …`; };
+  todo.forEach(p => { depotRatings[p.symbol] = {label: null}; });
+  renderDepot(); st();
+  const worker = async () => {
+    while (todo.length) {
+      const p = todo.shift();
+      try {
+        const r = await api("/api/analyze?q=" + encodeURIComponent(p.symbol));
+        depotRatings[p.symbol] = {label: r.rating?.label, group: r.rating?.group, fair: r.fair?.upside};
+      } catch (e) { depotRatings[p.symbol] = {label: null, err: "nicht verfügbar"}; }
+      done++;
+      if (my !== runId) return;
+      renderDepot(); st();
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  renderDepot();
 }
 
 /* Glossar: Fachbegriffe antippen -> kurze Erklärung */
@@ -3012,6 +3302,7 @@ function route() {
   else if (ps.get("view") === "watchlist") showWatchlist();
   else if (ps.get("view") === "trefferquote") showTrack();
   else if (ps.get("view") === "glossar") showGlossary();
+  else if (ps.get("view") === "depot") showDepot();
   else if (ps.get("view") === "screener") showScreener();
   else if (ps.get("view") === "admin") showAdmin();
   else if (pre) { $("#q").value = pre; run(pre); }

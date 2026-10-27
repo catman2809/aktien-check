@@ -6430,6 +6430,415 @@ def analyze(query):
 
 
 # ---------------------------------------------------------------------------
+# Depot-Analyse: CSV aus dem Broker-Export einlesen, Positionen zuordnen, Struktur, Risiko und Dividenden auswerten
+# ---------------------------------------------------------------------------
+DEPOT_MAX_POSITIONS = 200
+DEPOT_MAX_CSV = 1_500_000           # Zeichen
+DEPOT_CACHE = {}                    # Benutzer -> (Zeit, Signatur, Ergebnis)
+DEPOT_SYM_CACHE = {}                # Kennung -> (Zeit, Treffer)
+DEPOT_BENCH = ("EUNL.DE", "MSCI World (iShares Core, EUR)")
+DEPOT_RF = 0.025                    # risikoloser Zins für die Sharpe-Ratio (Euro)
+# Spaltenerkennung: (Feld, Stichwörter) – Reihenfolge zählt („Einstandswert“ vor „Wert“, „Wertpapier“ vor „Wert“)
+DEPOT_COLS = (
+    ("isin", ("isin",)),
+    ("wkn", ("wkn",)),
+    ("symbol", ("symbol", "ticker", "kuerzel", "kürzel")),
+    ("name", ("wertpapiername", "wertpapier", "bezeichnung", "instrument", "produkt", "security", "description")),
+    ("qty", ("stueck", "stück", "stk", "anzahl", "menge", "bestand", "quantity", "shares", "nominal", "units")),
+    ("cost", ("einstandswert", "kaufwert", "anschaffungswert", "investiert", "einstand gesamt", "cost basis", "kosten")),
+    ("buy", ("kaufkurs", "einstandskurs", "einstiegskurs", "kaufpreis", "durchschnittskurs", "einstand", "avg", "average",
+             "purchase", "buy")),
+    ("value", ("kurswert", "marktwert", "aktueller wert", "depotwert", "market value", "value", "wert")),
+    ("price", ("aktueller kurs", "letzter kurs", "kurs", "price")),
+    ("cur", ("waehrung", "währung", "currency", "whg")),
+    ("name", ("name", "titel")),
+)
+TAX_HAVEN_ISO = {"KY", "BM", "VG", "JE", "GG", "CW", "PA", "LR", "MH", "IM"}
+EURO_ISO = {"DE", "FR", "NL", "IT", "ES", "AT", "BE", "FI", "IE", "PT", "LU", "GR", "SK", "SI", "EE", "LV", "LT", "MT", "CY", "HR"}
+ISO_CURRENCY = {"US": "USD", "GB": "GBP", "JE": "GBP", "GG": "GBP", "CH": "CHF", "DK": "DKK", "SE": "SEK", "NO": "NOK",
+                "JP": "JPY", "CN": "CNY", "HK": "HKD", "TW": "TWD", "KR": "KRW", "CA": "CAD", "AU": "AUD", "IN": "INR",
+                "BR": "BRL", "SG": "SGD", "IL": "ILS", "PL": "PLN", "ZA": "ZAR", "MX": "MXN", "NZ": "NZD"}
+SUFFIX_CURRENCY = {"DE": "EUR", "F": "EUR", "BE": "EUR", "MU": "EUR", "SG": "EUR", "HM": "EUR", "DU": "EUR", "HA": "EUR",
+                   "AS": "EUR", "PA": "EUR", "MI": "EUR", "MC": "EUR", "BR": "EUR", "VI": "EUR", "LS": "EUR", "HE": "EUR",
+                   "IR": "EUR", "L": "GBp", "SW": "CHF", "CO": "DKK", "ST": "SEK", "OL": "NOK", "T": "JPY", "HK": "HKD",
+                   "TO": "CAD", "V": "CAD", "AX": "AUD"}
+EQUITY_SECTOR_DE = {"technology": "Technologie", "financial services": "Finanzen", "financial": "Finanzen",
+                    "healthcare": "Gesundheit", "industrials": "Industrie", "consumer cyclical": "Zyklischer Konsum",
+                    "consumer defensive": "Basiskonsum", "communication services": "Kommunikation", "energy": "Energie",
+                    "basic materials": "Grundstoffe", "utilities": "Versorger", "real estate": "Immobilien"}
+
+
+def _depot_norm(h):
+    return " ".join((h or "").replace("﻿", "").strip().strip('"').lower().split())
+
+
+def _depot_num(s, dec_comma):
+    """Zahl aus Broker-Exporten: „1.234,56 €“, „1,234.56“, „-12,5 %“, „100 Stk.“ …"""
+    s = re.sub(r"[^\d,.\-]", "", str(s or ""))
+    if not re.search(r"\d", s):
+        return None
+    if "," in s and "." in s:
+        dec = "," if s.rfind(",") > s.rfind(".") else "."
+    elif "," in s:
+        dec = "," if dec_comma or not re.fullmatch(r"-?\d{1,3}(,\d{3})+", s) else None
+    elif "." in s:
+        dec = None if dec_comma and re.fullmatch(r"-?\d{1,3}(\.\d{3})+", s) else "."
+    else:
+        dec = None
+    thou = {",": ".", ".": ",", None: ",." if dec_comma else ","}[dec]
+    for ch in thou:
+        s = s.replace(ch, "")
+    if dec:
+        s = s.replace(dec, ".")
+    return num(s)
+
+
+def parse_depot_csv(text):
+    """Liest gängige Depot-Exporte (comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic …) oder eine
+    eigene CSV mit Spalten wie ISIN/Symbol/Name, Stück, Kaufkurs. Gibt (Positionen, Hinweise) zurück."""
+    if not text or not text.strip():
+        raise ValueError("Die Datei ist leer.")
+    if len(text) > DEPOT_MAX_CSV:
+        raise ValueError("Die Datei ist zu groß (höchstens 1,5 MB).")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    sample = "\n".join(lines[:40])
+    delim = max(";,\t|", key=lambda d: sample.count(d))
+    rows = list(csv.reader(lines, delimiter=delim))
+    head_i, cols = None, {}
+    for i, r_ in enumerate(rows[:40]):
+        found = {}
+        for j, cell in enumerate(r_):
+            h = _depot_norm(cell)
+            if not h or len(h) > 40:
+                continue
+            for field, kws in DEPOT_COLS:
+                if field not in found and any(k in h for k in kws):
+                    found[field] = j
+                    break
+        if ("qty" in found or "value" in found) and any(k in found for k in ("isin", "wkn", "symbol", "name")):
+            head_i, cols = i, found
+            break
+    if head_i is None:
+        raise ValueError("Keine Kopfzeile erkannt. Benötigt werden eine Spalte für das Wertpapier (ISIN, WKN, Symbol "
+                         "oder Name) und eine für die Stückzahl oder den Wert.")
+    dec_comma = delim != ","
+    out, notes, seen = [], [], {}
+    for r_ in rows[head_i + 1:]:
+        get = lambda f: r_[cols[f]].strip() if f in cols and cols[f] < len(r_) else ""
+        isin = get("isin").upper().replace(" ", "")
+        isin = isin if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{9}\d", isin) else ""
+        wkn = get("wkn").upper() if re.fullmatch(r"[A-Z0-9]{6}", get("wkn").upper()) else ""
+        sym, name = get("symbol").upper(), get("name")
+        if not (isin or wkn or sym or name) or re.match(r"(?i)(summe|gesamt|total|depotwert|saldo)", name or sym):
+            continue
+        qty, val = _depot_num(get("qty"), dec_comma), _depot_num(get("value"), dec_comma)
+        if not (qty and qty > 0) and not (val and val > 0):
+            continue
+        key = isin or wkn or sym or name.lower()
+        p_ = {"isin": isin, "wkn": wkn, "symbol": sym, "name": name[:80], "qty": qty if qty and qty > 0 else None,
+              "buy": _depot_num(get("buy"), dec_comma), "cost": _depot_num(get("cost"), dec_comma),
+              "value": val, "cur": (get("cur") or "").upper()[:3] or None}
+        if key in seen:  # gleiche Position aus mehreren Lagerstellen zusammenfassen
+            q_ = seen[key]
+            if p_["qty"] and q_["qty"]:
+                if p_["buy"] and q_["buy"]:
+                    q_["buy"] = (q_["buy"] * q_["qty"] + p_["buy"] * p_["qty"]) / (q_["qty"] + p_["qty"])
+                q_["qty"] += p_["qty"]
+            for f in ("cost", "value"):
+                if p_[f]:
+                    q_[f] = (q_[f] or 0) + p_[f]
+            continue
+        seen[key] = p_
+        out.append(p_)
+        if len(out) >= DEPOT_MAX_POSITIONS:
+            notes.append(f"Nur die ersten {DEPOT_MAX_POSITIONS} Positionen wurden übernommen.")
+            break
+    if not out:
+        raise ValueError("Keine Positionen gefunden – bitte prüfe, ob die Datei Stückzahlen oder Werte enthält.")
+    return out, notes
+
+
+def depot_resolve(p_):
+    """Yahoo-Symbol zu einer Position: Symbol, sonst ISIN, sonst Name (WKN ist bei Yahoo nicht suchbar)."""
+    key = p_.get("symbol") or p_.get("isin") or p_.get("name") or p_.get("wkn")
+    hit = DEPOT_SYM_CACHE.get(key)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1]
+    found = None
+    for q in (p_.get("symbol"), p_.get("isin"), p_.get("name")):
+        if not q:
+            continue
+        res = safe(lambda: search_symbols(q, include_crypto=True), []) or []
+        if q == p_.get("symbol"):
+            res = [x for x in res if x["symbol"].upper() == q.upper()] or res[:1]
+        if res:
+            # bei Nicht-US-ISINs bevorzugt die Xetra-Notierung (Euro, gute Datenqualität)
+            found = next((x for x in res if x["symbol"].endswith(".DE")), None) if p_.get("isin", "")[:2] not in ("", "US") else None
+            found = found or res[0]
+            break
+    DEPOT_SYM_CACHE[key] = (time.time(), found)
+    return found
+
+
+def _depot_listing_currency(sym):
+    if sym.endswith("-EUR"):
+        return "EUR"
+    suf = sym.rsplit(".", 1)[1] if "." in sym else ""
+    cur = safe(lambda: yf.Ticker(sym).fast_info.currency)
+    return cur or SUFFIX_CURRENCY.get(suf, "USD" if not suf else None)
+
+
+def _depot_etf_sectors(sym):
+    fd = safe(lambda: yf.Ticker(sym).funds_data)
+    sw = safe(lambda: fd.sector_weightings) or {}
+    ac = safe(lambda: fd.asset_classes) or {}
+    sec = {SECTOR_DE.get(k, k): float(v) for k, v in sw.items() if num(v)}
+    tot = sum(sec.values())
+    return ({k: v / tot for k, v in sec.items()} if tot > 0.5 else None), (num(ac.get("bondPosition")) or 0)
+
+
+def _depot_share(items):
+    """[(Bezeichnung, Wert)] -> sortierte Anteile."""
+    agg = {}
+    for k, v in items:
+        if v and v > 0:
+            agg[k] = agg.get(k, 0.0) + v
+    tot = sum(agg.values()) or 1.0
+    return [{"label": k, "value": v, "weight": v / tot} for k, v in sorted(agg.items(), key=lambda kv: -kv[1])]
+
+
+def analyze_depot(positions):
+    """Struktur, Konzentration, Rendite, Risiko, Dividenden und Prüfpunkte eines Depots (Werte in Euro)."""
+    import pandas as pd
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        hits = list(ex.map(lambda p_: safe(lambda: depot_resolve(p_)), positions))
+    syms = sorted({h["symbol"] for h in hits if h})
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        curs = dict(zip(syms, ex.map(_depot_listing_currency, syms)))
+        etfs = {h["symbol"] for h in hits if h and h.get("etf")}
+        etf_info = dict(zip(sorted(etfs), ex.map(_depot_etf_sectors, sorted(etfs))))
+    fx_needed = sorted({{"GBp": "GBP"}.get(c, c) for c in curs.values() if c and c not in ("EUR",)})
+    fx_syms = [f"{c}EUR=X" for c in fx_needed]
+    tickers = syms + fx_syms + [DEPOT_BENCH[0]]
+    data = safe(lambda: yf.download(tickers, period="1y", auto_adjust=True, actions=True, progress=False, threads=True))
+    close = data["Close"] if data is not None and "Close" in data else pd.DataFrame()
+    divs = data["Dividends"] if data is not None and "Dividends" in data else pd.DataFrame()
+    if isinstance(close, pd.Series):
+        close = close.to_frame(tickers[0])
+    close = close.ffill()
+
+    def fx_series(cur):
+        c = {"GBp": "GBP"}.get(cur, cur)
+        if not c or c == "EUR":
+            return pd.Series(1.0, index=close.index)
+        s_ = close.get(f"{c}EUR=X")
+        if s_ is None or s_.dropna().empty:
+            k = fx_rate(c, "EUR")
+            return pd.Series(k, index=close.index)
+        return s_.ffill().bfill()
+    rows, unresolved, series = [], [], {}
+    for p_, h in zip(positions, hits):
+        sym = h["symbol"] if h else None
+        cur = curs.get(sym) if sym else None
+        px_s = close.get(sym) if sym is not None and sym in close else None
+        price = num(px_s.dropna().iloc[-1]) if px_s is not None and not px_s.dropna().empty else None
+        pence = cur == "GBp"
+        if price is not None and pence:
+            price /= 100
+        fx = num(fx_series(cur).iloc[-1]) if sym and len(close) else None
+        price_eur = price * fx if price is not None and fx else None
+        qty = p_.get("qty")
+        value = qty * price_eur if qty and price_eur else None
+        scale, flag = 1.0, None
+        if value and p_.get("value") and not 0.75 <= p_["value"] / value <= 1.33:
+            # z. B. andere Aktiengattung/Börse als in der Datei (Alibaba: Hongkong-Aktie vs. US-ADR) -> Wert laut Datei
+            scale, flag = p_["value"] / value, "Wert laut Datei – der gefundene Kurs passt nicht zur Stückzahl"
+            value = p_["value"]
+        if value is None and p_.get("value"):
+            value = p_["value"]  # Wert laut Datei (Euro angenommen), wenn kein Kurs gefunden wurde
+            qty = qty or (value / price_eur if price_eur else None)
+        if not value:
+            unresolved.append(p_.get("name") or p_.get("isin") or p_.get("symbol") or p_.get("wkn"))
+            continue
+        buy_fx = fx_rate(p_["cur"], "EUR") if p_.get("cur") and p_["cur"] != "EUR" else 1.0
+        cost = p_["cost"] * buy_fx if p_.get("cost") else (p_["buy"] * buy_fx * qty if p_.get("buy") and qty else None)
+        kind = "Krypto" if h and h.get("crypto") else "ETF" if h and h.get("etf") else "Aktie" if h else "Nicht zugeordnet"
+        iso = (p_.get("isin") or "")[:2]
+        if iso in TAX_HAVEN_ISO and sym and "." in sym:  # Sitz in Steueroase -> Land der Börsennotierung
+            iso = (SUFFIX_MARKET.get(sym.rsplit(".", 1)[1]) or (iso,))[0]
+        if not iso and sym and kind == "Aktie":
+            suf = sym.rsplit(".", 1)[1] if "." in sym else ""
+            iso = (SUFFIX_MARKET.get(suf) or (None,))[0] if suf else "US"
+        etf_sec, bond_share = etf_info.get(sym, (None, 0)) if kind == "ETF" else (None, 0)
+        if kind == "ETF" and bond_share > 0.5:
+            kind = "Anleihen-ETF"
+        sector = ("Krypto" if kind == "Krypto" else "ETF (breit gestreut)" if kind.endswith("ETF") else
+                  EQUITY_SECTOR_DE.get((h or {}).get("sector", "").lower(), (h or {}).get("sector") or "Unbekannt"))
+        country = ("Krypto" if kind == "Krypto" else "ETF (international)" if kind.endswith("ETF")
+                   else ISO_DE.get(iso, iso or "Unbekannt"))
+        home_cur = ("EUR" if iso in EURO_ISO else ISO_CURRENCY.get(iso) or {"GBp": "GBP"}.get(cur, cur)) \
+            if kind == "Aktie" else ("Krypto" if kind == "Krypto" else "ETF (Währungsmix)")
+        div_ps = float(divs[sym].sum()) if sym and sym in divs else 0.0
+        div_eur = div_ps / (100 if pence else 1) * (fx or 0) * (qty or 0) * scale
+        perf_1y = None
+        if px_s is not None and px_s.dropna().size > 200:
+            s_ = (px_s * fx_series(cur)).dropna()
+            perf_1y = float(s_.iloc[-1] / s_.iloc[0] - 1)
+            if qty:
+                series[sym] = px_s.ffill().bfill() * fx_series(cur) / (100 if pence else 1) * qty * scale
+        rows.append({"name": (h or {}).get("name") or p_.get("name") or sym, "symbol": sym, "isin": p_.get("isin"),
+                     "kind": kind, "qty": qty, "price": price_eur, "value": value, "cost": cost,
+                     "gain": (value - cost) if cost else None, "gain_pct": (value / cost - 1) if cost else None,
+                     "sector": sector, "industry": (h or {}).get("industry") or "", "country": country,
+                     "currency": home_cur, "div": div_eur, "div_yield": div_eur / value if value else None,
+                     "perf_1y": perf_1y, "etf_sectors": etf_sec, "flag": flag})
+    if not rows:
+        raise ValueError("Keine der Positionen konnte einem Wertpapier mit aktuellem Kurs zugeordnet werden.")
+    total = sum(r_["value"] for r_ in rows)
+    for r_ in rows:
+        r_["weight"] = r_["value"] / total
+    rows.sort(key=lambda r_: -r_["value"])
+    # Branchen mit Durchschau in ETFs (sofern Yahoo die Branchengewichte des Fonds liefert)
+    sec_items, see_through = [], 0.0
+    for r_ in rows:
+        if r_["etf_sectors"]:
+            sec_items += [(k, r_["value"] * w) for k, w in r_["etf_sectors"].items()]
+            see_through += r_["value"]
+        else:
+            sec_items.append((r_["sector"], r_["value"]))
+    # Konzentration
+    w_sorted = [r_["weight"] for r_ in rows]
+    hhi = sum(w * w for w in w_sorted)
+    cost_known = [r_ for r_ in rows if r_["cost"]]
+    cost_sum, cost_val = sum(r_["cost"] for r_ in cost_known), sum(r_["value"] for r_ in cost_known)
+    div_total = sum(r_["div"] for r_ in rows)
+    # Rendite und Risiko der letzten 12 Monate (heutige Stückzahlen rückgerechnet)
+    risk, chart = {}, None
+    if series:
+        pv = pd.concat(series.values(), axis=1).sum(axis=1).dropna()
+        pv = pv[pv > 0]
+        covered = sum(r_["value"] for r_ in rows if r_["symbol"] in series) / total
+        bench = close.get(DEPOT_BENCH[0])
+        if len(pv) > 150:
+            ret = pv.pct_change().dropna()
+            vol = float(ret.std() * math.sqrt(252))
+            perf = float(pv.iloc[-1] / pv.iloc[0] - 1)
+            dd = float((pv / pv.cummax() - 1).min())
+            risk = {"perf_1y": perf, "vol": vol, "max_dd": dd, "sharpe": (perf - DEPOT_RF) / vol if vol else None,
+                    "covered": covered, "rf": DEPOT_RF}
+            if bench is not None and bench.dropna().size > 150:
+                b = bench.ffill().dropna()
+                br = b.pct_change().dropna()
+                j = pd.concat([ret.rename("p"), br.rename("b")], axis=1).dropna()
+                if len(j) > 100 and j["b"].var() > 0:
+                    risk["beta"] = float(j["p"].cov(j["b"]) / j["b"].var())
+                    risk["corr_bench"] = float(j["p"].corr(j["b"]))
+                risk["bench_perf"] = float(b.iloc[-1] / b.iloc[0] - 1)
+                risk["bench_vol"] = float(br.std() * math.sqrt(252))
+                weekly = pd.concat([pv.rename("p"), b.rename("b")], axis=1).ffill().dropna().resample("W-FRI").last().dropna()
+                if len(weekly) > 10:
+                    chart = {"dates": [d.strftime("%Y-%m-%d") for d in weekly.index],
+                             "depot": [round(float(x / weekly["p"].iloc[0] * 100), 2) for x in weekly["p"]],
+                             "bench": [round(float(x / weekly["b"].iloc[0] * 100), 2) for x in weekly["b"]],
+                             "bench_name": DEPOT_BENCH[1]}
+        # stark korrelierte Paare unter den größeren Positionen
+        big = [r_["symbol"] for r_ in rows if r_["symbol"] in series and r_["weight"] >= 0.02][:15]
+        if len(big) >= 2:
+            rets = pd.concat({s_: series[s_].pct_change() for s_ in big}, axis=1).dropna()
+            cm = rets.corr()
+            pairs = [(a_, b_, float(cm.loc[a_, b_])) for i_, a_ in enumerate(big) for b_ in big[i_ + 1:]]
+            names = {r_["symbol"]: r_["name"] for r_ in rows}
+            risk["pairs"] = [{"a": names[a_], "b": names[b_], "corr": c_} for a_, b_, c_ in sorted(pairs, key=lambda x: -x[2])
+                             if c_ >= 0.75][:6]
+            vals = [c_ for *_x, c_ in pairs]
+            risk["avg_corr"] = sum(vals) / len(vals) if vals else None
+    alloc = {"positions": _depot_share((r_["name"], r_["value"]) for r_ in rows),
+             "sectors": _depot_share(sec_items), "countries": _depot_share((r_["country"], r_["value"]) for r_ in rows),
+             "currencies": _depot_share((r_["currency"], r_["value"]) for r_ in rows),
+             "kinds": _depot_share((r_["kind"], r_["value"]) for r_ in rows)}
+    summary = {"total": total, "n": len(rows), "cost": cost_sum or None,
+               "gain": (cost_val - cost_sum) if cost_sum else None, "gain_pct": (cost_val / cost_sum - 1) if cost_sum else None,
+               "cost_coverage": cost_val / total if cost_sum else 0, "div": div_total, "div_yield": div_total / total,
+               "div_yoc": div_total / cost_sum if cost_sum and cost_val >= 0.95 * total else None,
+               "largest": rows[0]["weight"], "largest_name": rows[0]["name"], "top5": sum(w_sorted[:5]),
+               "top10": sum(w_sorted[:10]), "hhi": hhi, "eff_n": 1 / hhi if hhi else None, "see_through": see_through / total,
+               "eff_stocks": (lambda ws: sum(ws) ** 2 / sum(w * w for w in ws) if ws else None)(
+                   [r_["weight"] for r_ in rows if r_["kind"] == "Aktie"])}
+    for r_ in rows:
+        r_.pop("etf_sectors", None)
+    return {"summary": summary, "positions": rows, "alloc": alloc, "risk": risk, "chart": chart,
+            "checks": depot_checks(summary, alloc, risk, rows), "unresolved": unresolved,
+            "generated": datetime.now().strftime("%d.%m.%Y %H:%M")}
+
+
+def depot_checks(S, A, R, rows):
+    """Typische Prüfpunkte einer Depotanalyse -> [{level: ok|info|warn, title, text}]."""
+    out = []
+    add = lambda lvl, title, text: out.append({"level": lvl, "title": title, "text": text})
+    stocks = [r_ for r_ in rows if r_["kind"] == "Aktie"]
+    big_single = [r_ for r_ in stocks if r_["weight"] > 0.10]
+    if big_single:
+        add("warn", "Klumpenrisiko Einzelaktie", "Über 10 % des Depots in einer Aktie: " + ", ".join(
+            f"{r_['name']} ({pct(r_['weight'])})" for r_ in big_single[:4]) + ". Ein Kurseinbruch dieser Firma trifft das ganze Depot spürbar.")
+    else:
+        add("ok", "Keine übergroße Einzelaktie", "Keine Aktie macht mehr als 10 % des Depots aus.")
+    etf_share = sum(r_["weight"] for r_ in rows if r_["kind"].endswith("ETF"))
+    eff = S["eff_stocks"] or 0  # Streuung des Einzelaktien-Teils; ETFs gelten als breit gestreut
+    tail = f" ({pct(etf_share)} des Depots liegen zusätzlich in breit gestreuten ETFs.)" if etf_share > 0.05 else ""
+    if etf_share >= 0.5:
+        add("ok", "Breite Streuung über ETFs", f"{pct(etf_share)} des Depots liegen in ETFs – jeder ETF enthält viele Einzelwerte.")
+    elif stocks and eff < 8:
+        add("warn", "Geringe Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch nur {fnum(eff, 1)} gleich großen Positionen "
+            "(Herfindahl-Index). Ab etwa 15–20 Einzelaktien aus verschiedenen Branchen sinkt das Einzelrisiko deutlich." + tail)
+    elif stocks and eff < 15:
+        add("info", "Mittlere Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch {fnum(eff, 1)} gleich großen Positionen – "
+            "ausreichend, wenn die Branchen gemischt sind." + tail)
+    elif stocks:
+        add("ok", "Gute Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch {fnum(eff, 1)} gleich großen Positionen." + tail)
+    top_sec = next((x for x in A["sectors"] if not x["label"].startswith("ETF")), None)
+    if top_sec and top_sec["weight"] > 0.30:
+        add("warn", "Branchen-Klumpen", f"{top_sec['label']} macht {pct(top_sec['weight'])} des Depots aus"
+            + (" (inkl. Durchschau in ETFs)" if S["see_through"] > 0.05 else "") + ". Branchenkrisen schlagen dann voll durch.")
+    elif top_sec:
+        add("ok", "Branchen gemischt", f"Größte Branche: {top_sec['label']} mit {pct(top_sec['weight'])}.")
+    ctry = [x for x in A["countries"] if not x["label"].startswith(("ETF", "Krypto"))]
+    if ctry and ctry[0]["weight"] > 0.6:
+        add("info", "Länderschwerpunkt", f"{pct(ctry[0]['weight'])} des Depots in Aktien aus {ctry[0]['label']}.")
+    de = next((x["weight"] for x in A["countries"] if x["label"] == "Deutschland"), 0)
+    if de > 0.4:
+        add("info", "Heimatmarkt-Neigung", f"{pct(de)} in deutschen Aktien – Deutschland macht nur rund 2 % der weltweiten "
+            "Börsenwerte aus („Home Bias“).")
+    fx_share = sum(x["weight"] for x in A["currencies"] if x["label"] not in ("EUR", "ETF (Währungsmix)", "Krypto"))
+    if fx_share > 0.5:
+        add("info", "Währungsrisiko", f"{pct(fx_share)} des Depots in Aktien mit Heimatwährung außerhalb des Euro – "
+            "Wechselkurse beeinflussen die Rendite spürbar (in beide Richtungen).")
+    crypto = sum(r_["weight"] for r_ in rows if r_["kind"] == "Krypto")
+    if crypto > 0.10:
+        add("warn", "Hoher Krypto-Anteil", f"{pct(crypto)} in Kryptowährungen – sehr schwankungsanfällig (Rückgänge von 70 % und mehr kamen vor).")
+    small = [r_ for r_ in rows if r_["weight"] < 0.01]
+    if len(small) >= 5:
+        add("info", "Viele Kleinstpositionen", f"{len(small)} Positionen unter 1 % des Depots – sie beeinflussen das Ergebnis "
+            "kaum, kosten aber Aufmerksamkeit und Gebühren.")
+    losers = [r_ for r_ in rows if r_.get("gain_pct") is not None and r_["gain_pct"] < -0.30]
+    if losers:
+        add("info", "Größere Verlustpositionen", "Mehr als 30 % im Minus: " + ", ".join(
+            f"{r_['name']} ({pct(r_['gain_pct'])})" for r_ in losers[:5]) + ". Prüfen, ob die ursprüngliche Kaufidee noch gilt.")
+    if R.get("vol") is not None:
+        if R["vol"] > 0.25:
+            add("warn", "Hohe Schwankung", f"Volatilität {pct(R['vol'])} pro Jahr – deutlich über einem breiten Weltaktien-ETF "
+                f"({pct(R.get('bench_vol') or 0.15)}).")
+        elif R["vol"] < 0.12:
+            add("ok", "Ruhiges Depot", f"Volatilität {pct(R['vol'])} pro Jahr.")
+    for pr in (R.get("pairs") or [])[:1]:
+        if pr["corr"] >= 0.85:
+            add("info", "Ähnliche Positionen", f"{pr['a']} und {pr['b']} bewegen sich fast gleich (Korrelation {fnum(pr['corr'], 2)}) – "
+                "sie streuen das Risiko kaum.")
+    if S["div_yield"] and S["div_yield"] > 0.04:
+        add("info", "Dividendenstark", f"Dividendenrendite {pct(S['div_yield'])} – auf Dividendensicherheit und Branchenmix achten.")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Webserver
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -7641,7 +8050,8 @@ def cache_rules():
             ("Finnhub", FINNHUB_CACHE, 3600, 400), ("CoinGecko", CG_CACHE, 86400, 60),
             ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50),
             ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300),
-            ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200)]
+            ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200), ("Depot-Symbole", DEPOT_SYM_CACHE, 7 * 86400, 3000),
+            ("Depot-Analysen", DEPOT_CACHE, 900, 30)]
 
 
 def prune_caches():
@@ -8309,7 +8719,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/admin/restore" and not self.is_admin():
                 return self.send_json({"error": "Nur für Administratoren"}, 403)
             try:
-                body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 300_000 if u.path == "/api/watchlist" else 16384)
+                body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 300_000 if u.path == "/api/watchlist"
+                                      else 3_200_000 if u.path == "/api/depot" else 16384)
             except BodyError as e:
                 return self.send_json({"error": e.msg}, e.code)
             user = self.current_user()
@@ -8322,6 +8733,30 @@ class Handler(BaseHTTPRequestHandler):
                         user_space(user)["lang"] = lang
                         STORE.dirty = True
                     return self.send_json({"ok": True, "lang": lang})
+                if u.path == "/api/depot":
+                    if body.get("action") == "delete":
+                        with STORE.lock:
+                            user_space(user).pop("depot", None)
+                            STORE.dirty = True
+                        DEPOT_CACHE.pop(user, None)
+                        save_async()
+                        return self.send_json({"ok": True})
+                    if not isinstance(body.get("csv"), str):
+                        raise ValueError("Bitte eine CSV-Datei hochladen.")
+                    positions, notes = parse_depot_csv(body["csv"])
+                    res = analyze_depot(positions)
+                    res["notes"] = notes
+                    res["file"] = str(body.get("filename") or "")[:80]
+                    if body.get("save"):
+                        with STORE.lock:
+                            user_space(user)["depot"] = {"positions": positions, "saved": datetime.now().strftime("%d.%m.%Y %H:%M"),
+                                                         "file": res["file"]}
+                            STORE.dirty = True
+                        save_async()
+                        res["saved"] = user_space(user)["depot"]["saved"]
+                    DEPOT_CACHE[user] = (time.time(), res)
+                    LOG.info("[Depot] %s: %d Positionen, %d nicht zugeordnet", user, len(res["positions"]), len(res["unresolved"]))
+                    return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
                 if u.path == "/api/watchlist":
                     if not isinstance(body.get("items"), list):
                         raise ValueError("Ungültige Watchlist (Liste erwartet).")
@@ -8669,6 +9104,21 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(json_safe(admin_dashboard()), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/api/watchlist":
             return self.send_json({"items": user_space(user)["watchlist"]})
+        if u.path == "/api/depot":
+            dep = user_space(user).get("depot")
+            if not dep:
+                return self.send_json({"empty": True})
+            hit = DEPOT_CACHE.get(user)
+            if hit and time.time() - hit[0] < 900 and hit[1].get("saved") == dep.get("saved"):
+                res = hit[1]
+            else:
+                try:
+                    res = analyze_depot(dep["positions"])
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+                res.update(saved=dep.get("saved"), file=dep.get("file") or "", notes=[])
+                DEPOT_CACHE[user] = (time.time(), res)
+            return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/api/screener":
             if not self.is_admin():
                 return self.send_json({"error": "Der Screener ist nur für Administratoren verfügbar."}, 403)

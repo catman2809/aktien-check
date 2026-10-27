@@ -1,0 +1,124 @@
+"""Englische Texte der Depot-Analyse (Startseite, Upload, Kennzahlen, Diagramme, Depot-Check)."""
+DEPOT_EXACT = {
+    "Depot-Analyse": "Portfolio analysis", "Mein Depot": "My portfolio", "Mein Depot analysieren": "Analyze my portfolio",
+    "CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Risiko, Dividenden und ein Depot-Check auf Klumpenrisiken.":
+        "Upload your portfolio's CSV export: breakdown by positions, sectors, countries and currencies, return and risk, dividends and a portfolio check for concentration risks.",
+    "Depot hochladen": "Upload portfolio", "CSV-Datei auswählen": "Choose CSV file",
+    "CSV-Datei deines Depots hierher ziehen oder auswählen": "Drag your portfolio's CSV file here or choose it",
+    "Neue Depot-Datei hochladen": "Upload a new portfolio file",
+    "Export aus deinem Online-Depot (z. B. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) oder eine eigene Tabelle mit den Spalten ISIN (oder Symbol/Name), Stück und optional Kaufkurs.":
+        "Export from your online brokerage account (e.g. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) or your own table with the columns ISIN (or symbol/name), quantity and optionally purchase price.",
+    "Datei auswählen": "Choose file",
+    "Depot in meinem Konto speichern (verschlüsselt), damit es beim nächsten Besuch wieder da ist":
+        "Save the portfolio in my account (encrypted) so it is still there on my next visit",
+    "Vorlage herunterladen": "Download template", "Gespeichertes Depot löschen": "Delete saved portfolio",
+    "Gespeichertes Depot wirklich löschen?": "Really delete the saved portfolio?",
+    "Depot wird eingelesen und analysiert … (je nach Größe {0}–{1} Sekunden)": "Reading and analyzing the portfolio … ({0}–{1} seconds depending on size)",
+    "Die Datei ist zu groß (höchstens {0} MB).": "The file is too large (max. {0} MB).",
+    "Was die Depot-Analyse zeigt": "What the portfolio analysis shows",
+    "Aufteilung nach Einzelpositionen, Branchen (mit Durchschau in ETFs), Ländern, Anlageklassen und Währungen":
+        "Breakdown by individual positions, sectors (with look-through into ETFs), countries, asset classes and currencies",
+    "Depotwert, Gewinn/Verlust je Position, erwartete Dividenden pro Jahr": "Portfolio value, gain/loss per position, expected dividends per year",
+    "Rendite, Schwankung, größter Rückgang, Beta und Sharpe-Ratio der letzten {0} Monate im Vergleich zum MSCI World":
+        "Return, volatility, maximum drawdown, beta and Sharpe ratio of the last {0} months compared with the MSCI World",
+    "Depot-Check: Klumpenrisiken, Streuung, Heimatmarkt-Neigung, Währungsrisiko, ähnlich verlaufende Positionen":
+        "Portfolio check: concentration risks, diversification, home bias, currency risk, positions that move alike",
+    "Auf Wunsch die Einschätzung der App für jede Position": "On request, the app's rating for each position",
+    "Die Datei wird nur auf dem Server ausgewertet. Gespeichert werden – wenn du es möchtest – nur Wertpapier, Stückzahl und Kaufkurs, verschlüsselt in deinem Konto.":
+        "The file is only evaluated on the server. If you wish, only security, quantity and purchase price are stored – encrypted in your account.",
+    "Nur die ersten {0} Positionen wurden übernommen.": "Only the first {0} positions were imported.",
+    "Depotwert": "Portfolio value", "{0} Positionen": "{0} positions", "Gewinn/Verlust": "Gain/loss",
+    "Kaufkurse fehlen in der Datei": "Purchase prices missing in the file", "{0} · für {1} des Depots": "{0} · for {1} of the portfolio",
+    "Rendite {0} Monate": "Return {0} months", "MSCI World {0}": "MSCI World {0}", "Dividenden pro Jahr": "Dividends per year",
+    "Rendite {0}": "Yield {0}", "Rendite {0} · auf Einstand {1}": "Yield {0} · on cost {1}",
+    "Schwankung (Volatilität)": "Volatility", "pro Jahr": "per year", "Größter Rückgang": "Maximum drawdown",
+    "vom Hoch, letzte {0} Monate": "from the high, last {0} months", "Beta zum MSCI World": "Beta vs. MSCI World",
+    "schwankt stärker als der Markt": "moves more than the market", "schwankt weniger als der Markt": "moves less than the market",
+    "etwa wie der Markt": "about like the market", "Sharpe-Ratio": "Sharpe ratio",
+    "Rendite je Risikoeinheit (über {0} = gut)": "Return per unit of risk (above {0} = good)",
+    "Top {0} / Top {1}": "Top {0} / Top {1}", "Anteil am Depot": "Share of portfolio",
+    "Aufteilung": "Allocation", "Einzelpositionen": "Individual positions", "Anlageklassen": "Asset classes", "Währungen": "Currencies",
+    "inkl. Durchschau in ETFs ({0} des Depots)": "incl. look-through into ETFs ({0} of the portfolio)",
+    "Sitz der Unternehmen": "Company headquarters", "Heimatwährung der Unternehmen": "Companies' home currency",
+    "Sonstige ({0})": "Other ({0})", "ETF (international)": "ETF (international)", "ETF (Währungsmix)": "ETF (currency mix)",
+    "ETF (breit gestreut)": "ETF (broadly diversified)", "Krypto": "Crypto", "Aktie": "Stock", "Anleihen-ETF": "Bond ETF",
+    "Nicht zugeordnet": "Not matched", "Unbekannt": "Unknown",
+    "Depot-Check": "Portfolio check", "Ähnlich verlaufende Positionen": "Positions that move alike",
+    "(Korrelation der Tagesrenditen, {0} Monate)": "(correlation of daily returns, {0} months)",
+    "Durchschnittliche Korrelation der größeren Positionen: {0} (unter {1} = gute Streuung).":
+        "Average correlation of the larger positions: {0} (below {1} = good diversification).",
+    "Entwicklung der letzten {0} Monate": "Performance over the last {0} months", "indexiert auf {0}": "indexed to {0}",
+    "Dein Depot (heutige Stückzahlen)": "Your portfolio (today's quantities)", "MSCI World (iShares Core, {0})": "MSCI World (iShares Core, {0})",
+    "Depot {0}, MSCI World (iShares Core, {1}) {2} (Start = {3})": "Portfolio {0}, MSCI World (iShares Core, {1}) {2} (start = {3})",
+    "Rückrechnung mit den heutigen Stückzahlen und Wechselkursen je Tag – zeigt, wie sich die aktuelle Zusammensetzung entwickelt hätte (ohne Käufe/Verkäufe, Dividenden nicht wieder angelegt).":
+        "Back-calculation with today's quantities and daily exchange rates – shows how the current composition would have performed (no purchases/sales, dividends not reinvested).",
+    "Positionen": "Positions", "Einschätzungen der App laden": "Load the app's ratings", "Einschätzungen aktualisieren": "Update ratings",
+    "{0} von {1} bewertet": "{0} of {1} rated", "{0} von {1} bewertet …": "{0} of {1} rated …",
+    "Analysiert jede Position einzeln (dauert etwa {0}–{1} Sekunden je Position).": "Analyzes each position individually (takes about {0}–{1} seconds per position).",
+    "Kaufen {0}": "Buy {0}", "Halten {0}": "Hold {0}", "Verkaufen {0}": "Sell {0}",
+    "nach Depotanteil der bewerteten Positionen": "by portfolio share of the rated positions",
+    "Wertpapier": "Security", "Art": "Type", "Stück": "Qty", "Kurs €": "Price €", "Wert €": "Value €", "G/V": "Gain/loss",
+    "{0} Monate": "{0} months", "Div.-Rendite": "Div. yield", "Land": "Country", "Einschätzung": "Rating",
+    "fair {0}": "fair {0}", "nicht verfügbar": "not available",
+    "Wert laut Datei – der gefundene Kurs passt nicht zur Stückzahl": "Value per file – the price found does not match the quantity",
+    "Kurse und Wechselkurse von Yahoo Finance, Stand {0} {1}:{2}.": "Prices and exchange rates from Yahoo Finance, as of {0} {1}:{2}.",
+    "Kurse und Wechselkurse von Yahoo Finance, Stand {0} {1}:{2}": "Prices and exchange rates from Yahoo Finance, as of {0} {1}:{2}",
+    "Datei:": "File:", "· gespeichert am {0} {1}:{2}": "· saved on {0} {1}:{2}",
+    "Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.":
+        "Purchase prices are assumed to be in euros unless the file states another currency.",
+    "Die Datei ist leer.": "The file is empty.", "Bitte eine CSV-Datei hochladen.": "Please upload a CSV file.",
+    "Keine Kopfzeile erkannt. Benötigt werden eine Spalte für das Wertpapier (ISIN, WKN, Symbol oder Name) und eine für die Stückzahl oder den Wert.":
+        "No header row recognized. A column for the security (ISIN, WKN, symbol or name) and one for the quantity or value are required.",
+    "Keine Positionen gefunden – bitte prüfe, ob die Datei Stückzahlen oder Werte enthält.":
+        "No positions found – please check whether the file contains quantities or values.",
+    "Keine der Positionen konnte einem Wertpapier mit aktuellem Kurs zugeordnet werden.":
+        "None of the positions could be matched to a security with a current price.",
+    "Klumpenrisiko Einzelaktie": "Single-stock concentration", "Keine übergroße Einzelaktie": "No oversized single stock",
+    "Breite Streuung über ETFs": "Broad diversification via ETFs", "Geringe Streuung": "Low diversification",
+    "Mittlere Streuung": "Medium diversification", "Gute Streuung": "Good diversification", "Branchen-Klumpen": "Sector concentration",
+    "Branchen gemischt": "Sectors mixed", "Länderschwerpunkt": "Country focus", "Heimatmarkt-Neigung": "Home bias",
+    "Währungsrisiko": "Currency risk", "Hoher Krypto-Anteil": "High crypto share", "Viele Kleinstpositionen": "Many tiny positions",
+    "Größere Verlustpositionen": "Larger losing positions", "Hohe Schwankung": "High volatility", "Ruhiges Depot": "Calm portfolio",
+    "Ähnliche Positionen": "Similar positions", "Dividendenstark": "High dividends",
+    "Keine Aktie macht mehr als {0} des Depots aus.": "No stock makes up more than {0} of the portfolio.",
+    "{0} des Depots liegen in ETFs – jeder ETF enthält viele Einzelwerte.": "{0} of the portfolio is in ETFs – each ETF holds many individual securities.",
+    "Der Einzelaktien-Teil entspricht rechnerisch nur {0} gleich großen Positionen (Herfindahl-Index). Ab etwa {1}–{2} Einzelaktien aus verschiedenen Branchen sinkt das Einzelrisiko deutlich.":
+        "The single-stock part is mathematically equivalent to only {0} equally sized positions (Herfindahl index). From about {1}–{2} individual stocks across sectors, single-stock risk drops markedly.",
+    "Der Einzelaktien-Teil entspricht rechnerisch nur {0} gleich großen Positionen (Herfindahl-Index). Ab etwa {1}–{2} Einzelaktien aus verschiedenen Branchen sinkt das Einzelrisiko deutlich. ({3} des Depots liegen zusätzlich in breit gestreuten ETFs.)":
+        "The single-stock part is mathematically equivalent to only {0} equally sized positions (Herfindahl index). From about {1}–{2} individual stocks across sectors, single-stock risk drops markedly. ({3} of the portfolio is additionally in broadly diversified ETFs.)",
+    "Der Einzelaktien-Teil entspricht rechnerisch {0} gleich großen Positionen – ausreichend, wenn die Branchen gemischt sind.":
+        "The single-stock part is mathematically equivalent to {0} equally sized positions – sufficient if the sectors are mixed.",
+    "Der Einzelaktien-Teil entspricht rechnerisch {0} gleich großen Positionen – ausreichend, wenn die Branchen gemischt sind. ({1} des Depots liegen zusätzlich in breit gestreuten ETFs.)":
+        "The single-stock part is mathematically equivalent to {0} equally sized positions – sufficient if the sectors are mixed. ({1} of the portfolio is additionally in broadly diversified ETFs.)",
+    "Der Einzelaktien-Teil entspricht rechnerisch {0} gleich großen Positionen.": "The single-stock part is mathematically equivalent to {0} equally sized positions.",
+    "Der Einzelaktien-Teil entspricht rechnerisch {0} gleich großen Positionen. ({1} des Depots liegen zusätzlich in breit gestreuten ETFs.)":
+        "The single-stock part is mathematically equivalent to {0} equally sized positions. ({1} of the portfolio is additionally in broadly diversified ETFs.)",
+    "{0} in deutschen Aktien – Deutschland macht nur rund {1} der weltweiten Börsenwerte aus („Home Bias“).":
+        "{0} in German stocks – Germany accounts for only about {1} of global market capitalization (“home bias”).",
+    "{0} des Depots in Aktien mit Heimatwährung außerhalb des Euro – Wechselkurse beeinflussen die Rendite spürbar (in beide Richtungen).":
+        "{0} of the portfolio is in stocks whose home currency is not the euro – exchange rates noticeably affect returns (in both directions).",
+    "{0} in Kryptowährungen – sehr schwankungsanfällig (Rückgänge von {1} und mehr kamen vor).":
+        "{0} in cryptocurrencies – very volatile (declines of {1} and more have occurred).",
+    "{0} Positionen unter {1} des Depots – sie beeinflussen das Ergebnis kaum, kosten aber Aufmerksamkeit und Gebühren.":
+        "{0} positions below {1} of the portfolio – they barely affect the result but cost attention and fees.",
+    "Volatilität {0} pro Jahr – deutlich über einem breiten Weltaktien-ETF ({1}).": "Volatility {0} per year – well above a broad global equity ETF ({1}).",
+    "Volatilität {0} pro Jahr.": "Volatility {0} per year.",
+    "Dividendenrendite {0} – auf Dividendensicherheit und Branchenmix achten.": "Dividend yield {0} – watch dividend safety and sector mix.",
+}
+DEPOT_WILD = [
+    ("Nicht zugeordnet (fehlen in der Auswertung): {*}", "Not matched (missing from the analysis): {*}"),
+    ("Über {0} des Depots in einer Aktie: {*}. Ein Kurseinbruch dieser Firma trifft das ganze Depot spürbar.",
+     "More than {0} of the portfolio in a single stock: {*}. A price slump at this company would hit the whole portfolio noticeably."),
+    ("{*} macht {0} des Depots aus (inkl. Durchschau in ETFs). Branchenkrisen schlagen dann voll durch.",
+     "{*} makes up {0} of the portfolio (incl. look-through into ETFs). Sector crises then hit with full force."),
+    ("{*} macht {0} des Depots aus. Branchenkrisen schlagen dann voll durch.",
+     "{*} makes up {0} of the portfolio. Sector crises then hit with full force."),
+    ("Größte Branche: {*} mit {0}.", "Largest sector: {*} with {0}."),
+    ("{0} des Depots in Aktien aus {*}.", "{0} of the portfolio in stocks from {*}."),
+    ("Mehr als {0} im Minus: {*}. Prüfen, ob die ursprüngliche Kaufidee noch gilt.",
+     "More than {0} down: {*}. Check whether the original investment case still holds."),
+    ("{*} und {*1} bewegen sich fast gleich (Korrelation {0}) – sie streuen das Risiko kaum.",
+     "{*} and {*1} move almost identically (correlation {0}) – they barely spread the risk."),
+    ("Einzelpositionen: {*}", "Individual positions: {*}"), ("Branchen: {*}", "Sectors: {*}"), ("Länder: {*}", "Countries: {*}"),
+    ("Anlageklassen: {*}", "Asset classes: {*}"), ("Währungen: {*}", "Currencies: {*}"),
+]

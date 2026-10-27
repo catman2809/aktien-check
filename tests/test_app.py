@@ -1267,6 +1267,76 @@ class TestCountryRisk(unittest.TestCase):
         self.assertAlmostEqual(a.cost_of_equity(dict(base, crp={"premium": 0.02}), mac) - a.cost_of_equity(base, mac), 0.02)
 
 
+class TestDepotParse(unittest.TestCase):
+    """Depot-Import aus Broker-CSV und Prüfpunkte (ohne Internet)."""
+    COMDIRECT = ('"Depotübersicht vom 27.10.2026";\n\n'
+                 '"Bezeichnung";"WKN";"ISIN";"Stück/Nom.";"Einstandskurs";"Kurswert in EUR";"Währung"\n'
+                 '"Apple Inc.";"865985";"US0378331005";"20";"145,30";"5.902,00";"EUR"\n'
+                 '"SAP SE";"716460";"DE0007164600";"1.035";"120,00";"222.155,00";"EUR"\n'
+                 '"SAP SE";"716460";"DE0007164600";"15";"180,00";"3.219,75";"EUR"\n'
+                 '"Summe";"";"";"";"";"231.276,75";""\n')
+
+    def test_numbers(self):
+        self.assertEqual(a._depot_num("1.234,56 €", True), 1234.56)
+        self.assertEqual(a._depot_num("1,234.56", False), 1234.56)
+        self.assertEqual(a._depot_num("1.035", True), 1035)      # deutsches Tausenderformat
+        self.assertEqual(a._depot_num("12.5", True), 12.5)
+        self.assertEqual(a._depot_num("0,05", True), 0.05)
+        self.assertEqual(a._depot_num("-12,5 %", True), -12.5)
+        self.assertIsNone(a._depot_num("–", True))
+
+    def test_comdirect_layout(self):
+        pos, notes = a.parse_depot_csv(self.COMDIRECT)
+        self.assertEqual(len(pos), 2)                              # Summenzeile ignoriert, SAP zusammengefasst
+        sap = pos[1]
+        self.assertEqual((sap["isin"], sap["qty"]), ("DE0007164600", 1050))
+        self.assertAlmostEqual(sap["buy"], (1035 * 120 + 15 * 180) / 1050)
+        self.assertAlmostEqual(sap["value"], 225374.75)
+        self.assertEqual(pos[0]["name"], "Apple Inc.")
+
+    def test_english_and_errors(self):
+        pos, _ = a.parse_depot_csv("Symbol,Name,Quantity,Average price\nKO,Coca-Cola,50,58.10\nJNJ,Johnson & Johnson,1,234.50\n")
+        self.assertEqual([(p_["symbol"], p_["qty"], p_["buy"]) for p_ in pos], [("KO", 50, 58.1), ("JNJ", 1, 234.5)])
+        with self.assertRaises(ValueError):
+            a.parse_depot_csv("Datum;Betrag\n01.01.2026;100\n")       # keine Wertpapier-/Stück-Spalte
+        with self.assertRaises(ValueError):
+            a.parse_depot_csv("")
+
+    def test_checks(self):
+        rows = [{"name": "A", "kind": "Aktie", "weight": 0.4, "gain_pct": -0.4},
+                {"name": "B", "kind": "Aktie", "weight": 0.6, "gain_pct": 0.1}]
+        S = {"eff_stocks": 1.9, "see_through": 0, "div_yield": 0.01}
+        A = {"sectors": [{"label": "Technologie", "weight": 1.0}], "countries": [{"label": "Deutschland", "weight": 1.0}],
+             "currencies": [{"label": "EUR", "weight": 1.0}]}
+        titles = {c["title"]: c["level"] for c in a.depot_checks(S, A, {"vol": 0.3}, rows)}
+        for t, lvl in (("Klumpenrisiko Einzelaktie", "warn"), ("Geringe Streuung", "warn"), ("Branchen-Klumpen", "warn"),
+                       ("Heimatmarkt-Neigung", "info"), ("Größere Verlustpositionen", "info"), ("Hohe Schwankung", "warn")):
+            self.assertEqual(titles.get(t), lvl, t)
+
+
+class TestDepotHTTP(TestHTTP):
+    def test_save_load_delete(self):
+        import unittest.mock as um
+        op = self.client()
+        self.login(op, "admin", "test-admin-pass")
+        fake = {"summary": {"total": 1.0}, "positions": [], "alloc": {}, "risk": {}, "chart": None, "checks": [],
+                "unresolved": [], "generated": "x"}
+        self.assertEqual(json.loads(self.call(op, "/api/depot")[2]), {"empty": True})
+        with um.patch.object(a, "analyze_depot", return_value=dict(fake)) as an:
+            st, _, b = self.call(op, "/api/depot", {"csv": "ISIN;Stück\nDE0007164600;10\n", "save": True, "filename": "d.csv"})
+            self.assertEqual(st, 200, b)
+            self.assertEqual(an.call_args[0][0][0]["isin"], "DE0007164600")
+            saved = a.user_space("admin")["depot"]
+            self.assertEqual((saved["positions"][0]["qty"], saved["file"]), (10, "d.csv"))
+            self.assertEqual(json.loads(self.call(op, "/api/depot")[2])["file"], "d.csv")     # aus dem Zwischenspeicher
+        st, _, b = self.call(op, "/api/depot", {"csv": "Datum;Betrag\n1;2\n"})
+        self.assertEqual(st, 400)
+        self.assertIn("Kopfzeile", json.loads(b)["error"])
+        self.assertEqual(self.call(op, "/api/depot", {"action": "delete"})[0], 200)
+        self.assertNotIn("depot", a.user_space("admin"))
+        self.assertEqual(json.loads(self.call(op, "/api/depot")[2]), {"empty": True})
+
+
 class TestQuarterAI(Isolated):
     def test_summary_cached(self):
         import unittest.mock as um
