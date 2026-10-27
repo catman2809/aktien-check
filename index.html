@@ -1891,13 +1891,21 @@ function welcome() {
 const MV_UNIS = [["dax", "DAX"], ["mdax", "MDAX"], ["tecdax", "TecDAX"], ["es50", "Euro Stoxx 50"], ["dow", "Dow Jones"],
   ["ndx", "Nasdaq-100"], ["sp500", "S&P 500"]];
 let mvUni = (() => { try { return localStorage.getItem("mvUni") || "dax"; } catch (e) { return "dax"; } })();
+let mvPer = (() => { try { return localStorage.getItem("mvPer") === "month" ? "month" : "day"; } catch (e) { return "day"; } })();
 async function moversLoad() {
   const box = $("#mv");
   if (!box) return;
   const uni = MV_UNIS.some(([k]) => k === mvUni) ? mvUni : "dax";
-  const head = `<div class="mv-head"><div><h2>Top &amp; Flop heute</h2><span class="stamp" id="mv-stamp">&nbsp;</span></div></div>
+  const per = mvPer;
+  const head = `<div class="mv-head"><div><h2>${per === "month" ? "Top &amp; Flop im letzten Monat" : "Top &amp; Flop heute"}</h2><span class="stamp" id="mv-stamp">&nbsp;</span></div>
+      <div class="seg" id="mv-per"><button type="button" data-p="day" class="${per === "day" ? "on" : ""}">Heute</button><button type="button" data-p="month" class="${per === "month" ? "on" : ""}">1 Monat</button></div></div>
     <div class="seg mv-unis" id="mv-unis">${MV_UNIS.map(([k, l]) => `<button type="button" data-u="${k}" class="${k === uni ? "on" : ""}">${esc(l)}</button>`).join("")}</div>`;
   box.innerHTML = head + `<div class="card mv-msg"><span class="wl-busy"></span> Kurse werden geladen …</div>`;
+  box.querySelectorAll("#mv-per button").forEach(b => b.onclick = () => {
+    mvPer = b.dataset.p;
+    try { localStorage.setItem("mvPer", mvPer); } catch (e) {}
+    moversLoad();
+  });
   box.querySelectorAll("#mv-unis button").forEach(b => b.onclick = () => {
     mvUni = b.dataset.u;
     try { localStorage.setItem("mvUni", mvUni); } catch (e) {}
@@ -1905,16 +1913,16 @@ async function moversLoad() {
   });
   let d;
   try {
-    const r = await fetch("/api/movers?u=" + uni);
+    const r = await fetch(`/api/movers?u=${uni}&p=${per}`);
     d = await r.json();
     if (!r.ok) throw new Error(d.error || "Fehler");
   } catch (e) {
-    if ($("#mv") === box && mvUni === uni) box.lastElementChild.outerHTML = `<div class="card mv-msg">Die Kurse konnten gerade nicht geladen werden.</div>`;
+    if ($("#mv") === box && mvUni === uni && mvPer === per) box.lastElementChild.outerHTML = `<div class="card mv-msg">Die Kurse konnten gerade nicht geladen werden.</div>`;
     return;
   }
-  if ($("#mv") !== box || mvUni !== uni) return;  // inzwischen anderer Index gewählt oder Seite gewechselt
-  const day = new Date(d.date + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
-  $("#mv-stamp").innerHTML = `<span>${esc(d.index)}</span> · <span>Handelstag ${day}</span> · <span>${d.advancers} im Plus, ${d.decliners} im Minus</span> · <span>Stand ${esc(d.updated)} Uhr, ca. 15 Min. verzögert</span>`;
+  if ($("#mv") !== box || mvUni !== uni || mvPer !== per) return;  // inzwischen anderer Index gewählt oder Seite gewechselt
+  const dd = iso => new Date(iso + "T00:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
+  $("#mv-stamp").innerHTML = `<span>${esc(d.index)}</span> · <span>${d.since ? `${dd(d.since)} bis ${dd(d.date)}` : `Handelstag ${dd(d.date)}`}</span> · <span>${d.advancers} im Plus, ${d.decliners} im Minus</span> · <span>Stand ${esc(d.updated)} Uhr, ca. 15 Min. verzögert</span>`;
   const row = (x, i, cls) => `<button type="button" class="mv-row" data-q="${esc(x.symbol)}" title="${esc(x.name)} analysieren">
       <span class="mv-rank num">${i + 1}</span>
       <span class="mv-name"><b>${esc(x.name)}</b><small><span>${esc(x.symbol)}</span> · <span class="num">${nf(x.price, 2)} ${esc(x.currency)}</span></small></span>

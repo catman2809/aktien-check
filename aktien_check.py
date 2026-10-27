@@ -8633,16 +8633,18 @@ def _mover_name(sym):
     return MOVER_NAMES[sym]
 
 
-def market_movers(uni="dax", n=5):
-    """Die n Werte eines Index mit dem größten Kursanstieg und -verlust am letzten Handelstag (Yahoo, ~15 Min. verzögert)."""
+def market_movers(uni="dax", n=5, period="day"):
+    """Die n Werte eines Index mit dem größten Kursanstieg und -verlust (Yahoo, ~15 Min. verzögert): am letzten Handelstag
+    (period="day") oder über einen Monat (period="month": aktueller Kurs gegen den Schlusskurs von vor einem Monat)."""
     import pandas as pd
-    if uni not in SCREENER_UNIVERSES:
-        raise ValueError("Unbekannter Index")
-    hit = MOVERS_CACHE.get(uni)
+    if uni not in SCREENER_UNIVERSES or period not in ("day", "month"):
+        raise ValueError("Unbekannter Index oder Zeitraum")
+    hit = MOVERS_CACHE.get((uni, period))
     if hit and time.time() - hit[0] < 600:
         return hit[1]
     name, syms = SCREENER_UNIVERSES[uni]
-    df = yf.download(syms, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True)["Close"]
+    df = yf.download(syms, period="5d" if period == "day" else "3mo", interval="1d", auto_adjust=False, progress=False,
+                     threads=True)["Close"]
     if isinstance(df, pd.Series):
         df = df.to_frame(syms[0])
     last = {s_: df[s_].dropna().index[-1] for s_ in syms if s_ in df and df[s_].dropna().size >= 2}
@@ -8650,12 +8652,20 @@ def market_movers(uni="dax", n=5):
         raise ValueError("Keine Kursdaten verfügbar")
     days = pd.Series(list(last.values())).value_counts()
     ref = max(d for d, c in days.items() if c >= 0.5 * len(last))  # letzter Handelstag, an dem die meisten Werte notierten
+    since = ref - pd.DateOffset(months=1) if period == "month" else None
     rows = []
     for s_, d in last.items():
         if d != ref:
             continue  # z. B. Handel ausgesetzt: kein aktueller Kurs
         c = df[s_].dropna()
-        prev, px = float(c.iloc[-2]), float(c.iloc[-1])
+        if since is None:
+            prev = float(c.iloc[-2])
+        else:
+            base = c[c.index <= since]
+            if base.empty:
+                continue  # erst seit Kurzem notiert
+            prev = float(base.iloc[-1])
+        px = float(c.iloc[-1])
         if prev > 0 and px > 0:
             suf = s_.rsplit(".", 1)[1] if "." in s_ else ""
             rows.append({"symbol": s_, "price": px, "change": px / prev - 1,
@@ -8666,10 +8676,11 @@ def market_movers(uni="dax", n=5):
     with ThreadPoolExecutor(max_workers=6) as ex:
         for r_, nm in zip(picked, ex.map(_mover_name, [r_["symbol"] for r_ in picked])):
             r_["name"] = nm
-    res = {"index": name, "key": uni, "date": ref.strftime("%Y-%m-%d"), "n": len(rows), "up": top, "down": flop,
+    res = {"index": name, "key": uni, "period": period, "date": ref.strftime("%Y-%m-%d"),
+           "since": since.strftime("%Y-%m-%d") if since is not None else None, "n": len(rows), "up": top, "down": flop,
            "advancers": sum(1 for r_ in rows if r_["change"] > 0), "decliners": sum(1 for r_ in rows if r_["change"] < 0),
            "updated": berlin_now().strftime("%H:%M")}
-    MOVERS_CACHE[uni] = (time.time(), res)
+    MOVERS_CACHE[(uni, period)] = (time.time(), res)
     return res
 
 
@@ -8772,7 +8783,7 @@ def cache_rules():
             ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500),
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
-            ("Tagesgewinner", MOVERS_CACHE, 600, 10)]
+            ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20)]
 
 
 def prune_caches():
@@ -9890,7 +9901,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/movers":
             try:
-                return self.send(200, json.dumps(json_safe(market_movers((qs.get("u") or ["dax"])[0])), ensure_ascii=False),
+                return self.send(200, json.dumps(json_safe(market_movers((qs.get("u") or ["dax"])[0], period=(qs.get("p") or ["day"])[0])), ensure_ascii=False),
                                  "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)

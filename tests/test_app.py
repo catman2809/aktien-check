@@ -1603,7 +1603,7 @@ class TestMovers(unittest.TestCase):
         df = pd.DataFrame({"A.DE": [100, 110], "B.DE": [100, 90], "C.DE": [100, 101], "D.DE": [100, 99],
                            "E.DE": [100, 105], "F.DE": [100, 97], "G.DE": [100, float("nan")]}, index=idx)
         with um.patch.dict(a.SCREENER_UNIVERSES, {"test": ("Testindex", syms)}),                 um.patch.object(a.yf, "download", lambda *x, **k: pd.concat({"Close": df}, axis=1)),                 um.patch.object(a, "_mover_name", lambda s_: s_.split(".")[0]):
-            a.MOVERS_CACHE.pop("test", None)
+            a.MOVERS_CACHE.pop(("test", "day"), None)
             r = a.market_movers("test", n=2)
         self.assertEqual([x["symbol"] for x in r["up"]], ["A.DE", "E.DE"])
         self.assertEqual([x["symbol"] for x in r["down"]], ["B.DE", "F.DE"])   # größter Verlust zuerst
@@ -1612,6 +1612,21 @@ class TestMovers(unittest.TestCase):
         self.assertEqual(r["up"][0]["currency"], "EUR")
         with self.assertRaises(ValueError):
             a.market_movers("gibtsnicht")
+
+    def test_month(self):
+        import unittest.mock as um
+        import pandas as pd
+        syms = ["A.DE", "B.DE", "C.DE", "N.DE"]
+        idx = pd.to_datetime(["2026-09-24", "2026-09-25", "2026-10-20", "2026-10-27"])
+        df = pd.DataFrame({"A.DE": [50, 100, 120, 130], "B.DE": [100, 200, 150, 150], "C.DE": [10, 10, 10, 11],
+                           "N.DE": [float("nan"), float("nan"), 5, 6]}, index=idx)
+        with um.patch.dict(a.SCREENER_UNIVERSES, {"test": ("Testindex", syms)}),                 um.patch.object(a.yf, "download", lambda *x, **k: pd.concat({"Close": df}, axis=1)),                 um.patch.object(a, "_mover_name", lambda s_: s_):
+            a.MOVERS_CACHE.pop(("test", "month"), None)
+            r = a.market_movers("test", n=1, period="month")
+        self.assertEqual((r["since"], r["date"], r["n"]), ("2026-09-27", "2026-10-27", 3))  # N erst seit Kurzem notiert
+        self.assertEqual(r["up"][0]["symbol"], "A.DE")
+        self.assertAlmostEqual(r["up"][0]["change"], 0.30)      # 130 gegen den Schlusskurs vom 25.09. (100)
+        self.assertAlmostEqual(r["down"][0]["change"], -0.25)   # B: 150 gegen 200
 
 
 class TestOptions(unittest.TestCase):
