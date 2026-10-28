@@ -253,7 +253,7 @@ class TestStore(Isolated):
             self.assertEqual(a.STORE.load()["u"]["admin"]["topic"], "t1")
             self.assertEqual(list(gists), ["new"])
             self.assertEqual(gists["new"]["description"], a.GIST_DESCRIPTION_ENC)
-            self.assertNotIn("t1", gists["new"]["content"])
+            self.assertNotIn('"topic"', gists["new"]["content"])  # nur Chiffretext (Base64 enthält nie Anführungszeichen im Inhalt)
             self.assertLess(calls.index("POST"), calls.index("DELETE"))
         finally:
             a.gh_api = orig

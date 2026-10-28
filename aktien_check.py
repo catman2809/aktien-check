@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aktien-Check – lokale Kaufen/Halten/Verkaufen-Einschätzung für beliebige Aktien.
+"""Stocky (früher Aktien-Check) – lokale Kaufen/Halten/Verkaufen-Einschätzung für beliebige Aktien.
 
 Start:  python aktien_check.py   ->  öffnet http://localhost:8765 im Browser.
 Datenquellen: Yahoo Finance (via yfinance), Google-News-RSS, Yahoo-Finance-RSS.
@@ -607,7 +607,7 @@ def resolve(query):
         kind = UNSUPPORTED_TYPES.get(info.get("quoteType")) or (
             "Index" if sym.startswith("^") else "Devisenkurs" if sym.endswith("=X") else "Terminkontrakt (Future)" if sym.endswith("=F") else None)
         if kind:
-            raise ValueError(f"„{q}“ ist ein {kind} – Aktien-Check bewertet nur Aktien, ETFs und Kryptowährungen.")
+            raise ValueError(f"„{q}“ ist ein {kind} – Stocky bewertet nur Aktien, ETFs und Kryptowährungen.")
     found = search_symbols(q)
     if not found:
         raise ValueError(f"Keine Aktie zu „{q}“ gefunden.")
@@ -1659,7 +1659,7 @@ def crp_table():
         return CRP_STATE["table"]
     try:
         import html as html_
-        raw = _fetch(CRP_URL, headers={"User-Agent": "Aktien-Check/1.0"}, timeout=20).decode("utf-8", "replace")
+        raw = _fetch(CRP_URL, headers={"User-Agent": "Stocky/1.0"}, timeout=20).decode("utf-8", "replace")
         table = {}
         for row_ in re.findall(r"<tr[^>]*>(.*?)</tr>", raw, re.S | re.I):
             c = [html_.unescape(re.sub(r"<[^>]+>", "", x)).strip()
@@ -3302,7 +3302,7 @@ def company_events(symbol, alternatives=(), currency=""):
 def ics_calendar(symbol, name, events):
     """iCalendar-Datei (ganztägige Termine) für Kalender-Apps."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Aktien-Check//DE", "CALSCALE:GREGORIAN"]
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Stocky//DE", "CALSCALE:GREGORIAN"]
     for e in events:
         d = e["date"].replace("-", "")
         nxt = (datetime.strptime(e["date"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
@@ -4351,7 +4351,7 @@ ISSUER_CACHE = {}         # Symbol -> (Zeit, Bestandsdaten)
 SEC_CACHE = {}            # Schlüssel -> (Zeit, Daten)
 VG_MAP = {"t": 0, "map": {}}
 HOLDINGS_MAX = 2000       # so viele Positionen gehen höchstens an die Oberfläche (Länder/Branchen zählen alle)
-SEC_UA = {"User-Agent": os.environ.get("SEC_USER_AGENT") or "Aktien-Check/1.0 (https://aktien-check.onrender.com)"}
+SEC_UA = {"User-Agent": os.environ.get("SEC_USER_AGENT") or "Stocky/1.0 (https://aktien-check.onrender.com)"}
 
 ISO_DE = {"US": "USA", "DE": "Deutschland", "GB": "Großbritannien", "FR": "Frankreich", "NL": "Niederlande",
           "CH": "Schweiz", "DK": "Dänemark", "SE": "Schweden", "FI": "Finnland", "NO": "Norwegen", "ES": "Spanien",
@@ -5696,7 +5696,7 @@ def derivatives(symbol, price=None, sec_=None, currency=""):
 # ---------------------------------------------------------------------------
 ESEF_CACHE = {}           # ISIN -> (Zeit, Ergebnis)
 ESEF_BASE = "https://filings.xbrl.org"
-ESEF_UA = {"User-Agent": "Aktien-Check/1.0 (https://aktien-check.onrender.com)"}
+ESEF_UA = {"User-Agent": "Stocky/1.0 (https://aktien-check.onrender.com)"}
 ESEF_COUNTRIES = {"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
                   "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "NO", "IS", "LI", "GB"}
 ESEF_MAX_DOWNLOADS = 3
@@ -5987,7 +5987,7 @@ def wikidata_company(ticker, company, isin_cc):
       OPTIONAL { ?c wdt:P17 ?cty. ?cty rdfs:label ?ctyEn FILTER(lang(?ctyEn) = "en") }
       SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". } } LIMIT 80''' % vals
     url = "https://query.wikidata.org/sparql?format=json&query=" + urllib.parse.quote(q)
-    req = urllib.request.Request(url, headers={"User-Agent": "Aktien-Check/1.0 (private Analyse-App)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Stocky/1.0 (private Analyse-App)"})
     with urllib.request.urlopen(req, timeout=12) as r:
         rows = json.loads(r.read())["results"]["bindings"]
     want = _plain_name(company)
@@ -8045,7 +8045,7 @@ def post_message(thread_user, sender, text, system=False):
         STORE.dirty = True
     save_async()
     if from_admin:
-        safe(lambda: ntfy_send("✉️ Nachricht vom Aktien-Check-Admin" if not system else "ℹ️ Aktien-Check",
+        safe(lambda: ntfy_send("✉️ Nachricht vom Stocky-Admin" if not system else "ℹ️ Stocky",
                                text[:300] + (" …" if len(text) > 300 else ""), tags=["envelope"], priority=3, topic=sp["topic"]))
     else:
         notify_admins(f"✉️ Nachricht von {thread_user}", text[:300] + (" …" if len(text) > 300 else ""))
@@ -8107,7 +8107,7 @@ def check_sub_reminders():
             STORE.dirty = True
     for name, until in due:
         d_ = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
-        safe(lambda: post_message(name, "System", f"Dein Aktien-Check-Abo läuft am {d_} ab. Wenn du es verlängern möchtest, "
+        safe(lambda: post_message(name, "System", f"Dein Stocky-Abo läuft am {d_} ab. Wenn du es verlängern möchtest, "
                                   "überweise bitte den nächsten Beitrag – der Administrator schaltet es nach Zahlungseingang frei. "
                                   "Bei Fragen antworte einfach auf diese Nachricht.", system=True))
         notify_admins("💶 Abo läuft bald ab", f"Das Abo von {name} läuft am {d_} ab.", tags=["moneybag"])
@@ -8214,7 +8214,7 @@ def backup_payload():
 def restore_backup(obj):
     """Spielt ein Backup ein. Prüft Format und Schlüssel, bevor der aktuelle Bestand ersetzt wird."""
     if not isinstance(obj, dict) or obj.get("format") != "aktien-check-backup":
-        raise ValueError("Das ist keine Aktien-Check-Backup-Datei.")
+        raise ValueError("Das ist keine Stocky-Backup-Datei.")
     text, _enc = decrypt_text(obj.get("payload") or "", store_key())
     data = json.loads(text)
     if not isinstance(data, dict) or not isinstance(data.get("users"), dict) or not isinstance(data.get("u"), dict):
@@ -9218,7 +9218,7 @@ def save_alert(body, user):
 HTML_PATH = Path(__file__).with_name("index.html")
 STATIC_DIR = Path(__file__).with_name("static")
 WEB_MANIFEST = {
-    "name": "Aktien-Check", "short_name": "Aktien-Check", "lang": "de",
+    "name": "Stocky", "short_name": "Stocky", "lang": "de",
     "description": "Kaufen, Halten oder Verkaufen – automatisierte Aktienanalyse",
     "start_url": "/", "scope": "/", "display": "standalone",
     "background_color": "#0c111d", "theme_color": "#1f4fd8",
@@ -9280,12 +9280,12 @@ LOGIN_PAGE = """<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Aktien-Check">
+<meta name="apple-mobile-web-app-title" content="Stocky">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=kerzi">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=kerzi">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1f4fd8">
-<title>Anmelden · Aktien-Check</title>
+<title>Anmelden · Stocky</title>
 <style>
 :root{--bg:#f5f6f8;--surface:#fff;--border:#d0d5dd;--text:#101828;--text-2:#475467;--accent:#1f4fd8;--accent-soft:#eef3ff;--neg:#b42318;--neg-soft:#fef3f2}
 @media (prefers-color-scheme:dark){:root{--bg:#0c111d;--surface:#131a2a;--border:#334056;--text:#f2f4f7;--text-2:#b4bccb;--accent:#7c9cff;--accent-soft:#1a2547;--neg:#f97066;--neg-soft:#2f1414}}
@@ -9308,7 +9308,7 @@ small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-al
 <form class="box" method="post" action="/login">
   <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
     stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
-  <h1>Aktien-Check</h1>
+  <h1>Stocky</h1>
   <p>Bitte einmal anmelden – dieses Gerät bleibt danach angemeldet.</p>
   {error}
   <input type="hidden" name="next" value="{next}">
@@ -9635,7 +9635,7 @@ class Handler(BaseHTTPRequestHandler):
                 if u.path == "/api/alerts":
                     save_alert(body, user)
                 elif u.path == "/api/alerts/test":
-                    ntfy_send("✅ Aktien-Check: Test", f"Push-Benachrichtigungen für „{user}“ funktionieren.",
+                    ntfy_send("✅ Stocky: Test", f"Push-Benachrichtigungen für „{user}“ funktionieren.",
                               tags=["white_check_mark"], topic=user_space(user)["topic"])
                 elif u.path == "/api/alerts/check":
                     fired = [f for f in run_alert_checks(force_rating=bool(body.get("rating"))) if f.get("user") == user]
@@ -9806,7 +9806,7 @@ class Handler(BaseHTTPRequestHandler):
             data_ = json.dumps(backup_payload(), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Disposition", f'attachment; filename="aktien-check-backup-{datetime.now():%Y-%m-%d}.json"')
+            self.send_header("Content-Disposition", f'attachment; filename="stocky-backup-{datetime.now():%Y-%m-%d}.json"')
             self.send_header("Content-Length", str(len(data_)))
             self.end_headers()
             self.wfile.write(data_)
@@ -9991,7 +9991,7 @@ def main():
              sys.version.split()[0], getattr(yf, "__version__", "?"), port, "an" if app_password() else "aus",
              "an" if finnhub_key() else "aus", STORE.backend, " (verschlüsselt)" if store_key() else "")
     url = f"http://localhost:{port}"
-    print(f"Aktien-Check läuft auf {url}  (Beenden mit Strg+C)")
+    print(f"Stocky läuft auf {url}  (Beenden mit Strg+C)")
     if network and not hosted:
         print("\nVon anderen Geräten im selben WLAN/Netzwerk erreichbar unter:")
         for ip in lan_ips():

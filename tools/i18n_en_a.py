@@ -59,9 +59,9 @@ SECTORS = {
 
 A = {
     # --- Kopf, Navigation, Startseite ---
-    "Aktien-Check": "Aktien-Check", "Kaufen · Halten · Verkaufen": "Buy · Hold · Sell", "Prüfen": "Check",
+    "Stocky": "Stocky", "Kaufen · Halten · Verkaufen": "Buy · Hold · Sell", "Prüfen": "Check",
     "Aktie oder Krypto, z. B. Allianz, SAP.DE, Bitcoin": "Stock or crypto, e.g. Allianz, AAPL, Bitcoin",
-    "Zur Startseite": "Go to start page", "Aktien-Check – zur Startseite": "Aktien-Check – go to start page",
+    "Zur Startseite": "Go to start page", "Stocky – zur Startseite": "Stocky – go to start page",
     "Zurück zur Startseite": "Back to start page", "Startseite": "Start page", "Watchlist": "Watchlist",
     "Watchlist öffnen": "Open watchlist", "Konto": "Account", "Hell/Dunkel umschalten": "Toggle light/dark",
     "Farbschema umschalten": "Toggle color scheme", "Kaufen, halten oder verkaufen?": "Buy, hold or sell?",

@@ -1,4 +1,4 @@
-# Aktien-Check
+# Stocky
 
 Lokales Tool, das jede beliebige Aktie auf **Kaufen / Halten / Verkaufen** prüft
 (Strong Buy … Strong Sell, 14 Abstufungen) und für 8 Kategorien das zutreffendste Adjektiv wählt.

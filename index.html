@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Aktien-Check">
+<meta name="apple-mobile-web-app-title" content="Stocky">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=kerzi">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=kerzi">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1f4fd8">
-<title>Aktien-Check</title>
+<title>Stocky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1050,9 +1050,9 @@ table.peers .neg{color:var(--neg)}
 <body>
 <header class="topbar">
   <div class="container">
-    <a class="brand" href="./" id="brand" title="Zur Startseite" aria-label="Aktien-Check – zur Startseite">
+    <a class="brand" href="./" id="brand" title="Zur Startseite" aria-label="Stocky – zur Startseite">
       <div class="logo"><svg width="22" height="26" viewBox="0 0 100 120" aria-hidden="true"><line x1="50" y1="6" x2="50" y2="114" stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="30" y1="56" x2="12" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><line x1="70" y1="56" x2="88" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><rect x="28" y="26" width="44" height="70" rx="9" fill="#1baf7a"/><circle cx="41" cy="50" r="5" fill="#0b3d27"/><circle cx="59" cy="50" r="5" fill="#0b3d27"/><path d="M40 64 Q50 74 60 64" fill="none" stroke="#0b3d27" stroke-width="4.5" stroke-linecap="round"/></svg></div>
-      <div>Aktien-Check<small>Kaufen · Halten · Verkaufen</small></div>
+      <div>Stocky<small>Kaufen · Halten · Verkaufen</small></div>
     </a>
     <form class="search" id="f" autocomplete="off">
       <svg class="s" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -1487,7 +1487,7 @@ async function wlShare() {
   let copied = false;
   try { await navigator.clipboard.writeText(link); copied = true; } catch (e) {}
   if (navigator.share && /iPhone|iPad|Android/i.test(navigator.userAgent)) {
-    try { await navigator.share({title: "Aktien-Check Watchlist", url: link}); return; } catch (e) {}
+    try { await navigator.share({title: "Stocky Watchlist", url: link}); return; } catch (e) {}
   }
   $("#wlsharebox").innerHTML = `<div class="card pad" style="margin-top:16px">
     <b>Link zum Übertragen</b><div class="stamp">Öffne diesen Link auf dem anderen Gerät – die Aktien werden dort zur Watchlist hinzugefügt.</div>
@@ -1536,7 +1536,7 @@ function showMaintenance(text) {
   const d = document.createElement("div");
   d.id = "maint-screen";
   d.innerHTML = `<div class="card pad maint-card"><div class="maint-ico">🛠️</div><h2>Wartungsarbeiten</h2>
-    <p>${esc(text || "Aktien-Check wird gerade gewartet und ist in Kürze wieder erreichbar.")}</p>
+    <p>${esc(text || "Stocky wird gerade gewartet und ist in Kürze wieder erreichbar.")}</p>
     <div class="modal-actions" style="justify-content:center"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button>
     <a class="btn" href="/logout">Abmelden</a></div></div>`;
   document.body.appendChild(d);
@@ -1811,7 +1811,7 @@ function a2hsHint() {
        <b style="display:inline;font-size:inherit">Android (Chrome):</b> Menü ⋮ → „Zum Startbildschirm hinzufügen“</p>`;
   return `<div class="card a2hs" id="a2hs" role="note">
     <img src="/static/apple-touch-icon.png?v=kerzi" alt="">
-    <div><b>Tipp: Aktien-Check auf den Startbildschirm legen</b>
+    <div><b>Tipp: Stocky auf den Startbildschirm legen</b>
       <p>Auf dem Handy startet die App dann wie eine normale App – mit eigenem Symbol, ohne Adressleiste und mit einem Tipp sofort da.</p>
       ${body}
       ${installPrompt ? `<button class="btn primary" id="a2hs-install">Jetzt installieren</button>` : ""}</div>
@@ -2980,7 +2980,7 @@ function renderSub(S) {
   const info = `<div class="sub-info"><b>So bezahlst du</b><p>${esc(S.payment_info).replace(/\n/g, "<br>")}</p></div>`;
   box.className = "";
   box.innerHTML = `<div class="sub-status">${status}</div>
-    <p class="stamp" style="margin:6px 0 10px">Mit ${S.price} € pro Monat unterstützt du den Betrieb von Aktien-Check. Derzeit bleiben alle Funktionen für alle nutzbar.</p>
+    <p class="stamp" style="margin:6px 0 10px">Mit ${S.price} € pro Monat unterstützt du den Betrieb von Stocky. Derzeit bleiben alle Funktionen für alle nutzbar.</p>
     ${S.state === "angefragt" || S.state === "inaktiv" || S.state === "abgelaufen" ? info : ""}
     <div class="modal-actions" style="justify-content:flex-start;margin-top:10px">
       ${S.state === "inaktiv" || S.state === "abgelaufen" ? `<button class="btn primary" id="sub-req">Abo für ${S.price} € / Monat anfragen</button>` : ""}
@@ -3239,7 +3239,7 @@ function renderAdmin(D) {
     if (!f) return;
     let obj;
     try { obj = JSON.parse(await f.text()); } catch (err) { bkMsg("Die Datei ist kein gültiges Backup.", false); return; }
-    if (obj.format !== "aktien-check-backup") { bkMsg("Das ist keine Aktien-Check-Backup-Datei.", false); return; }
+    if (obj.format !== "aktien-check-backup") { bkMsg("Das ist keine Stocky-Backup-Datei.", false); return; }
     if (!confirm(`Backup vom ${new Date(obj.created * 1000).toLocaleString("de-DE")} (${obj.users} Benutzer) einspielen?
 
 ALLE aktuellen Daten (Konten, Watchlists, Alarme, Abos, Nachrichten, Screener) werden durch den Stand des Backups ersetzt. Das lässt sich nur mit einem anderen Backup rückgängig machen – lade vorher am besten ein aktuelles Backup herunter.`)) return;
@@ -4523,7 +4523,7 @@ function peersSection(d) {
 function exportPdf(d) {
   const old = document.title;
   const date = new Date().toLocaleDateString("de-DE");
-  document.title = `Aktien-Check ${d.name} ${date}`.replace(/[\\/:*?"<>|]/g, "");  // wird zum Dateinamen
+  document.title = `Stocky ${d.name} ${date}`.replace(/[\\/:*?"<>|]/g, "");  // wird zum Dateinamen
   const restore = () => { document.title = old; window.removeEventListener("afterprint", restore); };
   window.addEventListener("afterprint", restore);
   if (isStandalone() && /iPhone|iPad/.test(navigator.userAgent)) {
@@ -4565,7 +4565,7 @@ function render(d) {
 
   $("#out").innerHTML = `
   <div class="print-only print-head">
-    <div><b>Aktien-Check</b> · Analyse ${esc(d.name)} (${esc(d.symbol)})</div>
+    <div><b>Stocky</b> · Analyse ${esc(d.name)} (${esc(d.symbol)})</div>
     <div>Stand ${esc(d.generated)}${ME?.multi ? " · erstellt für " + esc(ME.user) : ""} · ${esc(location.host)}</div>
   </div>
   <section id="ueberblick" class="hero">
