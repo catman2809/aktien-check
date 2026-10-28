@@ -3405,12 +3405,77 @@ INCOME_CACHE = {}
 MONTHS_DE_SHORT = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
 
+def income_estimates(t, periods, currency, eps_last):
+    """Prognosen für die Erfolgsrechnung: laufendes und folgendes Geschäftsjahr aus dem Analystenkonsens (Yahoo),
+    das zweite Folgejahr als Fortschreibung des Trends (dafür gibt es keinen Konsens). Umsatz direkt aus der
+    Umsatzprognose; Reinertrag = prognostizierter Gewinn je Aktie × Aktienzahl, wobei die Aktienzahl aus dem zuletzt
+    gemeldeten Reinertrag und Gewinn je Aktie folgt (gleiche Aktienbasis, auch bei ADRs). Alles in Berichtswährung."""
+    if not periods:
+        return []
+    last = periods[-1]
+
+    def get(df, per):
+        if df is None or getattr(df, "empty", True) or per not in df.index:
+            return None
+        r_ = df.loc[per]
+        avg = num(r_.get("avg"))
+        cur = r_.get("currency") if isinstance(r_.get("currency"), str) else None
+        k = fx_rate(cur, currency) if cur and currency and cur != currency else 1.0
+        if not avg or not k:
+            return None
+        ago = num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps"))
+        return {"avg": avg * k, "low": (num(r_.get("low")) or avg) * k, "high": (num(r_.get("high")) or avg) * k,
+                "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
+    rev_df, eps_df = safe(lambda: t.revenue_estimate), safe(lambda: t.earnings_estimate)
+    r0, r1, e0, e1 = get(rev_df, "0y"), get(rev_df, "+1y"), get(eps_df, "0y"), get(eps_df, "+1y")
+    # Die Prognose muss auf dem zuletzt gemeldeten Jahr aufbauen (sonst andere Abgrenzung oder Yahoo-Fehler)
+    if not r0 or not r0["ago"] or not 0.8 <= r0["ago"] / last["revenue"] <= 1.25:
+        return []
+    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    end = datetime.fromisoformat(last["end"])
+
+    def at(i):
+        try:
+            return end.replace(year=end.year + i)
+        except ValueError:  # 29. Februar
+            return end.replace(year=end.year + i, day=28)
+
+    def period(i, rev, ni, kind, n_rev=0, n_eps=0, rng=None):
+        d = at(i)
+        out_ = {"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
+                "margin": ni / rev if ni is not None and rev else None, "op_income": None, "op_margin": None,
+                "est": kind, "n_rev": n_rev, "n_eps": n_eps}
+        if rng:
+            out_.update(rng)
+        return out_
+    ni_of = lambda e: shares * e["avg"] if shares and e else None
+    ni0 = ni_of(e0)
+    if ni0 is not None and not 0.25 <= ni0 / last["net_income"] <= 4:
+        ni0 = None  # unplausibel -> vermutlich andere Aktienbasis
+    rng = lambda r_, e_: {"rev_low": r_["low"], "rev_high": r_["high"],
+                          "ni_low": shares * e_["low"] if shares and e_ else None,
+                          "ni_high": shares * e_["high"] if shares and e_ else None}
+    out = [period(1, r0["avg"], ni0, "consensus", r0["n"], e0["n"] if e0 and ni0 is not None else 0,
+                  rng(r0, e0 if ni0 is not None else None))]
+    if r1 and 0.5 <= r1["avg"] / r0["avg"] <= 2:
+        ni1 = ni_of(e1) if ni0 is not None else None
+        out.append(period(2, r1["avg"], ni1, "consensus", r1["n"], e1["n"] if e1 and ni1 is not None else 0,
+                          rng(r1, e1 if ni1 is not None else None)))
+        # zweites Folgejahr: Wachstum des Vorjahres fortgeschrieben, begrenzt
+        g_rev = clamp(r1["avg"] / r0["avg"] - 1, -0.15, 0.30)
+        ni2 = None
+        if ni1 is not None and ni0 and ni0 > 0 and ni1 > 0:
+            ni2 = ni1 * (1 + clamp(ni1 / ni0 - 1, -0.30, 0.40))
+        out.append(period(3, r1["avg"] * (1 + g_rev), ni2, "trend"))
+    return out
+
+
 def income_data(symbol, freq):
     """Erfolgsrechnung (Umsatz, Reinertrag, Nettomarge) je Geschäftsjahr oder Quartal, in Berichtswährung."""
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq)
+    key = (symbol, freq, "v2")  # v2: mit Prognosen
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3467,6 +3532,11 @@ def income_data(symbol, freq):
            "currency": "USD" if source else financial_currency(symbol) or safe(lambda: t.fast_info.currency) or ""}
     if source:
         out["source"] = source
+    if freq == "annual":
+        eps_row = row("Diluted EPS", "Basic EPS")
+        last_col = next((c for c in df.columns if (c.date() if hasattr(c, "date") else c).isoformat() == periods[-1]["end"]), None)
+        eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
+        out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last), []) or []
     INCOME_CACHE[key] = (time.time(), out)
     return out
 

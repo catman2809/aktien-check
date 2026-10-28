@@ -193,3 +193,14 @@ DEPOT_EXACT.update({"Top & Flop seit Jahresbeginn": "Top & flop year to date", "
                     "seit Jahresbeginn: {0} bis {1}": "year to date: {0} to {1}"})
 DEPOT_EXACT.update({"Lädt": "Loading"})
 DEPOT_EXACT.update({"Passwort anzeigen": "Show password", "Passwort verbergen": "Hide password"})
+DEPOT_EXACT.update({
+    "Prognose": "Forecast", " (Prognose)": " (forecast)", "Reinertrag ohne Prognose": "Net income without forecast",
+    "e = erwartet.": "e = expected.", "Fortschreibung des Trends, keine Analystenschätzung": "Trend extrapolation, no analyst estimate",
+    "Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.": "Net income calculated from expected earnings per share.",
+})
+DEPOT_WILD += [
+    ("{*}: Analystenkonsens (Yahoo Finance).", "{*}: analyst consensus (Yahoo Finance)."),
+    ("{*}: eigene Fortschreibung des Trends, dafür gibt es keine Analystenschätzung.", "{*}: own trend extrapolation, there is no analyst estimate for it."),
+    ("Prognose · Konsens von {0} Analysten (Gewinn: {1})", "Forecast · consensus of {0} analysts (earnings: {1})"),
+    ("Prognose · Konsens von {0} Analysten", "Forecast · consensus of {0} analysts"),
+]

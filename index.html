@@ -74,7 +74,7 @@ a{color:inherit}
 .topbar{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--border)}
 .topbar .container{display:flex;align-items:center;gap:20px;height:64px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:19px;white-space:nowrap}
-.logo{width:30px;height:30px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
+.logo{width:30px;height:30px;border-radius:8px;background:#1f5e5b;display:grid;place-items:center}
 a.brand{color:inherit;text-decoration:none;border-radius:10px}
 a.brand:hover .logo{filter:brightness(1.12)}
 a.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -790,6 +790,9 @@ table.trk tr:last-child td{border-bottom:0}
 .copy-btn:hover{color:var(--text);border-color:var(--border-strong)}
 .copy-btn.ok{color:var(--pos);border-color:var(--pos-line)}
 @media (max-width:640px){.about-row{padding:11px 16px}}
+.legend i.box.est{background:color-mix(in srgb,var(--text-3) 30%,transparent);border:1.5px solid var(--text-3)}
+.inc-est-lab{font-size:11.5px;fill:var(--text-3);font-weight:600}
+.inc-est-note{display:block;color:var(--text-3);font-size:12px;margin-top:4px}
 .legend i.mar.op{border-top-style:dashed}
 .legend i.mar.op::after{border-radius:1.5px}
 .legend i.sma50{color:var(--sma50)} .legend i.sma200{color:var(--sma200)}
@@ -4021,29 +4024,38 @@ const INC = {sym: null, freq: "annual", data: {}, ro: null};
 try { INC.freq = localStorage.getItem("ac-inc-freq") === "quarterly" ? "quarterly" : "annual"; } catch (e) {}
 function incHead(p, D, unit) {
   const [v, u] = big(p.revenue);
-  $("#inc-val").innerHTML = `${v}<small>${u} ${esc(D.currency)} Umsatz</small>`;
+  $("#inc-val").innerHTML = `${v}<small>${u} ${esc(D.currency)} Umsatz${p.est ? " (Prognose)" : ""}</small>`;
   const mc = p.margin >= 0 ? "var(--pos)" : "var(--neg)";
-  $("#inc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">Reinertrag ${big(p.net_income).join(" ")} ·
-    Netto <b style="color:${mc}">${pc(p.margin, 1)}</b>${p.op_margin != null ? ` · Operativ <b style="color:${p.op_margin >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(p.op_margin, 1)}</b>` : ""}</span><span>${esc(p.label)}</span>`;
+  $("#inc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">${p.net_income != null ? `Reinertrag ${big(p.net_income).join(" ")} ·
+    Netto <b style="color:${mc}">${pc(p.margin, 1)}</b>` : "Reinertrag ohne Prognose"}${p.op_margin != null ? ` · Operativ <b style="color:${p.op_margin >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(p.op_margin, 1)}</b>` : ""}</span><span>${esc(p.label)}</span>`;
+}
+function incEstNote(E) {
+  // eigene Spans je Satzteil, damit die englische Übersetzung greift
+  const cons = E.filter(p => p.est === "consensus").map(p => p.label), trend = E.find(p => p.est === "trend");
+  return `<span>e = erwartet.</span> <span>${esc(cons.join(" / "))}: Analystenkonsens (Yahoo Finance).</span>` +
+    (trend ? ` <span>${esc(trend.label)}: eigene Fortschreibung des Trends, dafür gibt es keine Analystenschätzung.</span>` : "") +
+    (E.some(p => p.net_income != null) ? ` <span>Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.</span>` : "");
 }
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
   const D = INC.data[INC.freq]; if (!D) return;
-  const P = D.periods, n = P.length;
+  // gemeldete Jahre + Prognosen (laufendes und folgendes Geschäftsjahr: Analystenkonsens, danach Fortschreibung)
+  const E = INC.freq === "annual" ? (D.estimates || []) : [];
+  const P = [...D.periods, ...E], n = P.length, nAct = D.periods.length;
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const m = {l: 44, r: 62, t: 12, b: 28};
   const pw = W - m.l - m.r, ph = H - m.t - m.b;
   // Rechte Achse: Beträge (Einheit nach größtem Umsatz)
   const maxV = Math.max(...P.map(p => p.revenue));
   const [div, unit] = maxV >= 1e12 ? [1e12, "Bio."] : maxV >= 1e9 ? [1e9, "Mrd."] : [1e6, "Mio."];
-  const minV = Math.min(0, ...P.map(p => p.net_income));
+  const minV = Math.min(0, ...P.map(p => p.net_income).filter(v => v != null));
   const {ticks, step} = niceTicks(minV / div, maxV / div * 1.04, 5);
   const vLo = Math.min(0, ticks[0]), vHi = ticks[ticks.length - 1] < maxV / div ? ticks[ticks.length - 1] + step : ticks[ticks.length - 1];
   const grid = [...new Set([...ticks.filter(t => t >= vLo), vHi])];
   const Yv = v => m.t + (1 - (v / div - vLo) / (vHi - vLo)) * ph;
   // Linke Achse: Nettomarge, auf dieselben Gitterlinien gelegt
   const hasOp = P.some(p => p.op_margin != null);
-  const mg = [...P.map(p => p.margin), ...P.map(p => p.op_margin).filter(v => v != null)];
+  const mg = [...P.map(p => p.margin), ...P.map(p => p.op_margin)].filter(v => v != null);
   let mLo = Math.min(...mg), mHi = Math.max(...mg);
   const mp = (mHi - mLo) * 0.12 || Math.abs(mHi) * 0.2 || 0.05;
   mLo -= mp; mHi += mp;
@@ -4051,15 +4063,22 @@ function drawIncome() {
   const mAt = y => mLo + (1 - (y - m.t) / ph) * (mHi - mLo);
   const cw = pw / n, bw = Math.min(34, cw * 0.3), gap = Math.min(10, cw * 0.08);
   const cx = i => m.l + cw * (i + 0.5);
-  const bar = (x, v, cls) => {   // Balken mit gerundetem Ende, am Nullpunkt verankert
+  const bar = (x, v, cls, est) => {   // Balken mit gerundetem Ende, am Nullpunkt verankert; Prognosen hell mit Rahmen
+    if (v == null) return "";
     const y0 = Yv(0), y1 = Yv(v), h = Math.abs(y0 - y1), r = Math.min(4, h, bw / 2), up = v >= 0;
     if (h < 0.5) return "";
     const top = up ? y1 : y0, bot = up ? y0 : y1;
     const d = up ? `M${x},${bot}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${bot}Z`
                  : `M${x},${top}V${bot - r}Q${x},${bot} ${x + r},${bot}H${x + bw - r}Q${x + bw},${bot} ${x + bw},${bot - r}V${top}Z`;
-    return `<path d="${d}" fill="var(${cls})"/>`;
+    return est ? `<path d="${d}" fill="var(${cls})" fill-opacity="${est === "trend" ? 0.18 : 0.32}" stroke="var(${cls})" stroke-width="1.5"${est === "trend" ? ` stroke-dasharray="4 3"` : ""}/>`
+      : `<path d="${d}" fill="var(${cls})"/>`;
   };
-  const line = P.map((p, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${Ym(p.margin).toFixed(1)}`).join("");
+  const pts = arr => arr.map(i => `${cx(i).toFixed(1)},${Ym(P[i].margin).toFixed(1)}`);
+  const actIdx = P.map((p, i) => i).filter(i => i < nAct && P[i].margin != null);
+  const estIdx = P.map((p, i) => i).filter(i => i >= nAct && P[i].margin != null);
+  const line = actIdx.length ? "M" + pts(actIdx).join("L") : "";
+  const estLine = estIdx.length && actIdx.length ? "M" + pts([actIdx[actIdx.length - 1], ...estIdx]).join("L") : "";
+  const sepX = E.length ? m.l + cw * nAct : null;
   let opLine = "", pen = false;
   P.forEach((p, i) => { if (p.op_margin == null) { pen = false; return; }
     opLine += `${pen ? "L" : "M"}${cx(i).toFixed(1)},${Ym(p.op_margin).toFixed(1)}`; pen = true; });
@@ -4076,38 +4095,46 @@ function drawIncome() {
       ${P.map((p, i) => `<text x="${cx(i).toFixed(1)}" y="${H - 7}" text-anchor="middle">${esc(p.label)}</text>`).join("")}
     </g>
     ${minV < 0 ? `<line class="zero" x1="${m.l}" x2="${m.l + pw}" y1="${Yv(0).toFixed(1)}" y2="${Yv(0).toFixed(1)}"/>` : ""}
-    ${P.map((p, i) => bar(cx(i) - bw - gap / 2, p.revenue, "--inc-rev") + bar(cx(i) + gap / 2, p.net_income, "--inc-ni")).join("")}
+    ${sepX != null ? `<line x1="${sepX.toFixed(1)}" x2="${sepX.toFixed(1)}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--border-strong)" stroke-dasharray="3 4"/>
+      <text class="inc-est-lab" x="${(sepX + 6).toFixed(1)}" y="${m.t + 11}">Prognose</text>` : ""}
+    ${P.map((p, i) => bar(cx(i) - bw - gap / 2, p.revenue, "--inc-rev", p.est) + bar(cx(i) + gap / 2, p.net_income, "--inc-ni", p.est)).join("")}
     ${hasOp ? `<path d="${opLine}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
       ${P.map((p, i) => p.op_margin == null ? "" : `<rect x="${(cx(i) - 4).toFixed(1)}" y="${(Ym(p.op_margin) - 4).toFixed(1)}" width="8" height="8" rx="1.5" fill="var(--surface)" stroke="var(--text-2)" stroke-width="2"/>`).join("")}` : ""}
     <path d="${line}" fill="none" stroke="var(--inc-mar)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    ${P.map((p, i) => `<circle cx="${cx(i).toFixed(1)}" cy="${Ym(p.margin).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--inc-mar)" stroke-width="2"/>`).join("")}
+    ${estLine ? `<path d="${estLine}" fill="none" stroke="var(--inc-mar)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round"/>` : ""}
+    ${P.map((p, i) => p.margin == null ? "" : `<circle cx="${cx(i).toFixed(1)}" cy="${Ym(p.margin).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--inc-mar)" stroke-width="2"${p.est ? ` stroke-dasharray="3 2"` : ""}/>`).join("")}
     <rect id="inc-hit" x="${m.l}" y="0" width="${pw}" height="${H}" fill="transparent"/>
   </svg><div class="chart-tip" id="inc-tip"></div>`;
-  const last = P[n - 1];
+  const last = P[nAct - 1];
   incHead(last, D);
   $("#inc-foot").innerHTML = `<div class="legend">
       <span style="color:var(--inc-rev)"><i class="box"></i><span style="color:var(--text-2)">Umsatz</span></span>
       <span style="color:var(--inc-ni)"><i class="box"></i><span style="color:var(--text-2)">Reinertrag</span></span>
       <span style="color:var(--inc-mar)"><i class="mar"></i><span style="color:var(--text-2)">Nettomarge %</span></span>
       ${hasOp ? `<span style="color:var(--text-2)"><i class="mar op"></i>Operative Marge %</span>` : ""}
+      ${E.length ? `<span style="color:var(--text-2)"><i class="box est"></i>Prognose</span>` : ""}
       <span style="color:var(--text-3)">Margen: linke Achse</span></div>
-    <span>${INC.freq === "annual" ? "Geschäftsjahre" : "Quartale (Monat = Periodenende)"} · Beträge in ${unit} ${esc(D.currency)} · Quelle: ${esc(D.source || "Yahoo Finance")}</span>`;
+    <span>${INC.freq === "annual" ? "Geschäftsjahre" : "Quartale (Monat = Periodenende)"} · Beträge in ${unit} ${esc(D.currency)} · Quelle: ${esc(D.source || "Yahoo Finance")}</span>
+    ${E.length ? `<span class="inc-est-note">${incEstNote(E)}</span>` : ""}`;
   const hit = $("#inc-hit"), tip = $("#inc-tip"), cols = wrap.querySelectorAll(".col");
   const move = e => {
     const r = hit.getBoundingClientRect();
     const i = Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
     const p = P[i];
     cols.forEach(c => c.classList.toggle("on", +c.dataset.i === i));
+    const rngTxt = (lo, hi) => lo != null && hi != null && hi > lo ? ` <span style="color:var(--text-3)">(${big(lo).join(" ")} – ${big(hi).join(" ")})</span>` : "";
     tip.innerHTML = `<b>${esc(p.label)}</b>
-      <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}</span>
-      <span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}</span>
+      ${p.est === "consensus" ? `<span style="display:block;color:var(--text-3)">Prognose · Konsens von ${p.n_rev} Analysten${p.n_eps ? ` (Gewinn: ${p.n_eps})` : ""}</span>`
+        : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">Fortschreibung des Trends, keine Analystenschätzung</span>` : ""}
+      <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>
+      ${p.net_income != null ? `<span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}${rngTxt(p.ni_low, p.ni_high)}</span>` : ""}
       ${p.op_income != null ? `<span style="display:block">Operatives Ergebnis: ${big(p.op_income).join(" ")} ${esc(D.currency)}</span>` : ""}
-      <span style="display:block">Nettomarge: ${pc(p.margin, 1)}</span>
+      ${p.margin != null ? `<span style="display:block">Nettomarge: ${pc(p.margin, 1)}</span>` : ""}
       ${p.op_margin != null ? `<span style="display:block">Operative Marge: ${pc(p.op_margin, 1)}</span>` : ""}`;
     tip.style.display = "block";
     const tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(W - tw, cx(i) - tw / 2)) + "px";
-    tip.style.top = Math.max(0, Math.min(Yv(p.revenue), Ym(p.margin), p.op_margin != null ? Ym(p.op_margin) : Infinity) - tip.offsetHeight - 12) + "px";
+    tip.style.top = Math.max(0, Math.min(Yv(p.revenue), p.margin != null ? Ym(p.margin) : Infinity, p.op_margin != null ? Ym(p.op_margin) : Infinity) - tip.offsetHeight - 12) + "px";
     incHead(p, D);
   };
   const leave = () => { tip.style.display = "none"; cols.forEach(c => c.classList.remove("on")); incHead(last, D); };
