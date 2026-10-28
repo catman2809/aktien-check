@@ -1668,7 +1668,7 @@ class TestIncomeFallbacks(unittest.TestCase):
         est = a.income_estimates_nasdaq(self.PER, "USD", 2.0, nq, [80.0, 90.0, 100.0])
         self.assertEqual([e["label"] for e in est], ["2026e", "2027e", "2028e"])
         self.assertAlmostEqual(est[0]["net_income"], 10 * 2.2)                 # 10 Aktien (20 / 2,00) × 2,20
-        self.assertAlmostEqual(est[0]["revenue"], 100 * (1 + 0.1111), places=2)  # Median-Wachstum der letzten Jahre
+        self.assertAlmostEqual(est[0]["revenue"], 112.5)                      # Wachstum 12,5 % / 11,1 % -> oberer Median
         self.assertTrue(est[0]["rev_trend"])
         self.assertEqual(est[2]["n_eps"], 3)
 
