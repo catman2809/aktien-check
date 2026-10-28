@@ -1645,6 +1645,26 @@ class TestFcfEstimates(unittest.TestCase):
         self.assertTrue(est[0]["fcf_derived"])
 
 
+class TestDividendForecast(unittest.TestCase):
+    def test_forecast(self):
+        y = a.datetime.now().year
+        m = {"div_yield": 0.02, "biz": "standard",
+             "divhist": {"years": [y - 2, y - 1], "dps": [1.0, 1.05], "g5": 0.06, "ytd": 0.8, "per_year": 4, "paid_now": 3},
+             "est_eps": {"0y": {"avg": 2.2, "ago": 2.0}, "+1y": {"avg": 2.25, "ago": 2.2}}}
+        f = a.dividend_forecast(m)
+        self.assertEqual([x["year"] for x in f], [y, y + 1, y + 2])
+        self.assertAlmostEqual(f[0]["dps"], 1.05 * 1.06, places=4)   # Dividendenwachstum 6 %, Gewinn +10 % -> 6 %
+        self.assertAlmostEqual(f[1]["growth"], 2.25 / 2.2 - 1, places=4)  # Gewinn nur +2,3 % -> Dividende höchstens so stark
+        m["divhist"].update(per_year=1, paid_now=1, ytd=1.2)           # jährliche Zahlung schon erfolgt
+        f = a.dividend_forecast(m)
+        self.assertTrue(f[0]["done"])
+        self.assertEqual(f[0]["dps"], 1.2)
+        m["est_eps"] = {"0y": {"avg": 1.5, "ago": 2.0}}                # Gewinnrückgang -> Dividende gehalten, keine Kürzung
+        m["divhist"].update(per_year=4, paid_now=1, ytd=0.25)
+        self.assertAlmostEqual(a.dividend_forecast(m)[0]["dps"], 1.05)
+        self.assertIsNone(a.dividend_forecast({"div_yield": 0, "divhist": m["divhist"]}))
+
+
 class TestMovers(unittest.TestCase):
     def test_top_and_flop(self):
         import unittest.mock as um

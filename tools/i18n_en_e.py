@@ -214,3 +214,13 @@ DEPOT_EXACT.update({
         "Free cash flow derived: expected net income times the usual cash conversion (free cash flow per unit of profit, half median of recent periods, half latest period).",
 })
 DEPOT_WILD += [("Free Cashflow: {*}", "Free cash flow: {*}"), ("· FCF {*}", "· FCF {*}")]
+DEPOT_EXACT.update({
+    "e = erwartet (heller).": "e = expected (lighter).",
+    "Prognose abgeleitet: Dividendenwachstum der letzten 5 Jahre, höchstens so stark wie das erwartete Gewinnwachstum, keine Kürzung angenommen.":
+        "Forecast derived: dividend growth of the last 5 years, at most as strong as expected earnings growth, no cut assumed.",
+})
+DEPOT_WILD += [
+    ("{*}: {0} {*1} (alle Zahlungen des Jahres erfolgt)", "{*}: {0} {*1} (all payments for the year made)"),
+    ("{*}: {0} {*1} (Prognose, +{1} %, davon bereits gezahlt {2})", "{*}: {0} {*1} (forecast, +{1}%, of which already paid {2})"),
+    ("{*}: {0} {*1} (Prognose, +{1} %)", "{*}: {0} {*1} (forecast, +{1}%)"),
+]

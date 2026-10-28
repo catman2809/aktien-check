@@ -1332,7 +1332,11 @@ def chart_extras(m, t, inc, bs, divs):
             pts -= 1
             why.append("hohe Verschuldung")
         label = "hoch" if pts >= 5 else "mittel" if pts >= 2 else "niedrig"
+        counts = d.groupby(d.index.year).size()
+        per_year = int(counts.get(this_year - 1, 0) or 0)   # Zahlungen im letzten vollen Jahr (1 = jährlich, 4 = quartalsweise)
+        paid_now = int(counts.get(this_year, 0) or 0)
         m["divhist"] = {"years": [y for y, _ in full], "dps": [v for _, v in full], "ytd": round(ytd, 4) if ytd else None,
+                        "per_year": per_year, "paid_now": paid_now,
                         "g5": cagr(5), "g10": cagr(10), "payout": payout, "currency": m["currency"], "streak": streak,
                         "safety": {"label": label, "reasons": why} if full else None}
     # Aktionärsstruktur
@@ -1773,6 +1777,56 @@ def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5, first
     pv += tv / (1 + r) ** years
     equity = pv - (net_debt or 0)
     return equity / shares if equity > 0 and shares else None
+
+
+def dividend_forecast(m):
+    """Dividendenprognose je Aktie für das laufende und die zwei folgenden Kalenderjahre (Yahoo liefert dafür keine
+    Analystenschätzung). Wachstum je Jahr = bisheriges Dividendenwachstum der letzten 5 Jahre, aber höchstens das
+    erwartete Gewinnwachstum (Analystenkonsens): Unternehmen erhöhen im gewohnten Tempo, auf Dauer aber nicht schneller
+    als der Gewinn. Begrenzt auf 0–25 % – eine Kürzung wird nicht vorhergesagt. Im laufenden Jahr zählt mindestens,
+    was schon gezahlt wurde."""
+    D = m.get("divhist")
+    if not D or not D.get("dps") or not m.get("div_yield"):
+        return None
+    base, last_year = D["dps"][-1], D["years"][-1]
+    this_year = datetime.now().year
+    if not base or base <= 0 or last_year < this_year - 1:
+        return None  # keine laufende Dividende
+    E = m.get("est_eps") if m.get("biz") != "real_estate" else {}  # Immobilien: Gewinn je Aktie wenig aussagekräftig
+    E = E or {}
+    g_eps = [None, None]
+    for i, per in enumerate(("0y", "+1y")):
+        e = E.get(per) or {}
+        if e.get("avg") and e.get("ago") and e["ago"] > 0 and e["avg"] > 0:
+            g_eps[i] = e["avg"] / e["ago"] - 1
+    g_div = D.get("g5") if D.get("g5") is not None else D.get("g10")
+
+    def g(x):
+        if g_div is not None and x is not None:
+            v = min(g_div, max(x, 0.0))
+        elif g_div is not None:
+            v = g_div
+        elif x is not None:
+            v = min(x, 0.15)  # ohne Dividendenhistorie vorsichtig
+        else:
+            return None
+        return clamp(v, 0.0, 0.25)
+    rates = [g(g_eps[0]), g(g_eps[1]), g(g_eps[1])]
+    if rates[0] is None:
+        return None
+    out, v = [], base
+    for i, r_ in enumerate(rates):
+        r_ = rates[i - 1] if r_ is None else r_
+        v = v * (1 + r_)
+        done = False
+        if i == 0 and D.get("ytd"):
+            if D.get("per_year") and D.get("paid_now", 0) >= D["per_year"]:
+                v, done = D["ytd"], True  # alle Zahlungen des Jahres sind schon erfolgt
+            else:
+                v = max(v, D["ytd"])  # mindestens das schon Gezahlte
+        out.append({"year": this_year + i, "dps": round(v, 4), "growth": v / (out[-1]["dps"] if out else base) - 1,
+                    "paid": D.get("ytd") if i == 0 else None, "done": done})
+    return out
 
 
 def fy_progress(m):
@@ -6676,7 +6730,8 @@ def analyze(query):
         "model": {"key": m["biz"], "label": BIZ_MODELS[m["biz"]][0], "text": BIZ_MODELS[m["biz"]][1]},
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],
-        "valchart": m.get("valchart"), "balance": m.get("balance"), "divhist": m.get("divhist"),
+        "valchart": m.get("valchart"), "balance": m.get("balance"),
+        "divhist": (dict(m["divhist"], forecast=safe(lambda: dividend_forecast(m))) if m.get("divhist") else None),
         "holders": m.get("holders"), "eps_quarters": m.get("eps_quarters"),
         "targets": {"low": m.get("target_low"), "high": m.get("target_high"), "mean": m.get("target"),
                     "median": m.get("target_median"), "n": m.get("n_analysts"), "hist": m.get("rec_hist"),

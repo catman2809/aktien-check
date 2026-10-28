@@ -562,6 +562,8 @@ table.scr td b{font-weight:600}
 .db{display:flex;gap:3px;align-items:flex-end;height:110px}
 .db-c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
 .db-c i{display:block;width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.8}
+.db-c.est i{background:color-mix(in srgb,var(--accent) 30%,transparent);border:1.5px dashed var(--accent);border-bottom:0;opacity:1}
+.db-note{margin:8px 0 0}
 .dv-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin:12px 0 0}
 .eq{display:flex;gap:6px;margin:4px 0 10px}
 .eq-c{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0;font-size:12px}
@@ -2942,10 +2944,18 @@ function healthSection(d) {
   }
   let div = "";
   if (Dv && (Dv.dps || []).length) {
-    const mx = Math.max(...Dv.dps), S = Dv.safety;
+    // gezahlte Jahre + Prognose (laufendes Jahr und zwei Folgejahre); ein schon vollständig gezahltes Jahr zählt als gezahlt
+    const F = Dv.forecast || [];
+    const cols = [...Dv.years.map((y, i) => ({y: String(y), v: Dv.dps[i]})),
+      ...F.map(f => ({y: f.done ? String(f.year) : f.year + "e", v: f.dps, est: !f.done, f}))];
+    const mx = Math.max(...cols.map(c => c.v)), S = Dv.safety, dfmt = v => nf(v, v < 1 ? 3 : 2);
+    const nAll = cols.length, step = nAll > 12 ? 5 : nAll > 6 ? 2 : 1;
+    const dTip = c => c.f ? `${c.y}: ${dfmt(c.v)} ${Dv.currency}` + (c.f.done ? " (alle Zahlungen des Jahres erfolgt)" : ` (Prognose, +${nf(c.f.growth * 100, 1)} %` +
+      (c.f.paid ? `, davon bereits gezahlt ${dfmt(c.f.paid)}` : "") + ")") : `${c.y}: ${dfmt(c.v)} ${Dv.currency}`;
     div = `<div class="card pad"><h3>Dividendenhistorie <span class="stamp">je Aktie, ${esc(Dv.currency)}</span></h3>
-      <div class="db">${Dv.years.map((y, i) => { const step = Dv.years.length > 12 ? 5 : Dv.years.length > 6 ? 2 : 1, show = (Dv.years.length - 1 - i) % step === 0;
-        return `<div class="db-c" title="${y}: ${nf(Dv.dps[i], Dv.dps[i] < 1 ? 3 : 2)} ${esc(Dv.currency)}"><i style="height:${Dv.dps[i] / mx * 100}%"></i><small>${show ? y : "&nbsp;"}</small></div>`; }).join("")}</div>
+      <div class="db">${cols.map((c, i) => { const show = (nAll - 1 - i) % step === 0;
+        return `<div class="db-c${c.est ? " est" : ""}" title="${esc(dTip(c))}"><i style="height:${c.v / mx * 100}%"></i><small>${show ? c.y : "&nbsp;"}</small></div>`; }).join("")}</div>
+      ${F.some(f => !f.done) ? `<p class="stamp db-note"><span>e = erwartet (heller).</span> <span>Prognose abgeleitet: Dividendenwachstum der letzten 5 Jahre, höchstens so stark wie das erwartete Gewinnwachstum, keine Kürzung angenommen.</span></p>` : ""}
       <dl class="dv-stats">
         <div><dt>Wachstum 5 J. p. a.</dt><dd class="num">${pc(Dv.g5, 1, true)}</dd></div>
         <div><dt>Wachstum 10 J. p. a.</dt><dd class="num">${pc(Dv.g10, 1, true)}</dd></div>
