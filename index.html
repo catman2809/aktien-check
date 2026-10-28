@@ -4076,14 +4076,7 @@ function incHead(p, D, unit) {
 }
 function incEstNote(E) {
   // eigene Spans je Satzteil, damit die englische Übersetzung greift
-  const cons = E.filter(p => p.est === "consensus" && !p.rev_trend).map(p => p.label), trend = E.find(p => p.est === "trend");
-  const nq = E.filter(p => p.est === "consensus" && p.rev_trend).map(p => p.label);
-  const trL = E.filter(p => p.est === "trend").map(p => p.label).join(" / ");
-  return `<span>e = erwartet.</span>` + (cons.length ? ` <span>${esc(cons.join(" / "))}: Analystenkonsens (Yahoo Finance).</span>` : "") +
-    (nq.length ? ` <span>${esc(nq.join(" / "))}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben.</span>` : "") +
-    (trend ? (trend.ni_consensus ? ` <span>${esc(trL)}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks, ${trend.n_eps} Analysten), Umsatz fortgeschrieben.</span>`
-      : ` <span>${esc(trL)}: eigene Fortschreibung des Trends, dafür gibt es keine Analystenschätzung.</span>`) : "") +
-    (E.some(p => p.net_income != null) ? ` <span>Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.</span>` : "") +
+  return `<span>e = erwartet.</span>${estSources(E)}` +
     (E.some(p => p.fcf_derived) ? ` <span>Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
     (E.some(p => p.op_derived) ? ` <span>Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).</span>` : "");
 }
@@ -4102,7 +4095,7 @@ function incTable(D) {
   const dec = maxV / div >= 1000 ? 0 : 1, amt = v => v == null ? "–" : nf(v / div, dec);  // eine Nachkommastelle für die ganze Tabelle
   const mg = (v, r) => v == null || !r ? "–" : pc(v / r, 1);
   // abgeleitet (*): keine Analystenschätzung, sondern Rechnung bzw. Fortschreibung der App
-  const revD = c => c.est === "trend" || c.rev_trend, niD = c => c.est === "trend" && !c.ni_consensus;
+  const revD = c => !c.rev_src && (c.est === "trend" || c.rev_trend), niD = c => c.est === "trend" && !c.ni_consensus;
   // Veränderung zum Vorjahr als kleiner Pfeil: grün bei Steigerung, rot bei Rückgang (nur bei positivem Vorjahreswert)
   const chg = (v, prev) => {
     if (v == null || prev == null || prev <= 0) return "";
@@ -4126,15 +4119,17 @@ function incTable(D) {
       </tbody></table></div>
     ${est.length ? `<p class="stamp inc-tbl-note">${incTableNote(est)}</p>` : ""}`;
 }
+// Quelle je Prognosejahr: Umsatz (Yahoo / Alpha Vantage / fortgeschrieben) und Reinertrag (Yahoo / Nasdaq / fortgeschrieben)
+function estSources(E) {
+  const revS = e => e.rev_src ? `Umsatz aus dem Konsens von ${e.rev_src}` : (e.rev_trend || e.est === "trend") ? "Umsatz fortgeschrieben" : "Umsatz aus dem Analystenkonsens (Yahoo Finance)";
+  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
+    : e.est === "trend" ? "Reinertrag fortgeschrieben" : "Reinertrag aus dem Analystenkonsens (Yahoo Finance)";
+  const groups = [];
+  E.forEach(e => { const k = revS(e) + ", " + niS(e), g = groups.find(x => x.k === k); g ? g.l.push(e.label) : groups.push({k, l: [e.label]}); });
+  return groups.map(g => ` <span>${esc(g.l.join(" / "))}: ${esc(g.k)}.</span>`).join("");
+}
 function incTableNote(est) {
-  const cons = est.filter(e => e.est === "consensus" && !e.rev_trend).map(e => e.label), tr = est.find(e => e.est === "trend");
-  const nq = est.filter(e => e.est === "consensus" && e.rev_trend).map(e => e.label);
-  const trL = est.filter(e => e.est === "trend").map(e => e.label).join(" / ");
-  return `<span>e = erwartet.</span>` + (cons.length ? ` <span>${esc(cons.join(" / "))}: Umsatz und Reinertrag aus dem Analystenkonsens (Yahoo Finance).</span>` : "") +
-    (nq.length ? ` <span>${esc(nq.join(" / "))}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben.</span>` : "") +
-    (tr ? (tr.ni_consensus ? ` <span>${esc(trL)}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks, ${tr.n_eps} Analysten), Umsatz fortgeschrieben.</span>`
-                           : ` <span>${esc(trL)}: Umsatz und Reinertrag fortgeschrieben, dafür gibt es keine frei verfügbare Analystenschätzung.</span>`) : "") +
-    ` <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>`;
+  return `<span>e = erwartet.</span>${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>`;
 }
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
@@ -4237,7 +4232,8 @@ function drawIncome() {
     cols.forEach(c => c.classList.toggle("on", +c.dataset.i === i));
     const rngTxt = (lo, hi) => lo != null && hi != null && hi > lo ? ` <span style="color:var(--text-3)">(${big(lo).join(" ")} – ${big(hi).join(" ")})</span>` : "";
     tip.innerHTML = `<b>${esc(p.label)}</b>
-      ${p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens (${p.n_eps} Analysten)</span>`
+      ${p.rev_src ? `<span style="display:block;color:var(--text-3)">Umsatz: Konsens ${esc(p.rev_src)} (${p.n_rev} Analysten)${p.ni_consensus ? ` · Reinertrag: Nasdaq-Konsens (${p.n_eps} Analysten)` : ""}</span>`
+        : p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens (${p.n_eps} Analysten)</span>`
         : p.est === "consensus" ? `<span style="display:block;color:var(--text-3)">Prognose · Konsens von ${p.n_rev} Analysten${p.n_eps ? ` (Gewinn: ${p.n_eps})` : ""}</span>`
         : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">${p.ni_consensus ? `Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens (${p.n_eps} Analysten)` : "Fortschreibung des Trends, keine Analystenschätzung"}</span>` : ""}
       <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>

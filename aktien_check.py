@@ -3584,6 +3584,79 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist):
     return out
 
 
+AV_CACHE = {}             # US-Symbol -> (Zeit, {Jahr: Prognose})
+AV_CALLS = {"day": "", "n": 0}
+AV_DAILY_LIMIT = 24       # kostenloser Tarif: rund 25 Anfragen pro Tag
+
+
+def av_key():
+    return (os.environ.get("ALPHAVANTAGE_API_KEY") or "").strip()
+
+
+def alpha_vantage_estimates(us_sym):
+    """Analystenkonsens für Umsatz und Gewinn je Aktie je Geschäftsjahr (Alpha Vantage, EARNINGS_ESTIMATES).
+    Nur mit Schlüssel (ALPHAVANTAGE_API_KEY); 24 Stunden zwischengespeichert, Tageslimit des Gratis-Tarifs beachtet."""
+    key = av_key()
+    if not key or not us_sym:
+        return None
+    hit = AV_CACHE.get(us_sym)
+    if hit and time.time() - hit[0] < 86400:
+        return hit[1]
+    today = datetime.now().strftime("%Y-%m-%d")
+    if AV_CALLS["day"] != today:
+        AV_CALLS.update(day=today, n=0)
+    if AV_CALLS["n"] >= AV_DAILY_LIMIT:
+        return None
+    AV_CALLS["n"] += 1
+    url = "https://www.alphavantage.co/query?" + urllib.parse.urlencode({"function": "EARNINGS_ESTIMATES", "symbol": us_sym, "apikey": key})
+    d = json.loads(_fetch(url, timeout=20))
+    if not isinstance(d, dict) or "estimates" not in d:
+        LOG.warning("[Alpha Vantage] %s: keine Daten (%s)", us_sym, str((d or {}).get("Note") or (d or {}).get("Information") or "")[:80])
+        return None
+    out = {}
+    for e in d["estimates"]:
+        if e.get("horizon") != "fiscal year" or not e.get("date"):
+            continue
+        y = int(e["date"][:4])
+        out[y] = {"end": e["date"], "rev": num(e.get("revenue_estimate_average")), "rev_low": num(e.get("revenue_estimate_low")),
+                  "rev_high": num(e.get("revenue_estimate_high")), "rev_n": int(num(e.get("revenue_estimate_analyst_count")) or 0),
+                  "eps": num(e.get("eps_estimate_average")), "eps_n": int(num(e.get("eps_estimate_analyst_count")) or 0)}
+    AV_CACHE[us_sym] = (time.time(), out)
+    LOG.info("[Alpha Vantage] %s: Konsens für %s", us_sym, ", ".join(map(str, sorted(out))) or "keine Jahre")
+    return out
+
+
+def apply_av_revenue(estimates, periods, currency, av):
+    """Umsatzkonsens von Alpha Vantage in die Prognosen übernehmen (ersetzt die Fortschreibung). Bei ADRs kann der
+    Konsens in USD statt in Berichtswährung vorliegen – dann wird umgerechnet, sonst verworfen."""
+    if not av or not periods:
+        return
+    last_rev = periods[-1]["revenue"]
+    k_usd = fx_rate("USD", currency) if currency and currency != "USD" else 1.0
+    for e in estimates:
+        a_ = av.get(int(e["end"][:4]))
+        if not a_ or not a_.get("rev"):
+            continue
+        years = int(e["end"][:4]) - int(periods[-1]["end"][:4])
+        lo, hi = 0.7 ** years, 2.0 ** years
+        for k in (1.0, k_usd):
+            if k and lo <= a_["rev"] * k / last_rev <= hi:
+                e.update(revenue=a_["rev"] * k, rev_low=(a_["rev_low"] or a_["rev"]) * k, rev_high=(a_["rev_high"] or a_["rev"]) * k,
+                         n_rev=a_["rev_n"], rev_trend=False, rev_src="Alpha Vantage")
+                if e.get("est") == "trend" and e.get("ni_consensus"):
+                    e["est"] = "consensus"  # Umsatz und Reinertrag jetzt beide aus einem Konsens
+                if e.get("net_income") is not None:
+                    e["margin"] = e["net_income"] / e["revenue"]
+                break
+    # Jahre ohne Konsens: Wachstum des letzten Konsensjahres fortschreiben (statt der alten Trendkette)
+    for i, e in enumerate(estimates):
+        if i >= 2 and not e.get("rev_src") and estimates[i - 1].get("rev_src") and estimates[i - 2].get("rev_src"):
+            g = clamp(estimates[i - 1]["revenue"] / estimates[i - 2]["revenue"] - 1, -0.15, 0.30)
+            e["revenue"] = estimates[i - 1]["revenue"] * (1 + g)
+            if e.get("net_income") is not None:
+                e["margin"] = e["net_income"] / e["revenue"]
+
+
 def income_estimates_trend(periods):
     """Letzte Stufe ohne jede Analystenschätzung: Umsatz mit dem mittleren Wachstum der letzten Jahre fortgeschrieben,
     Reinertrag = Umsatz × mittlere Nettomarge – bis einschließlich des nächsten Geschäftsjahres."""
@@ -3594,6 +3667,9 @@ def income_estimates_trend(periods):
     margins = sorted(p_["margin"] for p_ in periods[-3:] if p_.get("margin") is not None)
     if not growth or not margins:
         return []
+    # Reinertrag nur fortschreiben, wenn die Marge zuletzt stabil und positiv war (sonst unrealistisch, z. B. nach
+    # Verlustjahren oder Sondereffekten) – der Umsatz wird trotzdem gezeigt
+    stable = len(margins) >= 2 and margins[0] > 0 and margins[-1] / margins[0] <= 2.5
     g, mg = clamp(growth[len(growth) // 2], -0.10, 0.25), margins[len(margins) // 2]
     end, limit = datetime.fromisoformat(periods[-1]["end"]), datetime.now() + timedelta(days=730)
     out, rev = [], revs[-1]
@@ -3605,8 +3681,8 @@ def income_estimates_trend(periods):
         if d > limit:
             break
         rev = rev * (1 + g)
-        out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": rev * mg, "margin": mg,
-                    "op_income": None, "op_margin": None, "est": "trend", "n_rev": 0, "n_eps": 0})
+        out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": rev * mg if stable else None,
+                    "margin": mg if stable else None, "op_income": None, "op_margin": None, "est": "trend", "n_rev": 0, "n_eps": 0})
     return out
 
 
@@ -3834,7 +3910,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v8")  # v8: Nasdaq-Konsens auch als Ersatz für fehlende Yahoo-Schätzungen
+    key = (symbol, freq, "v9")  # v9: + Alpha Vantage (Umsatzkonsens), stabile Margen für die Fortschreibung
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3919,6 +3995,9 @@ def income_data(symbol, freq):
                                                                     [p_["revenue"] for p_ in periods]), []) or []
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
+        if not has_yahoo_est and us_sym and av_key():  # echter Umsatzkonsens statt Fortschreibung, wenn verfügbar
+            av = safe(lambda: alpha_vantage_estimates(us_sym))
+            safe(lambda: apply_av_revenue(out["estimates"], periods, out["currency"], av))
         LOG.info("[Prognose] %s: Yahoo-Schätzungen %s, Nasdaq %s -> %s", symbol, "ja" if has_yahoo_est else "nein",
                  "ja" if nasdaq else "nein", ", ".join(e_["label"] for e_ in out["estimates"]) or "keine Prognosen")
     else:
@@ -9262,7 +9341,7 @@ def cache_rules():
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
             ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
-            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
+            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Alpha Vantage", AV_CACHE, 86400, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
 def prune_caches():
