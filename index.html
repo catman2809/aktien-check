@@ -807,6 +807,9 @@ table.inc-tbl{min-width:520px}
 .inc-tbl .est{background:var(--surface-2);color:var(--text-2);font-style:italic}
 .inc-tbl thead .est{font-style:normal;color:var(--text-3)}
 .inc-tbl sup{font-size:10px;color:var(--text-3);margin-left:1px}
+.inc-chg{display:block;font-size:11px;font-weight:600;font-style:normal;margin-top:1px;line-height:1.2}
+.inc-chg.up{color:var(--pos)} .inc-chg.down{color:var(--neg)}
+.inc-chg span{font-size:9px;vertical-align:1px}
 .inc-tbl thead small{display:block;font-size:10.5px;font-weight:500;color:var(--text-3);font-style:normal}
 .inc-tbl-note{margin:6px 0 0}
 .legend i.mar.op{border-top-style:dashed}
@@ -4100,18 +4103,25 @@ function incTable(D) {
   const mg = (v, r) => v == null || !r ? "–" : pc(v / r, 1);
   // abgeleitet (*): keine Analystenschätzung, sondern Rechnung bzw. Fortschreibung der App
   const revD = c => c.est === "trend" || c.rev_trend, niD = c => c.est === "trend" && !c.ni_consensus;
-  const cell = (c, html, derived) => `<td class="num${c.est ? " est" : ""}">${html}${c.est && derived && html !== "–" ? "<sup>*</sup>" : ""}</td>`;
-  const row = (lab, fn, cls, derived) => `<tr class="${cls || ""}"><th scope="row">${lab}</th>${cols.map(c => cell(c, fn(c), derived(c))).join("")}</tr>`;
+  // Veränderung zum Vorjahr als kleiner Pfeil: grün bei Steigerung, rot bei Rückgang (nur bei positivem Vorjahreswert)
+  const chg = (v, prev) => {
+    if (v == null || prev == null || prev <= 0) return "";
+    const r = v / prev - 1, up = r >= 0;
+    return `<span class="inc-chg ${up ? "up" : "down"}" title="${pc(r, 1, true)} gegenüber Vorjahr"><span aria-hidden="true">${up ? "▲" : "▼"}</span> ${pc(Math.abs(r), 1)}</span>`;
+  };
+  const cell = (c, html, derived, delta) => `<td class="num${c.est ? " est" : ""}">${html}${c.est && derived && html !== "–" ? "<sup>*</sup>" : ""}${delta || ""}</td>`;
+  const row = (lab, fn, cls, derived, val) => `<tr class="${cls || ""}"><th scope="row">${lab}</th>${cols.map((c, i) =>
+    cell(c, fn(c), derived(c), val && i ? chg(val(c), val(cols[i - 1])) : "")).join("")}</tr>`;
   const all = () => true;
   const hasG = cols.some(c => c.gross != null), hasE = cols.some(c => c.ebit != null);
   box.innerHTML = `<div class="inc-tbl-head"><b>Kennzahlen je Geschäftsjahr</b><span class="stamp">in ${unit} ${esc(D.currency)}</span></div>
     <div class="peer-scroll"><table class="trk inc-tbl">
       <thead><tr><th></th>${cols.map(c => `<th class="num${c.est ? " est" : ""}" scope="col">${esc(c.label)}${c.phase ? `<small>${c.phase}</small>` : ""}</th>`).join("")}</tr></thead>
       <tbody>
-        ${row("Umsatz", c => amt(c.revenue), "", revD)}
-        ${hasG ? row("Bruttoergebnis", c => amt(c.gross), "", all) + row("Bruttomarge", c => mg(c.gross, c.revenue), "sub", all) : ""}
-        ${hasE ? row("EBIT", c => amt(c.ebit), "", all) + row("EBIT-Marge", c => mg(c.ebit, c.revenue), "sub", all) : ""}
-        ${row("Reinertrag", c => amt(c.net_income), "", niD)}
+        ${row("Umsatz", c => amt(c.revenue), "", revD, c => c.revenue)}
+        ${hasG ? row("Bruttoergebnis", c => amt(c.gross), "", all, c => c.gross) + row("Bruttomarge", c => mg(c.gross, c.revenue), "sub", all) : ""}
+        ${hasE ? row("EBIT", c => amt(c.ebit), "", all, c => c.ebit) + row("EBIT-Marge", c => mg(c.ebit, c.revenue), "sub", all) : ""}
+        ${row("Reinertrag", c => amt(c.net_income), "", niD, c => c.net_income)}
         ${row("Nettomarge", c => mg(c.net_income, c.revenue), "sub", c => revD(c) || niD(c))}
       </tbody></table></div>
     ${est.length ? `<p class="stamp inc-tbl-note">${incTableNote(est)}</p>` : ""}`;

@@ -256,3 +256,4 @@ DEPOT_WILD += [
      "{*}: net income from the EPS consensus (Nasdaq, data from Zacks), revenue extrapolated with the growth of recent years."),
     ("Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens ({0} Analysten)", "Revenue extrapolated · net income from the Nasdaq consensus ({0} analysts)"),
 ]
+DEPOT_WILD += [("{0} gegenüber Vorjahr", "{0} vs. prior year")]
