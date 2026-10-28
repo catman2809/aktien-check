@@ -3465,7 +3465,50 @@ INCOME_CACHE = {}
 MONTHS_DE_SHORT = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
 
-def income_estimates(t, periods, currency, eps_last):
+NASDAQ_EPS_CACHE = {}     # US-Symbol -> (Zeit, {Jahr: Prognose})
+US_LISTING_CACHE = {}     # Symbol -> (Zeit, US-Symbol oder "")
+MONTHS_EN = {m_: i + 1 for i, m_ in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))}
+
+
+def us_listing(symbol):
+    """Reguläre US-Notierung (NYSE/NASDAQ) eines Werts – bei europäischen Aktien die ADR mit gleichem Firmennamen
+    (SAP.DE -> SAP, ASML.AS -> ASML). Außerbörsliche ADRs (Siemens: SIEGY) haben bei Nasdaq keine Prognosen."""
+    if "." not in symbol:
+        return symbol
+    hit = US_LISTING_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1] or None
+    res = safe(lambda: search_symbols(symbol.split(".")[0]), []) or []
+    own = next((r_ for r_ in res if r_.get("symbol") == symbol), None)
+    norm = lambda n: " ".join(_legal_tokens(n or ""))
+    us = next((r_["symbol"] for r_ in res if own and r_.get("exchange") in ("NYSE", "NASDAQ", "NYSE American")
+               and "." not in r_["symbol"] and norm(r_.get("name")) == norm(own.get("name"))), "")
+    US_LISTING_CACHE[symbol] = (time.time(), us)
+    return us or None
+
+
+def nasdaq_eps_forecast(us_sym):
+    """Jährliche Konsensprognosen für den Gewinn je Aktie von Nasdaq (Daten von Zacks), bis zu vier Geschäftsjahre:
+    {Jahr des Geschäftsjahresendes: {"avg", "low", "high", "n", "month"}}."""
+    hit = NASDAQ_EPS_CACHE.get(us_sym)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+           "Accept": "application/json"}
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym)}/earnings-forecast", headers=hdr, timeout=15))
+    rows = (((d or {}).get("data") or {}).get("yearlyForecast") or {}).get("rows") or []
+    out = {}
+    for r_ in rows:
+        m_ = re.match(r"([A-Za-z]{3}) (\d{4})", str(r_.get("fiscalEnd") or ""))
+        avg = num(r_.get("consensusEPSForecast"))
+        if m_ and avg is not None:
+            out[int(m_.group(2))] = {"avg": avg, "low": num(r_.get("lowEPSForecast")), "high": num(r_.get("highEPSForecast")),
+                                    "n": int(num(r_.get("noOfEstimates")) or 0), "month": MONTHS_EN.get(m_.group(1))}
+    NASDAQ_EPS_CACHE[us_sym] = (time.time(), out)
+    return out
+
+
+def income_estimates(t, periods, currency, eps_last, nasdaq=None):
     """Prognosen für die Erfolgsrechnung: laufendes und folgendes Geschäftsjahr aus dem Analystenkonsens (Yahoo),
     das zweite Folgejahr als Fortschreibung des Trends (dafür gibt es keinen Konsens). Umsatz direkt aus der
     Umsatzprognose; Reinertrag = prognostizierter Gewinn je Aktie × Aktienzahl, wobei die Aktienzahl aus dem zuletzt
@@ -3488,8 +3531,11 @@ def income_estimates(t, periods, currency, eps_last):
                 "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
     rev_df, eps_df = safe(lambda: t.revenue_estimate), safe(lambda: t.earnings_estimate)
     r0, r1, e0, e1 = get(rev_df, "0y"), get(rev_df, "+1y"), get(eps_df, "0y"), get(eps_df, "+1y")
-    # Die Prognose muss auf dem zuletzt gemeldeten Jahr aufbauen (sonst andere Abgrenzung oder Yahoo-Fehler)
+    # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen (sonst andere Abgrenzung oder Yahoo-Fehler,
+    # z. B. bei Versicherern) – dann nur Gewinnprognosen
     if not r0 or not r0["ago"] or not 0.8 <= r0["ago"] / last["revenue"] <= 1.25:
+        r0 = r1 = None
+    if not r0 and not e0:
         return []
     shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
     end = datetime.fromisoformat(last["end"])
@@ -3515,18 +3561,35 @@ def income_estimates(t, periods, currency, eps_last):
     rng = lambda r_, e_: {"rev_low": r_["low"], "rev_high": r_["high"],
                           "ni_low": shares * e_["low"] if shares and e_ else None,
                           "ni_high": shares * e_["high"] if shares and e_ else None}
-    out = [period(1, r0["avg"], ni0, "consensus", r0["n"], e0["n"] if e0 and ni0 is not None else 0,
-                  rng(r0, e0 if ni0 is not None else None))]
-    if r1 and 0.5 <= r1["avg"] / r0["avg"] <= 2:
-        ni1 = ni_of(e1) if ni0 is not None else None
-        out.append(period(2, r1["avg"], ni1, "consensus", r1["n"], e1["n"] if e1 and ni1 is not None else 0,
-                          rng(r1, e1 if ni1 is not None else None)))
-        # zweites Folgejahr: Wachstum des Vorjahres fortgeschrieben, begrenzt
-        g_rev = clamp(r1["avg"] / r0["avg"] - 1, -0.15, 0.30)
-        ni2 = None
-        if ni1 is not None and ni0 and ni0 > 0 and ni1 > 0:
-            ni2 = ni1 * (1 + clamp(ni1 / ni0 - 1, -0.30, 0.40))
-        out.append(period(3, r1["avg"] * (1 + g_rev), ni2, "trend"))
+    if not r0 and ni0 is None:
+        return []
+    rng = lambda r_, e_: {"rev_low": r_["low"] if r_ else None, "rev_high": r_["high"] if r_ else None,
+                          "ni_low": shares * e_["low"] if shares and e_ else None,
+                          "ni_high": shares * e_["high"] if shares and e_ else None}
+    out = [period(1, r0["avg"] if r0 else None, ni0, "consensus", r0["n"] if r0 else 0,
+                  e0["n"] if e0 and ni0 is not None else 0, rng(r0, e0 if ni0 is not None else None))]
+    rev1 = r1["avg"] if r1 and r0 and 0.5 <= r1["avg"] / r0["avg"] <= 2 else None
+    ni1 = ni_of(e1) if ni0 is not None else None
+    if rev1 is None and ni1 is None:
+        return out
+    out.append(period(2, rev1, ni1, "consensus", r1["n"] if rev1 is not None else 0,
+                      e1["n"] if e1 and ni1 is not None else 0, rng(r1 if rev1 is not None else None, e1 if ni1 is not None else None)))
+    # zweites Folgejahr: Gewinn aus dem Nasdaq-Konsens (Zacks; Wachstum je Aktie, damit ADR-Verhältnis und Währung
+    # keine Rolle spielen), sonst Wachstum des Vorjahres fortgeschrieben; Umsatz immer fortgeschrieben (begrenzt)
+    rev2 = rev1 * (1 + clamp(rev1 / r0["avg"] - 1, -0.15, 0.30)) if rev1 is not None else None
+    ni2, n2 = None, 0
+    y1, y2 = at(2).year, at(3).year
+    nq = nasdaq or {}
+    if ni1 is not None and ni1 > 0 and (nq.get(y1) or {}).get("avg") and (nq.get(y2) or {}).get("avg") \
+            and nq[y1]["avg"] > 0 and nq[y2]["avg"] > 0 and 0.5 <= nq[y2]["avg"] / nq[y1]["avg"] <= 2:
+        ni2, n2 = ni1 * nq[y2]["avg"] / nq[y1]["avg"], nq[y2]["n"]
+    elif ni1 is not None and ni0 and ni0 > 0 and ni1 > 0:
+        ni2 = ni1 * (1 + clamp(ni1 / ni0 - 1, -0.30, 0.40))
+    if rev2 is not None or ni2 is not None:
+        p2 = period(3, rev2, ni2, "trend")
+        if n2:
+            p2.update(ni_consensus="Nasdaq", n_eps=n2)
+        out.append(p2)
     return out
 
 
@@ -3613,6 +3676,8 @@ def add_table_estimates(periods, estimates, n):
     gm_ = med(gm) if len(gm) >= min(2, n) else None
     gap_ = med(gap) if len(gap) >= min(2, n) else None
     for e in estimates:
+        if not e.get("revenue"):
+            continue  # ohne Umsatzprognose keine Margenrechnung
         if gm_ is not None and 0 < gm_ <= 1:
             e["gross"] = e["revenue"] * gm_
         if gap_ is not None and -0.1 <= gap_ <= 0.45 and e.get("margin") is not None:
@@ -3637,7 +3702,7 @@ def add_fcf_estimates(periods, estimates, n):
     for e in estimates:
         if conv is not None and e.get("net_income") and e["net_income"] > 0:
             e["fcf"] = e["net_income"] * conv
-        elif margin is not None and -0.5 <= margin <= 0.6:
+        elif margin is not None and -0.5 <= margin <= 0.6 and e.get("revenue"):
             e["fcf"] = e["revenue"] * margin
         else:
             continue
@@ -3667,7 +3732,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v6")  # v6: + Bruttoergebnis und EBIT (Tabelle)
+    key = (symbol, freq, "v7")  # v7: + Nasdaq-Konsens fürs zweite Folgejahr
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3736,8 +3801,12 @@ def income_data(symbol, freq):
     eps_row = row("Diluted EPS", "Basic EPS")
     last_col = next((c for c in df.columns if (c.date() if hasattr(c, "date") else c).isoformat() == periods[-1]["end"]), None)
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
-    est_fn = income_estimates if freq == "annual" else income_estimates_q
-    out["estimates"] = safe(lambda: est_fn(t, periods, out["currency"], eps_last), []) or []
+    if freq == "annual":
+        us_sym = safe(lambda: us_listing(symbol))
+        nasdaq = safe(lambda: nasdaq_eps_forecast(us_sym)) if us_sym else None
+        out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq), []) or []
+    else:
+        out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
@@ -9059,7 +9128,8 @@ def cache_rules():
             ("Depot-Splits", DEPOT_SPLIT_CACHE, 7 * 86400, 500),
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
-            ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20)]
+            ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
+            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
 def prune_caches():

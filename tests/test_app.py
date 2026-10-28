@@ -1628,6 +1628,38 @@ class TestIncomeEstimates(unittest.TestCase):
         self.assertNotIn("op_margin", est2[0])
 
 
+class TestIncomeEstimatesSources(unittest.TestCase):
+    def _t(self, rev_ago):
+        import pandas as pd
+
+        class T:
+            pass
+        t = T()
+        t.revenue_estimate = pd.DataFrame({"avg": [110.0, 121.0], "low": [105.0, 115.0], "high": [115.0, 127.0],
+                                           "numberOfAnalysts": [20, 18], "yearAgoRevenue": [rev_ago, 110.0], "currency": ["USD", "USD"]},
+                                          index=["0y", "+1y"])
+        t.earnings_estimate = pd.DataFrame({"avg": [2.2, 2.4], "low": [2.0, 2.2], "high": [2.4, 2.6], "numberOfAnalysts": [20, 18],
+                                            "yearAgoEps": [2.0, 2.2], "currency": ["USD", "USD"]}, index=["0y", "+1y"])
+        return t
+
+    def test_nasdaq_for_second_year(self):
+        periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
+        nasdaq = {2027: {"avg": 2.4, "n": 10}, 2028: {"avg": 3.0, "n": 4}}
+        est = a.income_estimates(self._t(100.0), periods, "USD", 2.0, nasdaq)
+        self.assertEqual([e["label"] for e in est], ["2026e", "2027e", "2028e"])
+        self.assertAlmostEqual(est[1]["net_income"], 24.0)                  # 10 Aktien × 2,40
+        self.assertAlmostEqual(est[2]["net_income"], 24.0 * 3.0 / 2.4)      # Gewinnwachstum laut Nasdaq-Konsens
+        self.assertEqual((est[2]["ni_consensus"], est[2]["n_eps"]), ("Nasdaq", 4))
+        self.assertAlmostEqual(est[2]["revenue"], 121.0 * 1.1)              # Umsatz fortgeschrieben
+
+    def test_without_usable_revenue_estimate(self):
+        periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
+        est = a.income_estimates(self._t(50.0), periods, "USD", 2.0)       # Vorjahreswert passt nicht -> kein Umsatz
+        self.assertIsNone(est[0]["revenue"])
+        self.assertAlmostEqual(est[0]["net_income"], 22.0)                  # Gewinnprognose bleibt
+        self.assertIsNone(est[0]["margin"])
+
+
 class TestFcfEstimates(unittest.TestCase):
     def test_conversion_and_matching(self):
         import pandas as pd

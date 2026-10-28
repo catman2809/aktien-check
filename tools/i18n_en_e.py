@@ -240,3 +240,14 @@ DEPOT_EXACT.update({
     "* abgeleitet: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.":
         "* derived: gross margin as the median of recent years, EBIT from the expected net margin plus the usual gap.",
 })
+DEPOT_EXACT.update({"abgelaufen": "ended", "laufend": "current", "nächstes GJ": "next FY",
+    "* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.":
+        "* derived or extrapolated: gross margin as the median of recent years, EBIT from the expected net margin plus the usual gap."})
+DEPOT_WILD += [
+    ("{*}: Umsatz und Reinertrag aus dem Analystenkonsens (Yahoo Finance).", "{*}: revenue and net income from the analyst consensus (Yahoo Finance)."),
+    ("{*}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks, {0} Analysten), Umsatz fortgeschrieben.",
+     "{*}: net income from the EPS consensus (Nasdaq, data from Zacks, {0} analysts), revenue extrapolated."),
+    ("{*}: Umsatz und Reinertrag fortgeschrieben, dafür gibt es keine frei verfügbare Analystenschätzung.",
+     "{*}: revenue and net income extrapolated, no freely available analyst estimate exists for it."),
+]
+DEPOT_WILD += [("Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens ({0} Analysten)", "Revenue extrapolated · net income from the Nasdaq consensus ({0} analysts)")]
