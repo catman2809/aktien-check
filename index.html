@@ -1100,7 +1100,7 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#erfolg">Erfolgsrechnung</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
     <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#derivate">Derivate</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
@@ -4672,7 +4672,7 @@ function render(d) {
   if (ng_) ng_.style.display = d.bizmodel && d.bizmodel.text ? "" : "none";
   const nu = document.querySelector('#subnav a[href="#ueber"]');
   if (nu) nu.style.display = etf || crypto ? "none" : "";
-  ["#fairerwert", "#analysten", "#bilanz"].forEach(h => { const a_ = document.querySelector(`#subnav a[href="${h}"]`); if (a_) a_.style.display = etf || crypto ? "none" : ""; });
+  ["#erfolg", "#fairerwert", "#analysten", "#bilanz"].forEach(h => { const a_ = document.querySelector(`#subnav a[href="${h}"]`); if (a_) a_.style.display = etf || crypto ? "none" : ""; });
   const nt_ = document.querySelector('#subnav a[href="#technik"]');
   if (nt_) nt_.style.display = d.tech && d.tech.frames && Object.keys(d.tech.frames).length ? "" : "none";
   $("#subnav").style.display = "block";
