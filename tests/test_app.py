@@ -334,6 +334,7 @@ class TestHTTP(Isolated):
     def setUp(self):
         super().setUp()
         os.environ["APP_PASSWORD"] = "test-admin-pass"
+        a.FAILED_LOGINS.clear()  # Fehlversuche anderer Tests sollen keine Anmeldesperre auslösen
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), a.Handler)
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
@@ -1500,6 +1501,24 @@ class TestDepotParse(unittest.TestCase):
         for t, lvl in (("Klumpenrisiko Einzelaktie", "warn"), ("Geringe Streuung", "warn"), ("Branchen-Klumpen", "warn"),
                        ("Heimatmarkt-Neigung", "info"), ("Größere Verlustpositionen", "info"), ("Hohe Schwankung", "warn")):
             self.assertEqual(titles.get(t), lvl, t)
+
+
+class TestHostedWithoutPassword(TestHTTP):
+    def test_locked(self):
+        old = {k: os.environ.get(k) for k in ("RENDER", "APP_PASSWORD")}
+        os.environ["RENDER"] = "true"
+        os.environ.pop("APP_PASSWORD", None)
+        try:
+            op = self.client()
+            self.assertEqual(self.call(op, "/api/watchlist")[0], 503)   # ohne Passwort online: alles gesperrt
+            self.assertEqual(self.call(op, "/")[0], 503)
+            self.assertEqual(self.call(op, "/healthz")[0], 200)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
 
 class TestDepotHTTP(TestHTTP):

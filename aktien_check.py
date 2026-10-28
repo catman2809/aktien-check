@@ -9429,6 +9429,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _guard(self, fn):
         try:
+            if "RENDER" in os.environ and not app_password() and urllib.parse.urlparse(self.path).path != "/healthz":
+                # Online ohne Passwort wäre jeder Besucher Administrator -> gesperrt, bis APP_PASSWORD gesetzt ist
+                return self.send(503, "Stocky ist noch nicht eingerichtet: Bitte in Render die Umgebungsvariable "
+                                      "APP_PASSWORD setzen.", "text/plain; charset=utf-8")
             fn()
         except (BrokenPipeError, ConnectionResetError):
             pass  # Browser hat die Verbindung geschlossen
