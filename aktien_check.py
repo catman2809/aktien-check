@@ -3601,6 +3601,24 @@ def add_op_estimates(periods, estimates, n):
             e["op_derived"] = True
 
 
+def add_table_estimates(periods, estimates, n):
+    """Bruttoergebnis und EBIT für die Prognosen ableiten (dafür gibt es bei Yahoo keinen Konsens):
+    Bruttomarge = Median der letzten n Jahre (meist sehr stabil); EBIT-Marge = erwartete Nettomarge + übliche
+    Differenz zwischen EBIT- und Nettomarge (Median), wie beim operativen Ergebnis."""
+    med = lambda xs: (sorted(xs)[len(xs) // 2] if len(xs) % 2 else sum(sorted(xs)[len(xs) // 2 - 1:len(xs) // 2 + 1]) / 2) if xs else None
+    recent = periods[-n:]
+    gm = [p_["gross"] / p_["revenue"] for p_ in recent if p_.get("gross") is not None and p_["revenue"]]
+    gap = [p_["ebit"] / p_["revenue"] - p_["margin"] for p_ in recent
+           if p_.get("ebit") is not None and p_["revenue"] and p_.get("margin") is not None]
+    gm_ = med(gm) if len(gm) >= min(2, n) else None
+    gap_ = med(gap) if len(gap) >= min(2, n) else None
+    for e in estimates:
+        if gm_ is not None and 0 < gm_ <= 1:
+            e["gross"] = e["revenue"] * gm_
+        if gap_ is not None and -0.1 <= gap_ <= 0.45 and e.get("margin") is not None:
+            e["ebit"] = e["revenue"] * (e["margin"] + gap_)
+
+
 def add_fcf_estimates(periods, estimates, n):
     """Free Cashflow für die Prognosen ableiten (dafür gibt es bei Yahoo keinen Konsens): erwarteter Reinertrag ×
     Cash-Umwandlung (Free Cashflow / Reinertrag); ohne Gewinnprognose erwarteter Umsatz × Free-Cashflow-Marge.
@@ -3649,7 +3667,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v5")  # v5: Prognosen inkl. operativem Ergebnis und Free Cashflow
+    key = (symbol, freq, "v6")  # v6: + Bruttoergebnis und EBIT (Tabelle)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3684,6 +3702,7 @@ def income_data(symbol, freq):
     rev = row("Total Revenue", "Operating Revenue")
     ni = row("Net Income", "Net Income Common Stockholders", "Net Income From Continuing Operation Net Minority Interest")
     op = row("Operating Income", "Total Operating Income As Reported", "EBIT")
+    gp, ebit_r = row("Gross Profit"), row("EBIT")
     if rev is None or ni is None:
         raise ValueError("Keine Geschäftszahlen verfügbar")
     periods = []
@@ -3695,8 +3714,11 @@ def income_data(symbol, freq):
         end = col.date() if hasattr(col, "date") else col
         # Quartale nach Monat des Periodenendes benennen (Geschäftsquartale weichen oft vom Kalender ab)
         label = str(end.year) if freq == "annual" else f"{MONTHS_DE_SHORT[end.month - 1]} {str(end.year)[2:]}"
+        gr = num(gp.get(col)) if gp is not None else None
+        eb = num(ebit_r.get(col)) if ebit_r is not None else None
         periods.append({"label": label, "end": end.isoformat(), "revenue": r, "net_income": n, "margin": n / r,
-                        "op_income": o, "op_margin": o / r if o is not None else None})
+                        "op_income": o, "op_margin": o / r if o is not None else None,
+                        "gross": gr, "ebit": eb if eb is not None else o})
     periods = periods[-5:] if freq == "annual" else periods[-6:]
     if not periods:
         raise ValueError("Keine Geschäftszahlen verfügbar")
@@ -3718,6 +3740,7 @@ def income_data(symbol, freq):
     out["estimates"] = safe(lambda: est_fn(t, periods, out["currency"], eps_last), []) or []
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
+    safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     INCOME_CACHE[key] = (time.time(), out)
     return out
 

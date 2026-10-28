@@ -796,6 +796,18 @@ table.trk tr:last-child td{border-bottom:0}
 .inc-est-lab{font-size:11.5px;fill:var(--text-3);font-weight:600}
 .vc-fwd{font-size:11.5px;fill:var(--accent);font-weight:700}
 .inc-est-note{display:block;color:var(--text-3);font-size:12px;margin-top:4px}
+.inc-tbl-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:18px 0 6px}
+.inc-tbl th,.inc-tbl td{white-space:nowrap}
+.inc-tbl .num{text-align:right}
+table.inc-tbl{min-width:520px}
+.inc-tbl tbody th{font-size:13.5px}
+.inc-tbl tbody th{text-align:left;font-weight:600;color:var(--text)}
+.inc-tbl tr.sub th{font-weight:500;color:var(--text-3);padding-left:18px}
+.inc-tbl tr.sub td{color:var(--text-2);font-size:13px}
+.inc-tbl .est{background:var(--surface-2);color:var(--text-2);font-style:italic}
+.inc-tbl thead .est{font-style:normal;color:var(--text-3)}
+.inc-tbl sup{font-size:10px;color:var(--text-3);margin-left:1px}
+.inc-tbl-note{margin:6px 0 0}
 .legend i.mar.op{border-top-style:dashed}
 .legend i.mar.op::after{border-radius:1.5px}
 .legend i.sma50{color:var(--sma50)} .legend i.sma200{color:var(--sma200)}
@@ -4067,6 +4079,32 @@ function incEstNote(E) {
     (E.some(p => p.fcf_derived) ? ` <span>Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
     (E.some(p => p.op_derived) ? ` <span>Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).</span>` : "");
 }
+// Tabelle: letzte 5 Geschäftsjahre + laufendes und folgendes Geschäftsjahr (Prognose)
+function incTable(D) {
+  const box = $("#inc-table"); if (!box) return;
+  if (INC.freq !== "annual" || !D) { box.innerHTML = ""; return; }
+  const est = (D.estimates || []).filter(e => e.est === "consensus").slice(0, 2);
+  const cols = [...D.periods.slice(-5), ...est];
+  if (!cols.length) { box.innerHTML = ""; return; }
+  const maxV = Math.max(...cols.map(c => Math.abs(c.revenue)));
+  const [div, unit] = maxV >= 1e12 ? [1e12, "Bio."] : maxV >= 1e9 ? [1e9, "Mrd."] : [1e6, "Mio."];
+  const dec = maxV / div >= 1000 ? 0 : 1, amt = v => v == null ? "–" : nf(v / div, dec);  // eine Nachkommastelle für die ganze Tabelle
+  const mg = (v, r) => v == null || !r ? "–" : pc(v / r, 1);
+  const cell = (c, html, derived) => `<td class="num${c.est ? " est" : ""}">${html}${c.est && derived && html !== "–" ? "<sup>*</sup>" : ""}</td>`;
+  const row = (lab, fn, cls, derived) => `<tr class="${cls || ""}"><th scope="row">${lab}</th>${cols.map(c => cell(c, fn(c), derived)).join("")}</tr>`;
+  const hasG = cols.some(c => c.gross != null), hasE = cols.some(c => c.ebit != null);
+  box.innerHTML = `<div class="inc-tbl-head"><b>Kennzahlen je Geschäftsjahr</b><span class="stamp">in ${unit} ${esc(D.currency)}</span></div>
+    <div class="peer-scroll"><table class="trk inc-tbl">
+      <thead><tr><th></th>${cols.map(c => `<th class="num${c.est ? " est" : ""}" scope="col">${esc(c.label)}</th>`).join("")}</tr></thead>
+      <tbody>
+        ${row("Umsatz", c => amt(c.revenue))}
+        ${hasG ? row("Bruttoergebnis", c => amt(c.gross), "", true) + row("Bruttomarge", c => mg(c.gross, c.revenue), "sub", true) : ""}
+        ${hasE ? row("EBIT", c => amt(c.ebit), "", true) + row("EBIT-Marge", c => mg(c.ebit, c.revenue), "sub", true) : ""}
+        ${row("Reinertrag", c => amt(c.net_income))}
+        ${row("Nettomarge", c => mg(c.net_income, c.revenue), "sub")}
+      </tbody></table></div>
+    ${est.length ? `<p class="stamp inc-tbl-note"><span>e = erwartet: Umsatz und Reinertrag aus dem Analystenkonsens.</span>${hasG || hasE ? ` <span>* abgeleitet: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` : ""}</p>` : ""}`;
+}
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
   const D = INC.data[INC.freq]; if (!D) return;
@@ -4149,6 +4187,7 @@ function drawIncome() {
   </svg><div class="chart-tip" id="inc-tip"></div>`;
   const last = P[nAct - 1];
   incHead(last, D);
+  incTable(D);
   $("#inc-foot").innerHTML = `<div class="legend">
       <span style="color:var(--inc-rev)"><i class="box"></i><span style="color:var(--text-2)">Umsatz</span></span>
       <span style="color:var(--inc-ni)"><i class="box"></i><span style="color:var(--text-2)">Reinertrag</span></span>
@@ -4775,6 +4814,7 @@ function render(d) {
     </div>
     <div class="chart-wrap inc-wrap" id="inc-wrap"><div class="chart-msg">Lade Geschäftszahlen …</div></div>
     <div class="chart-foot" id="inc-foot"></div>
+    <div id="inc-table"></div>
   </section>`}
 
   ${eventsCard(d)}

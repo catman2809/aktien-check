@@ -234,3 +234,9 @@ DEPOT_WILD += [
     ("KGV {*}: {0} (Analystenkonsens)", "P/E {*}: {0} (analyst consensus)"),
     ("KGV {*}: {0} (Fortschreibung)", "P/E {*}: {0} (extrapolation)"),
 ]
+DEPOT_EXACT.update({
+    "Kennzahlen je Geschäftsjahr": "Key figures per fiscal year", "Bruttoergebnis": "Gross income", "Bruttomarge": "Gross margin",
+    "EBIT-Marge": "EBIT margin", "e = erwartet: Umsatz und Reinertrag aus dem Analystenkonsens.": "e = expected: revenue and net income from the analyst consensus.",
+    "* abgeleitet: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.":
+        "* derived: gross margin as the median of recent years, EBIT from the expected net margin plus the usual gap.",
+})
