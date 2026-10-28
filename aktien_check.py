@@ -9222,9 +9222,9 @@ WEB_MANIFEST = {
     "description": "Kaufen, Halten oder Verkaufen – automatisierte Aktienanalyse",
     "start_url": "/", "scope": "/", "display": "standalone",
     "background_color": "#0c111d", "theme_color": "#1f4fd8",
-    "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
-              {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
-              {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+    "icons": [{"src": "/static/icon-192.png?v=kerzi", "sizes": "192x192", "type": "image/png"},
+              {"src": "/static/icon-512.png?v=kerzi", "sizes": "512x512", "type": "image/png"},
+              {"src": "/static/icon-maskable-512.png?v=kerzi", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
 }
 
 # --- Login mit dauerhafter Sitzung (nur aktiv, wenn APP_PASSWORD gesetzt ist) ---
@@ -9281,8 +9281,8 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aktien-Check">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=kerzi">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=kerzi">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1f4fd8">
 <title>Anmelden · Aktien-Check</title>

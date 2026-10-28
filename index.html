@@ -7,8 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aktien-Check">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=kerzi">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=kerzi">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1f4fd8">
 <title>Aktien-Check</title>
@@ -992,6 +992,31 @@ table.peers .neg{color:var(--neg)}
 .feat div{padding:16px;font-size:13px;color:var(--text-2)}
 .feat b{display:block;color:var(--text);font-size:14px;margin-bottom:4px}
 .loading{max-width:420px;margin:72px auto;text-align:center}
+/* Kerzi, die Chartkerze: Maskottchen für Bewertung und Laden */
+.kerzi{display:block;flex:none;overflow:visible}
+.kerzi .kz-wick{stroke:var(--kz-wick,var(--text-3))}
+.kerzi .kz-body,.kerzi .kz-arm{fill:var(--kz,var(--accent));stroke:var(--kz,var(--accent))}
+.kerzi .kz-face{fill:#fff;stroke:#fff}
+.kerzi.buy{--kz:var(--pos)} .kerzi.hold{--kz:var(--neu)} .kerzi.sell{--kz:var(--neg)}
+.verdict .kerzi{animation:kzpop .5s cubic-bezier(.3,1.6,.5,1) both}
+.verdict .kerzi.buy .kz-arms{transform-origin:50px 52px;animation:kzcheer 1.4s ease-in-out .5s 2}
+@keyframes kzpop{from{transform:scale(.6);opacity:0}}
+@keyframes kzcheer{50%{transform:translateY(-3px)}}
+.v-head{display:flex;align-items:center;gap:14px;min-width:0}
+.kz-load{width:64px;height:77px;margin:0 auto 14px}
+.kz-load .kerzi{animation:kzhop 1.2s ease-in-out infinite}
+.kz-load .kz-body{transform-box:fill-box;transform-origin:50% 100%;animation:kzgrow 1.2s ease-in-out infinite,kzcolor 4.8s steps(1) infinite}
+.kz-load .kz-arm{animation:kzcolor 4.8s steps(1) infinite}
+.kz-load .kz-arm.l{transform-origin:30px 56px;animation:kzwave 1.2s ease-in-out infinite,kzcolor 4.8s steps(1) infinite}
+.kz-load .kz-arm.r{transform-origin:70px 56px;animation:kzwave2 1.2s ease-in-out infinite,kzcolor 4.8s steps(1) infinite}
+.kz-load .kz-eyes{transform-box:fill-box;transform-origin:50% 50%;animation:kzblink 3.6s infinite}
+@keyframes kzhop{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes kzgrow{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.86)}}
+@keyframes kzwave{0%,100%{transform:rotate(0)}50%{transform:rotate(-28deg)}}
+@keyframes kzwave2{0%,100%{transform:rotate(0)}50%{transform:rotate(28deg)}}
+@keyframes kzblink{0%,46%,50%,100%{transform:scaleY(1)}48%{transform:scaleY(.1)}}
+@keyframes kzcolor{0%{fill:var(--pos);stroke:var(--pos)}25%{fill:var(--accent);stroke:var(--accent)}50%{fill:var(--neg);stroke:var(--neg)}75%{fill:var(--neu);stroke:var(--neu)}}
+@media (prefers-reduced-motion:reduce){.kerzi,.kerzi *{animation:none !important}}
 .spinner{width:34px;height:34px;border:3px solid var(--track);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;margin:0 auto 18px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .steps{list-style:none;padding:0;margin:18px 0 0;text-align:left;display:inline-block;font-size:13.5px;color:var(--text-3)}
@@ -1022,7 +1047,7 @@ table.peers .neg{color:var(--neg)}
 <header class="topbar">
   <div class="container">
     <a class="brand" href="./" id="brand" title="Zur Startseite" aria-label="Aktien-Check – zur Startseite">
-      <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
+      <div class="logo"><svg width="22" height="26" viewBox="0 0 100 120" aria-hidden="true"><line x1="50" y1="6" x2="50" y2="114" stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="30" y1="56" x2="12" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><line x1="70" y1="56" x2="88" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><rect x="28" y="26" width="44" height="70" rx="9" fill="#1baf7a"/><circle cx="41" cy="50" r="5" fill="#0b3d27"/><circle cx="59" cy="50" r="5" fill="#0b3d27"/><path d="M40 64 Q50 74 60 64" fill="none" stroke="#0b3d27" stroke-width="4.5" stroke-linecap="round"/></svg></div>
       <div>Aktien-Check<small>Kaufen · Halten · Verkaufen</small></div>
     </a>
     <form class="search" id="f" autocomplete="off">
@@ -1481,6 +1506,19 @@ function wlImport(list) {
 }
 /* Preisalarme (auf dem Server gespeichert, Versand per ntfy-Push) */
 let ALERTS = null;
+// Kerzi, die Chartkerze (100 × 120-Raster wie tools/make_icons.py): buy jubelt, hold neutral, sell traurig, load animiert
+function kerziSVG(mood = "load", size = 64, label = "") {
+  const arms = {buy: [[12, 34], [88, 34]], hold: [[10, 58], [90, 58]], sell: [[14, 78], [86, 78]], load: [[12, 40], [88, 40]]}[mood] || [[12, 40], [88, 40]];
+  const mouth = {buy: "M40 64 Q50 74 60 64", hold: "M41 67 L59 67", sell: "M40 70 Q50 61 60 70", load: "M41 65 Q50 71 59 65"}[mood] || "M41 65 Q50 71 59 65";
+  return `<svg class="kerzi ${mood}" width="${size}" height="${Math.round(size * 1.2)}" viewBox="0 0 100 120" ${label ? `role="img" aria-label="${esc(label)}"` : `aria-hidden="true"`}>
+    <line class="kz-wick" x1="50" y1="6" x2="50" y2="114" stroke-width="5" stroke-linecap="round"/>
+    <g class="kz-arms"><line class="kz-arm l" x1="30" y1="56" x2="${arms[0][0]}" y2="${arms[0][1]}" stroke-width="7" stroke-linecap="round"/>
+    <line class="kz-arm r" x1="70" y1="56" x2="${arms[1][0]}" y2="${arms[1][1]}" stroke-width="7" stroke-linecap="round"/></g>
+    <rect class="kz-body" x="28" y="26" width="44" height="70" rx="9" stroke-width="0"/>
+    <g class="kz-eyes"><circle class="kz-face" cx="41" cy="50" r="4" stroke-width="0"/><circle class="kz-face" cx="59" cy="50" r="4" stroke-width="0"/></g>
+    <path class="kz-face" d="${mouth}" fill="none" stroke-width="3.4" stroke-linecap="round" style="fill:none"/></svg>`;
+}
+const KERZI_LOAD = () => `<div class="kz-load">${kerziSVG("load", 64)}</div>`;
 const BELL_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`;
 function showMaintenance(text) {
   if ($("#maint-screen")) return;
@@ -1761,7 +1799,7 @@ function a2hsHint() {
     : `<p style="margin-top:6px"><b style="display:inline;font-size:inherit">iPhone (Safari):</b> Teilen ${shareIcon} → „Zum Home-Bildschirm“ ·
        <b style="display:inline;font-size:inherit">Android (Chrome):</b> Menü ⋮ → „Zum Startbildschirm hinzufügen“</p>`;
   return `<div class="card a2hs" id="a2hs" role="note">
-    <img src="/static/apple-touch-icon.png" alt="">
+    <img src="/static/apple-touch-icon.png?v=kerzi" alt="">
     <div><b>Tipp: Aktien-Check auf den Startbildschirm legen</b>
       <p>Auf dem Handy startet die App dann wie eine normale App – mit eigenem Symbol, ohne Adressleiste und mit einem Tipp sofort da.</p>
       ${body}
@@ -2463,7 +2501,7 @@ async function showScreener() {
   navTo("?view=screener");
   window.scrollTo({top: 0});
   if (ME && !ME.admin) { $("#out").innerHTML = `<div class="card pad">Der Screener ist nur für Administratoren verfügbar.</div>`; return; }
-  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Screener …</b></div>`;
+  $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}<b>Lade Screener …</b></div>`;
   try { SCR.data = await api("/api/screener"); } catch (e) {
     if (e.message !== "login") $("#out").innerHTML = `<div class="card pad">Screener nicht verfügbar: ${esc(e.message)}</div>`; return; }
   renderScreener(); scrPoll();
@@ -2999,7 +3037,7 @@ async function showAdmin() {
   navTo("?view=admin");
   window.scrollTo({top: 0});
   if (!ME?.admin) { $("#out").innerHTML = `<div class="card pad">Das Admin-Dashboard ist nur für Administratoren sichtbar.</div>`; return; }
-  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Lade Admin-Dashboard …</b></div>`;
+  $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}<b>Lade Admin-Dashboard …</b></div>`;
   await loadAdmin();
 }
 async function loadAdmin() {
@@ -3300,7 +3338,7 @@ async function showTrack() {
   $("#subnav").style.display = "none";
   navTo("?view=trefferquote");
   window.scrollTo({top: 0});
-  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div><b>Werte Empfehlungen aus …</b>
+  $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}<b>Werte Empfehlungen aus …</b>
     <div class="stamp">Kursverläufe aller bisher analysierten Werte werden geladen – beim ersten Mal bis zu 30 Sekunden.</div></div>`;
   try {
     const r = await fetch("/api/track" + (trkScope === "all" ? "?scope=all" : ""));
@@ -3439,7 +3477,7 @@ async function run(q) {
   wlView = false;
   $("#subnav").style.display = "none";
   const steps = ["Unternehmen finden", "Kurs- und Bilanzdaten laden", "Nachrichten aus Tier 1–3 sammeln", "Kategorien bewerten"];
-  $("#out").innerHTML = `<div class="loading"><div class="spinner"></div>
+  $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}
     <b>Analysiere „${esc(q)}“</b><div class="stamp">Dauert in der Regel 10–25 Sekunden</div>
     <ul class="steps">${steps.map(s => `<li>${s}</li>`).join("")}</ul></div>`;
   const lis = [...document.querySelectorAll(".steps li")];
@@ -4543,7 +4581,8 @@ function render(d) {
 
     <div class="card pad verdict ${gt}">
       <div class="v-top">
-        <div><span class="pill">${esc(R.group)}</span><div class="v-label">${esc(R.label)}</div></div>
+        <div class="v-head">${kerziSVG({pos: "buy", neu: "hold", neg: "sell"}[gt] || "hold", 56, "Kerzi: " + R.group)}
+          <div><span class="pill">${esc(R.group)}</span><div class="v-label">${esc(R.label)}</div></div></div>
         <div class="v-score"><b class="num">${R.score > 0 ? "+" : ""}${nf(R.score, 1)}</b><span>Score (−100 bis +100)</span></div>
       </div>
       <div class="scale">
