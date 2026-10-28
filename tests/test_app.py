@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 import pandas as pd  # noqa: E402
 
 import aktien_check as a  # noqa: E402
+a.YQ_STATE.update(blocked=False, checked=float("inf"))  # keine echte Yahoo-Sperrprüfung im Testlauf
 
 a.LOG.setLevel("WARNING")  # Info-Protokoll in Tests ausblenden
 ENV_KEYS = ("APP_PASSWORD", "GITHUB_TOKEN", "STORE_KEY", "FINNHUB_API_KEY", "FORCE_FALLBACK", "RENDER")
@@ -1676,6 +1677,19 @@ class TestIncomeFallbacks(unittest.TestCase):
         est = a.income_estimates_trend(self.PER)
         self.assertTrue(est and all(e["est"] == "trend" for e in est))
         self.assertAlmostEqual(est[0]["net_income"], est[0]["revenue"] * 0.2)
+
+
+class TestYahooBlock(unittest.TestCase):
+    def test_skip_when_blocked(self):
+        calls = []
+        try:
+            a.YQ_STATE.update(blocked=True)
+            self.assertEqual(a.yq(lambda: calls.append(1) or 5, "leer"), "leer")   # gesperrt: gar nicht erst anfragen
+            self.assertEqual(calls, [])
+            a.YQ_STATE.update(blocked=False)
+            self.assertEqual(a.yq(lambda: 5), 5)
+        finally:
+            a.YQ_STATE.update(blocked=False, checked=float("inf"))
 
 
 class TestFcfEstimates(unittest.TestCase):

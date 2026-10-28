@@ -479,7 +479,48 @@ def convert_df(df, k):
     return df
 
 
-def fill_info(t, info, hint=None):
+YQ_STATE = {"blocked": False, "checked": 0.0, "running": False}
+
+
+def yahoo_qs_probe():
+    """Prüft, ob Yahoos Unternehmensdaten-Schnittstelle (quoteSummary) erreichbar ist. Auf Cloud-Servern sperrt Yahoo
+    sie oft; jede Anfrage scheitert dann erst nach Sekunden. Ergebnis wird 30 Minuten gemerkt."""
+    YQ_STATE["running"] = True
+    t0 = time.time()
+    try:
+        ok = bool(current_price(safe(lambda: yf.Ticker("AAPL").info, {}) or {}))
+        YQ_STATE.update(blocked=not ok, checked=time.time())
+        LOG.info("[Yahoo] Unternehmensdaten und Schätzungen: %s (Prüfung %.1f s)", "erreichbar" if ok else "gesperrt – Ersatzquellen",
+                 time.time() - t0)
+    finally:
+        YQ_STATE["running"] = False
+
+
+def yahoo_qs_ok():
+    if time.time() - YQ_STATE["checked"] > 1800 and not YQ_STATE["running"]:
+        threading.Thread(target=yahoo_qs_probe, daemon=True).start()
+    return not YQ_STATE["blocked"]
+
+
+def yq(fn, default=None):
+    """Abfrage über Yahoos quoteSummary – bei bekannter Sperre sofort überspringen statt auf Fehler zu warten."""
+    return safe(fn, default) if yahoo_qs_ok() else default
+
+
+BENCH_HIST = {}  # Index -> (Zeit, Tagesschlusskurse 1 Jahr) für das Beta
+
+
+def bench_history(sym="^GSPC"):
+    hit = BENCH_HIST.get(sym)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    h = safe(lambda: yf.Ticker(sym).history(period="1y")["Close"])
+    if h is not None and len(h):
+        BENCH_HIST[sym] = (time.time(), h)
+    return h
+
+
+def fill_info(t, info, hint=None, light=False):
     """Ergänzt fehlende Yahoo-'info'-Felder aus Kursverlauf und Geschäftsberichten.
 
     Yahoo sperrt die info-Schnittstelle für manche Server (z. B. Cloud-Hoster); Kurse und
@@ -524,9 +565,9 @@ def fill_info(t, info, hint=None):
         mcap = price * shares if shares else None
         put("marketCap", mcap)
     statement_info(put, price, mcap, inc, qinc, cf, qcf, bs, qbs)
-    # Beta ggü. S&P 500 (1 Jahr, Tagesrenditen)
-    if hist is not None and len(hist) > 100:
-        idx = safe(lambda: yf.Ticker("^GSPC").history(period="1y")["Close"])
+    # Beta ggü. S&P 500 (1 Jahr, Tagesrenditen) – nicht für Vergleichswerte (light), Index einmal je Stunde laden
+    if hist is not None and len(hist) > 100 and not light:
+        idx = bench_history("^GSPC")
         if idx is not None and len(idx) > 100:
             def norm(series):
                 r = series.pct_change()
@@ -597,7 +638,7 @@ def resolve(query):
     if re.fullmatch(r"[A-Za-z0-9.\-^=]{1,15}", q) and not is_isin:
         sym = q.upper()
         t = yf.Ticker(sym)
-        info = safe(lambda: t.info, {}) or {}
+        info = yq(lambda: t.info, {}) or {}
         found = search_symbols(info.get("longName") or q)
         hint = next((a for a in found if a["symbol"] == sym), None)
         if current_price(info) or hint:
@@ -616,7 +657,7 @@ def resolve(query):
                else 1 if a["name"].lower().startswith(ql) else 2)  # stabil: Yahoo-Reihenfolge bleibt sonst erhalten
     for cand in found[:3]:
         t = yf.Ticker(cand["symbol"])
-        info = fill_info(t, safe(lambda: t.info, {}) or {}, cand)
+        info = fill_info(t, yq(lambda: t.info, {}) or {}, cand)
         if current_price(info):
             return cand["symbol"], t, info, [a for a in found if a["symbol"] != cand["symbol"]][:6]
     raise ValueError(f"Keine Kursdaten zu „{q}“ verfügbar.")
@@ -986,7 +1027,7 @@ def expectations(m, t):
     """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
     m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = m["eps_quarters"] = None
     m["est_rev"], m["est_eps"] = {}, {}
-    tr = safe(lambda: t.eps_trend)
+    tr = yq(lambda: t.eps_trend)
     if tr is not None and not tr.empty and "current" in tr and "90daysAgo" in tr:
         ch = []
         for per in ("0y", "+1y"):
@@ -995,7 +1036,7 @@ def expectations(m, t):
                 if cur is not None and old and old > 0:
                     ch.append(cur / old - 1)
         m["eps_rev"] = sum(ch) / len(ch) if ch else None
-    rv = safe(lambda: t.eps_revisions)
+    rv = yq(lambda: t.eps_revisions)
     if rv is not None and not rv.empty and "upLast30days" in rv:
         sub = rv.loc[[p_ for p_ in ("0y", "+1y") if p_ in rv.index]]
         up, dn = int(sub["upLast30days"].fillna(0).sum()), int(sub["downLast30days"].fillna(0).sum())
@@ -1012,10 +1053,10 @@ def expectations(m, t):
                             "ago": num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps")),
                             "cur": str(r_.get("currency")) if isinstance(r_.get("currency"), str) else None}
         return out
-    m["est_rev"] = est(safe(lambda: t.revenue_estimate))
-    m["est_eps"] = est(safe(lambda: t.earnings_estimate))
+    m["est_rev"] = est(yq(lambda: t.revenue_estimate))
+    m["est_eps"] = est(yq(lambda: t.earnings_estimate))
     check_revenue_estimates(m)
-    eh = safe(lambda: t.earnings_history)
+    eh = yq(lambda: t.earnings_history)
     if eh is not None and not eh.empty and "epsActual" in eh:
         m["eps_quarters"] = [{"q": str(getattr(q_, "date", lambda: q_)())[:10], "est": num(r_.get("epsEstimate")),
                               "act": num(r_.get("epsActual"))} for q_, r_ in eh.iterrows()][-8:]
@@ -1023,7 +1064,7 @@ def expectations(m, t):
         vals = [num(v) for v in eh["surprisePercent"].tolist()]
         vals = [v for v in vals if v is not None][-4:]
         m["surprises"] = vals or None
-    it = safe(lambda: t.insider_transactions)
+    it = yq(lambda: t.insider_transactions)
     if it is not None and not it.empty and "Text" in it:
         since = datetime.now() - timedelta(days=183)
         buys = sells = 0.0
@@ -1346,13 +1387,13 @@ def chart_extras(m, t, inc, bs, divs):
                         "g5": cagr(5), "g10": cagr(10), "payout": payout, "currency": m["currency"], "streak": streak,
                         "safety": {"label": label, "reasons": why} if full else None}
     # Aktionärsstruktur
-    mh = safe(lambda: t.major_holders)
+    mh = yq(lambda: t.major_holders)
     if mh is not None and not getattr(mh, "empty", True):
         val = mh.iloc[:, 0] if mh.shape[1] else None
         get_ = lambda k: num(val.get(k)) if val is not None and k in val.index else None
         ins, inst = get_("insidersPercentHeld"), get_("institutionsPercentHeld")
         top = []
-        ih = safe(lambda: t.institutional_holders)
+        ih = yq(lambda: t.institutional_holders)
         if ih is not None and not ih.empty and "pctHeld" in ih:
             for _, r_ in ih.sort_values("pctHeld", ascending=False).head(8).iterrows():
                 if num(r_.get("pctHeld")):
@@ -1582,7 +1623,7 @@ def gather(symbol, t, info):
             m[k] = None
 
     # Analysten-Verteilung
-    rec = safe(lambda: t.recommendations)
+    rec = yq(lambda: t.recommendations)
     m["rec_dist"] = None
     if rec is not None and not rec.empty:
         r0 = rec.iloc[0]
@@ -3121,7 +3162,7 @@ def peer_metrics(sym, name_hint=None):
                    "op_m": pct("operatingMarginTTM"), "growth": pct("revenueGrowthTTMYoy"), "source": "Finnhub"}
     if out is None:
         t = yf.Ticker(sym)
-        info = fill_info(t, safe(lambda: t.info, {}) or {}, {"name": name_hint})
+        info = fill_info(t, yq(lambda: t.info, {}) or {}, {"name": name_hint}, light=True)
         if current_price(info):
             out = {"symbol": sym, "name": info.get("shortName") or info.get("longName") or name_hint or sym,
                    "currency": info.get("currency") or "", "mcap": num(info.get("marketCap")),
@@ -3263,7 +3304,7 @@ def company_events(symbol, alternatives=(), currency=""):
     today = date.today()
     horizon = today + timedelta(days=400)
     t = yf.Ticker(symbol)
-    cal = safe(lambda: t.calendar) or {}
+    cal = yq(lambda: t.calendar) or {}
     if not isinstance(cal, dict):
         cal = {}
     ev = []
@@ -3590,7 +3631,7 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None):
         ago = num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps"))
         return {"avg": avg * k, "low": (num(r_.get("low")) or avg) * k, "high": (num(r_.get("high")) or avg) * k,
                 "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
-    rev_df, eps_df = safe(lambda: t.revenue_estimate), safe(lambda: t.earnings_estimate)
+    rev_df, eps_df = yq(lambda: t.revenue_estimate), yq(lambda: t.earnings_estimate)
     r0, r1, e0, e1 = get(rev_df, "0y"), get(rev_df, "+1y"), get(eps_df, "0y"), get(eps_df, "+1y")
     # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen (sonst andere Abgrenzung oder Yahoo-Fehler,
     # z. B. bei Versicherern) – dann nur Gewinnprognosen
@@ -3686,7 +3727,7 @@ def income_estimates_q(t, periods, currency, eps_last):
         ago = num(r_.get("yearAgoRevenue")) if "yearAgoRevenue" in r_ else num(r_.get("yearAgoEps"))
         return {"avg": avg * k, "low": (num(r_.get("low")) or avg) * k, "high": (num(r_.get("high")) or avg) * k,
                 "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
-    rev_df, eps_df = safe(lambda: t.revenue_estimate), safe(lambda: t.earnings_estimate)
+    rev_df, eps_df = yq(lambda: t.revenue_estimate), yq(lambda: t.earnings_estimate)
     out = []
     for i, per in ((1, "0q"), (2, "+1q")):
         r_, e_ = get(rev_df, per), get(eps_df, per)
@@ -3864,7 +3905,7 @@ def income_data(symbol, freq):
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     if freq == "annual":
         us_sym = safe(lambda: us_listing(symbol))
-        has_yahoo_est = bool(safe(lambda: len(t.earnings_estimate.index)))
+        has_yahoo_est = bool(yq(lambda: len(t.earnings_estimate.index)))
         nasdaq = None
         if us_sym:
             try:
@@ -4493,7 +4534,7 @@ def etf_price_metrics(m, hist):
 
 def etf_data(m, t, info):
     """Fondsdaten: Kosten, Volumen, Zusammensetzung, Bewertung der Bestände (Yahoo; auf Servern teils gesperrt)."""
-    fd = safe(lambda: t.funds_data)
+    fd = yq(lambda: t.funds_data)
     ops = safe(lambda: fd.fund_operations) if fd is not None else None
     ter = num(info.get("netExpenseRatio"))
     m["ter"] = ter / 100 if ter is not None else None
@@ -6777,7 +6818,9 @@ def analyze(query):
         result = analyze_crypto(cr)
         CACHE[key] = (time.time(), result)
         return result
+    t_start = time.time()
     symbol, t, info, alternatives = resolve(query)
+    t_resolved = time.time()
     if info.get("quoteType") == "ETF":
         result = analyze_etf(symbol, t, info, alternatives, query)
         CACHE[key] = (time.time(), result)
@@ -6793,20 +6836,30 @@ def analyze(query):
                 t_ = SecTicker(t0, st, financial_currency(symbol, info) or "USD")
                 return gather(symbol, t_, sec_info(t_, info)), t_
             return gather(symbol, t0, info), t0
-        fm = ex.submit(gather_primary)
-        fmac = ex.submit(gather_macro, info.get("currency") or "")
+        durs = {}
+
+        def timed(name, fn, *a_, **k_):
+            def run():
+                t1 = time.time()
+                try:
+                    return fn(*a_, **k_)
+                finally:
+                    durs[name] = time.time() - t1
+            return run
+        fm = ex.submit(timed("Kennzahlen", gather_primary))
+        fmac = ex.submit(timed("Makro", gather_macro, info.get("currency") or ""))
         siblings = sibling_names(company, symbol)
-        fnews = ex.submit(collect_news, symbol, company, info.get("website") or "", siblings)
-        ftgt = ex.submit(news_targets, company, info.get("currency") or "", current_price(info), siblings)
-        fev = ex.submit(company_events, symbol, alternatives, info.get("currency") or "")
-        fpeer = ex.submit(competitors, symbol, info, alternatives)
-        fprof = ex.submit(company_profile, symbol, info, company)
+        fnews = ex.submit(timed("Nachrichten", collect_news, symbol, company, info.get("website") or "", siblings))
+        ftgt = ex.submit(timed("Kursziele", news_targets, company, info.get("currency") or "", current_price(info), siblings))
+        fev = ex.submit(timed("Termine", company_events, symbol, alternatives, info.get("currency") or ""))
+        fpeer = ex.submit(timed("Konkurrenz", competitors, symbol, info, alternatives))
+        fprof = ex.submit(timed("Profil", company_profile, symbol, info, company))
         fesef = ex.submit(lambda t0=t: esef_check(fprof.result(timeout=30), t0, financial_currency(symbol, info) or "", symbol,
                                              info.get("longName") or info.get("shortName") or company)) \
             if equity_ and not os.environ.get("NO_ESEF") else None
-        fsec = ex.submit(sec_company, symbol, alternatives, company) if equity_ else None
+        fsec = ex.submit(timed("SEC", sec_company, symbol, alternatives, company)) if equity_ else None
         us_listed = "." not in symbol.replace("-", "") or bool(re.fullmatch(r"[A-Z]+-[A-Z]", symbol))
-        fder = ex.submit(derivatives_cached, symbol, current_price(info)) if us_listed else None  # parallel laden
+        fder = ex.submit(timed("Derivate", derivatives_cached, symbol, current_price(info))) if us_listed else None  # parallel laden
         (m, t), mac, news, tgt = fm.result(), fmac.result(), fnews.result(), ftgt.result()
         events = safe(lambda: fev.result(timeout=30), []) or []
         comp = safe(lambda: fpeer.result(timeout=45), {}) or {"peers": [], "source": "", "industry": ""}
@@ -6814,6 +6867,9 @@ def analyze(query):
         esef_ = safe(lambda: fesef.result(timeout=60)) if fesef else None
         sec_ = safe(lambda: fsec.result(timeout=60)) if fsec else None
         der_ = safe(lambda: fder.result(timeout=40)) if fder else None
+    if time.time() - t_start > 15:  # langsame Analyse: Teilschritte ins Log (Diagnose der Ladezeit)
+        LOG.info("[Dauer] %s: Suche %.1f s · %s", symbol, t_resolved - t_start,
+                 " · ".join(f"{k} {v:.1f} s" for k, v in sorted(durs.items(), key=lambda kv: -kv[1])[:6]))
     if fder and der_ is None:  # länger als 40 s: der Block oben hat trotzdem auf das Ende gewartet -> Ergebnis übernehmen
         der_ = safe(lambda: fder.result(timeout=0)) or {"na": "error", "symbol": symbol}
     if not m.get("country"):
