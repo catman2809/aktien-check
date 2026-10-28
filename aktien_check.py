@@ -8629,6 +8629,8 @@ def note_startup():
         o["commit"], o["alive"] = commit, int(time.time())
         STORE.dirty = True
     LOG.info("[Start] Grund: %s", reason)
+    if "RENDER" in os.environ:
+        yahoo_qs_ok()  # Sperrprüfung gleich beim Start, damit schon die erste Analyse nicht auf gesperrte Abfragen wartet
 
 
 def ops_tick(n):
