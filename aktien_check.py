@@ -9304,10 +9304,19 @@ button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;backgr
   font:inherit;font-weight:600;font-size:15px;cursor:pointer}
 .err{background:var(--neg-soft);color:var(--neg);font-size:13.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px}
 small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-align:center}
+.pw{position:relative}
+.pw input{padding-right:48px}
+.pw .eye{position:absolute;right:5px;top:5px;width:36px;height:36px;margin:0;padding:0;border-radius:8px;background:none;
+  color:var(--text-2);display:grid;place-items:center}
+.pw .eye:hover{color:var(--text)} .pw .eye:focus-visible{outline:2px solid var(--accent)}
 </style></head><body>
 <form class="box" method="post" action="/login">
-  <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
-    stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div>
+  <div class="logo"><svg width="28" height="34" viewBox="0 0 100 120" aria-hidden="true"><line x1="50" y1="6" x2="50" y2="114"
+    stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="30" y1="56" x2="12" y2="34" stroke="#1baf7a" stroke-width="9"
+    stroke-linecap="round"/><line x1="70" y1="56" x2="88" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><rect
+    x="28" y="26" width="44" height="70" rx="9" fill="#1baf7a"/><circle cx="41" cy="50" r="5" fill="#0b3d27"/><circle cx="59"
+    cy="50" r="5" fill="#0b3d27"/><path d="M40 64 Q50 74 60 64" fill="none" stroke="#0b3d27" stroke-width="4.5"
+    stroke-linecap="round"/></svg></div>
   <h1>Stocky</h1>
   <p>Bitte einmal anmelden – dieses Gerät bleibt danach angemeldet.</p>
   {error}
@@ -9316,10 +9325,30 @@ small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-al
   <input id="un" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"
     value="{user}" required {ufocus}>
   <label for="pw" style="margin-top:12px">Passwort</label>
-  <input id="pw" name="password" type="password" autocomplete="current-password" required {pfocus}>
+  <div class="pw"><input id="pw" name="password" type="password" autocomplete="current-password" required {pfocus}>
+    <button type="button" class="eye" id="eye" aria-label="Passwort anzeigen" title="Passwort anzeigen" aria-pressed="false"
+      data-show="Passwort anzeigen" data-hide="Passwort verbergen"><svg id="eye-on" width="20" height="20" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path
+      d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg id="eye-off" width="20"
+      height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round" aria-hidden="true" style="display:none"><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.5"/><path
+      d="M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.6-.6 5-1.4"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg></button></div>
   <button type="submit">Anmelden</button>
   <small>Angemeldet für {days} Tage oder bis das Passwort geändert wird. Zugang erhältst du vom Administrator.</small>
-</form></body></html>"""
+</form>
+<script>
+document.getElementById("eye").onclick = function () {
+  var pw = document.getElementById("pw"), show = pw.type === "password", en = document.documentElement.lang === "en";
+  pw.type = show ? "text" : "password";
+  document.getElementById("eye-on").style.display = show ? "none" : "";
+  document.getElementById("eye-off").style.display = show ? "" : "none";
+  var lab = show ? (en ? "Hide password" : "Passwort verbergen") : (en ? "Show password" : "Passwort anzeigen");
+  this.setAttribute("aria-label", lab);
+  this.title = lab;
+  this.setAttribute("aria-pressed", String(show));
+  pw.focus();
+};
+</script></body></html>"""
 
 
 class BodyError(Exception):

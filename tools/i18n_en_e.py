@@ -192,3 +192,4 @@ DEPOT_EXACT.update({"Top & Flop seit Monatsbeginn": "Top & flop month to date", 
 DEPOT_EXACT.update({"Top & Flop seit Jahresbeginn": "Top & flop year to date", "Jahr": "Year",
                     "seit Jahresbeginn: {0} bis {1}": "year to date: {0} to {1}"})
 DEPOT_EXACT.update({"Lädt": "Loading"})
+DEPOT_EXACT.update({"Passwort anzeigen": "Show password", "Passwort verbergen": "Hide password"})

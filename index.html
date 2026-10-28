@@ -843,6 +843,12 @@ table.trk tr:last-child td{border-bottom:0}
 .field input[type=text],.field input[type=password]{flex:1;min-width:0;height:42px;border-radius:9px;border:1px solid var(--border-strong);
   background:var(--surface);color:var(--text);padding:0 12px;font:inherit;font-size:16px;width:100%}
 .form-msg{font-size:13px;margin-top:8px;min-height:18px}
+.pw-wrap{position:relative;display:flex;flex:1 1 160px;min-width:0;width:100%}
+.pw-wrap > input{flex:1;min-width:0;width:100%;padding-right:44px !important}
+.pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:34px;height:34px;padding:0;border:0;border-radius:7px;
+  background:none;color:var(--text-3);cursor:pointer;display:grid;place-items:center}
+.nu-form .pw-eye{width:28px;height:28px}
+.pw-eye:hover{color:var(--text)} .pw-eye:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .form-msg.err{color:var(--neg)} .form-msg.ok{color:var(--pos)}
 .user-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
 .user-row b{font-size:14px}
@@ -1530,6 +1536,34 @@ const KERZI_MINI = `<span class="kz-mini" role="img" aria-label="Lädt"><svg cla
   <line class="kz-arm" x1="74" y1="58" x2="90" y2="40" stroke-width="11" stroke-linecap="round"/>
   <rect class="kz-body" x="24" y="24" width="52" height="72" rx="12" stroke-width="0"/>
   <circle class="kz-face" cx="40" cy="52" r="6.5" stroke-width="0"/><circle class="kz-face" cx="60" cy="52" r="6.5" stroke-width="0"/></svg></span>`;
+// Passwortfelder: Augen-Button zum Ein- und Ausblenden (für jedes Passwortfeld, auch in später geöffneten Dialogen)
+const EYE_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.5"/><path d="M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.6-.6 5-1.4"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg>`;
+function pwEyes(root) {
+  const list = root.matches?.("input[type=password]") ? [root] : [...(root.querySelectorAll?.("input[type=password]") || [])];
+  list.filter(inp => !inp.dataset.eye).forEach(inp => {
+    inp.dataset.eye = "1";
+    const wrap = document.createElement("span");
+    wrap.className = "pw-wrap";
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pw-eye";
+    const set = show => {
+      inp.type = show ? "text" : "password";
+      b.innerHTML = show ? EYE_OFF_SVG : EYE_SVG;
+      b.setAttribute("aria-label", tr(show ? "Passwort verbergen" : "Passwort anzeigen"));
+      b.setAttribute("aria-pressed", String(show));
+      b.title = b.getAttribute("aria-label");
+    };
+    set(false);
+    b.onclick = () => { set(inp.type === "password"); inp.focus(); };
+    wrap.appendChild(b);
+  });
+}
+new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => n.nodeType === 1 && pwEyes(n))))
+  .observe(document.documentElement, {childList: true, subtree: true});
 const BELL_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`;
 function showMaintenance(text) {
   if ($("#maint-screen")) return;
