@@ -3574,7 +3574,7 @@ def nasdaq_price_target(us_sym):
         return hit[1]
     hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
            "Accept": "application/json"}
-    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym)}/targetprice", headers=hdr, timeout=15))
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym.replace("-", "."))}/targetprice", headers=hdr, timeout=15))
     c = (((d or {}).get("data") or {}).get("consensusOverview") or {})
     out = None
     if num(c.get("priceTarget")):
@@ -3670,7 +3670,7 @@ def nasdaq_eps_forecast(us_sym):
         return hit[1]
     hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
            "Accept": "application/json"}
-    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym)}/earnings-forecast", headers=hdr, timeout=15))
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym.replace("-", "."))}/earnings-forecast", headers=hdr, timeout=15))
     rows = (((d or {}).get("data") or {}).get("yearlyForecast") or {}).get("rows") or []
     out = {}
     for r_ in rows:
@@ -3824,14 +3824,24 @@ def income_estimates_trend(periods):
     if len(periods) < 3:
         return []
     revs = [p_["revenue"] for p_ in periods]
-    growth = sorted(b / a - 1 for a, b in zip(revs, revs[1:]) if a and b and a > 0)
+    steps = [b / a - 1 for a, b in zip(revs, revs[1:]) if a and b and a > 0]
+    growth = sorted(steps)
     margins = sorted(p_["margin"] for p_ in periods[-3:] if p_.get("margin") is not None)
     if not growth or not margins:
         return []
-    # Reinertrag nur fortschreiben, wenn die Marge zuletzt stabil und positiv war (sonst unrealistisch, z. B. nach
-    # Verlustjahren oder Sondereffekten) – der Umsatz wird trotzdem gezeigt
-    stable = len(margins) >= 2 and margins[0] > 0 and margins[-1] / margins[0] <= 2.5
-    g, mg = clamp(growth[len(growth) // 2], -0.10, 0.25), margins[len(margins) // 2]
+    # Reinertrag nur fortschreiben, wenn die Marge über die letzten fünf Jahre stabil und positiv war (sonst
+    # unrealistisch, z. B. nach Verlustjahren oder bei Gewinnen, die stark von Kursgewinnen abhängen wie bei
+    # Berkshire Hathaway) – der Umsatz wird trotzdem gezeigt
+    hist_m = [p_["margin"] for p_ in periods[-5:] if p_.get("margin") is not None]
+    stable = (len(hist_m) >= 2 and min(hist_m) > 0 and max(hist_m) / min(hist_m) <= 2.5
+              and max(margins) / min(margins) <= 1.6)
+    # Wachstum: echter Median der Jahresraten, zur Hälfte mit den letzten zwei Jahren gemittelt (ein einzelnes
+    # Ausnahmejahr soll die Fortschreibung nicht dominieren, eine Abkühlung zuletzt schon berücksichtigt werden)
+    n_ = len(growth)
+    med = growth[n_ // 2] if n_ % 2 else (growth[n_ // 2 - 1] + growth[n_ // 2]) / 2
+    recent = sum(steps[-2:]) / len(steps[-2:])
+    g = clamp((med + recent) / 2, -0.10, 0.25)
+    mg = min(margins[len(margins) // 2], periods[-1].get("margin") or margins[len(margins) // 2])
     end, limit = datetime.fromisoformat(periods[-1]["end"]), datetime.now() + timedelta(days=730)
     out, rev = [], revs[-1]
     for i in (1, 2, 3):
@@ -4071,7 +4081,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v11")  # v11: + onvista-Konsens
+    key = (symbol, freq, "v12")  # v12: vorsichtigere Fortschreibung
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]

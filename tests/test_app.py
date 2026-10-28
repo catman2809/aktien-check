@@ -1700,6 +1700,15 @@ class TestTrendEstimates(unittest.TestCase):
         self.assertTrue(est and all(e["net_income"] is None for e in est))   # Verlustjahr -> kein Reinertrag
         self.assertTrue(all(e["revenue"] for e in est))
 
+    def test_trend_berkshire_like(self):
+        # Umsatz zuletzt flach nach einem Sprungjahr, Reinertrag schwankt mit Kursgewinnen (Verlust vor drei Jahren)
+        y0 = a.datetime.now().year - 5
+        rows = ((276.2, 89.9), (302.0, -22.8), (364.5, 96.2), (371.4, 89.0), (371.4, 67.0))
+        per = [{"end": f"{y0 + i}-12-31", "revenue": r, "net_income": ni, "margin": ni / r} for i, (r, ni) in enumerate(rows)]
+        est = a.income_estimates_trend(per)
+        self.assertTrue(est and all(e["net_income"] is None for e in est))
+        self.assertLess(est[0]["revenue"] / 371.4 - 1, 0.05)                 # nicht +9 % wie mit dem Sprungjahr
+
 
 class TestOnvista(unittest.TestCase):
     def test_dividend_year_offset(self):
