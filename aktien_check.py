@@ -3795,8 +3795,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     k = fx_rate(eps_cur, currency) if eps_cur and currency and currency != eps_cur else 1.0
     if not shares or not k:
         return []
-    growth = [b / a - 1 for a, b in zip(rev_hist, rev_hist[1:]) if a and b and a > 0]
-    g = clamp(sorted(growth)[len(growth) // 2], -0.10, 0.30) if growth else None
+    g = trend_growth(rev_hist)
     out, rev, prev_ni = [], last["revenue"], last["net_income"]
     for i in (1, 2, 3):
         try:
@@ -3818,6 +3817,20 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     return out
 
 
+def trend_growth(revs, cap=0.25):
+    """Jährliches Umsatzwachstum für die Fortschreibung: ein Viertel echter Median aller Jahresraten, ein Viertel
+    Schnitt der letzten zwei Jahre, die Hälfte das letzte Jahr – ein einzelnes Sprungjahr (Übernahme, Boom) soll
+    nicht dominieren, eine Abkühlung zuletzt schon zählen. Begrenzt auf −10 % … cap."""
+    steps = [b / a - 1 for a, b in zip(revs, revs[1:]) if a and b and a > 0]
+    if not steps:
+        return None
+    g_ = sorted(steps)
+    n_ = len(g_)
+    med = g_[n_ // 2] if n_ % 2 else (g_[n_ // 2 - 1] + g_[n_ // 2]) / 2
+    recent = sum(steps[-2:]) / len(steps[-2:])
+    return clamp(0.25 * med + 0.25 * recent + 0.5 * steps[-1], -0.10, cap)
+
+
 def income_estimates_trend(periods):
     """Letzte Stufe ohne jede Analystenschätzung: Umsatz mit dem mittleren Wachstum der letzten Jahre fortgeschrieben,
     Reinertrag = Umsatz × mittlere Nettomarge – bis einschließlich des nächsten Geschäftsjahres."""
@@ -3837,10 +3850,7 @@ def income_estimates_trend(periods):
               and max(margins) / min(margins) <= 1.6)
     # Wachstum: echter Median der Jahresraten, zur Hälfte mit den letzten zwei Jahren gemittelt (ein einzelnes
     # Ausnahmejahr soll die Fortschreibung nicht dominieren, eine Abkühlung zuletzt schon berücksichtigt werden)
-    n_ = len(growth)
-    med = growth[n_ // 2] if n_ % 2 else (growth[n_ // 2 - 1] + growth[n_ // 2]) / 2
-    recent = sum(steps[-2:]) / len(steps[-2:])
-    g = clamp((med + recent) / 2, -0.10, 0.25)
+    g = trend_growth(revs)
     mg = min(margins[len(margins) // 2], periods[-1].get("margin") or margins[len(margins) // 2])
     end, limit = datetime.fromisoformat(periods[-1]["end"]), datetime.now() + timedelta(days=730)
     out, rev = [], revs[-1]
@@ -4081,7 +4091,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v12")  # v12: vorsichtigere Fortschreibung
+    key = (symbol, freq, "v13")  # v13: Fortschreibung gewichtet das letzte Jahr, Nasdaq/onvista-Abgleich
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4161,16 +4171,35 @@ def income_data(symbol, freq):
             except Exception as e:
                 LOG.warning("[Nasdaq] %s: nicht erreichbar (%s)", us_sym, type(e).__name__)
         out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq), []) or []
-        if not out["estimates"] and nasdaq:  # keine Yahoo-Schätzungen (z. B. auf dem Server gesperrt) -> Nasdaq-Konsens
-            out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq,
-                                                                    [p_["revenue"] for p_ in periods]), []) or []
-        if not out["estimates"]:  # kein Yahoo/Nasdaq -> onvista-Konsens (v. a. deutsche Werte ohne US-Notierung)
+        rev_hist = [p_["revenue"] for p_ in periods]
+        ov_est = []
+        if not out["estimates"]:  # keine Yahoo-Schätzungen (z. B. auf dem Server gesperrt) -> onvista und Nasdaq
             ov = safe(lambda: onvista_data(symbol))
             ov_eps = {y: e for y, e in ((ov or {}).get("eps") or {}).items() if e["est"] and e["avg"]}
             if ov_eps:
-                out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, ov_eps,
-                                                                        [p_["revenue"] for p_ in periods], "onvista",
-                                                                        ov.get("currency") or out["currency"]), []) or []
+                ov_est = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, ov_eps, rev_hist, "onvista",
+                                                              ov.get("currency") or out["currency"]), []) or []
+        if not out["estimates"] and nasdaq:
+            out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq, rev_hist), []) or []
+            # Zacks rechnet mit bereinigtem Gewinn je Aktie; weicht das stark vom berichteten Gewinn ab (Pfizer: 2,94 $
+            # bereinigt gegenüber 1,22 $ berichtet), passt die Hochrechnung nicht zur Vorjahresbasis. Dann onvista
+            # nehmen, wenn es fürs selbe Jahr deutlich näher am Vorjahr liegt. Nur bei Geschäftsjahr ≈ Kalenderjahr,
+            # sonst ordnet onvista die Jahre teils anders zu (Nvidia).
+            nq0 = out["estimates"][0] if out["estimates"] else None
+            ov0 = next((e_ for e_ in ov_est if nq0 and e_["label"] == nq0["label"]), None)
+            if nq0 and ov0 and datetime.fromisoformat(periods[-1]["end"]).month >= 9 and periods[-1]["net_income"] > 0:
+                base = periods[-1]["net_income"]
+                if abs(nq0["net_income"] / ov0["net_income"] - 1) > 0.35 and \
+                        abs(ov0["net_income"] / base - 1) < abs(nq0["net_income"] / base - 1):
+                    LOG.info("[Prognose] %s: Nasdaq %.0f%% vs. onvista %.0f%% zum Vorjahr – onvista (gleiche Gewinnbasis)",
+                             symbol, (nq0["net_income"] / base - 1) * 100, (ov0["net_income"] / base - 1) * 100)
+                    out["estimates"] = ov_est
+        if not out["estimates"] and ov_est:  # kein Yahoo/Nasdaq -> onvista-Konsens (v. a. deutsche Werte ohne US-Notierung)
+            out["estimates"] = ov_est
+        # Konsens beruht meist auf bereinigtem Gewinn (ohne Sondereffekte): starker Sprung zum berichteten Vorjahr kennzeichnen
+        e0 = out["estimates"][0] if out["estimates"] else None
+        if e0 and e0.get("ni_consensus") and e0.get("net_income") and periods[-1]["net_income"] > 0                 and e0["net_income"] / periods[-1]["net_income"] > 1.4:
+            e0["adj_jump"] = True
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
         LOG.info("[Prognose] %s: Yahoo-Schätzungen %s, Nasdaq %s -> %s", symbol, "ja" if has_yahoo_est else "nein",

@@ -276,3 +276,7 @@ DEPOT_WILD += [
     ("{*}: {0} {*1} (Prognose, {1} %, davon bereits gezahlt {2})", "{*}: {0} {*1} (forecast, {1}%, of which already paid {2})"),
     ("{*}: {0} {*1} (Prognose, {1} %)", "{*}: {0} {*1} (forecast, {1}%)"),
 ]
+DEPOT_EXACT.update({
+    "Hinweis: Analysten schätzen den bereinigten Gewinn (ohne Sondereffekte wie Abschreibungen, Rechtsfälle oder Umbaukosten). Ein starker Anstieg gegenüber dem berichteten Reinertrag des Vorjahres kann daher teils aus Sonderbelastungen im Vorjahr stammen.":
+        "Note: analysts estimate adjusted earnings (excluding one-offs such as write-downs, legal cases or restructuring costs). A sharp rise versus the prior year's reported net income may therefore partly reflect one-off charges in the prior year.",
+})

@@ -1669,7 +1669,7 @@ class TestIncomeFallbacks(unittest.TestCase):
         est = a.income_estimates_nasdaq(self.PER, "USD", 2.0, nq, [80.0, 90.0, 100.0])
         self.assertEqual([e["label"] for e in est], ["2026e", "2027e", "2028e"])
         self.assertAlmostEqual(est[0]["net_income"], 10 * 2.2)                 # 10 Aktien (20 / 2,00) × 2,20
-        self.assertAlmostEqual(est[0]["revenue"], 112.5)                      # Wachstum 12,5 % / 11,1 % -> oberer Median
+        self.assertAlmostEqual(est[0]["revenue"], 100 * (1 + a.trend_growth([80, 90, 100])))  # gewichtete Fortschreibung
         self.assertTrue(est[0]["rev_trend"])
         self.assertEqual(est[2]["n_eps"], 3)
 
@@ -1699,6 +1699,11 @@ class TestTrendEstimates(unittest.TestCase):
         est = a.income_estimates_trend(per)
         self.assertTrue(est and all(e["net_income"] is None for e in est))   # Verlustjahr -> kein Reinertrag
         self.assertTrue(all(e["revenue"] for e in est))
+
+    def test_trend_growth_weights_recent_years(self):
+        self.assertAlmostEqual(a.trend_growth([100, 125, 150, 160]), 0.25 * 0.2 + 0.25 * (0.2 + 1 / 15) / 2 + 0.5 / 15)
+        self.assertEqual(a.trend_growth([10, 30, 90]), 0.25)            # Deckel
+        self.assertIsNone(a.trend_growth([100]))
 
     def test_trend_berkshire_like(self):
         # Umsatz zuletzt flach nach einem Sprungjahr, Reinertrag schwankt mit Kursgewinnen (Verlust vor drei Jahren)
