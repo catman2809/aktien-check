@@ -9221,10 +9221,10 @@ WEB_MANIFEST = {
     "name": "Stocky", "short_name": "Stocky", "lang": "de",
     "description": "Kaufen, Halten oder Verkaufen – automatisierte Aktienanalyse",
     "start_url": "/", "scope": "/", "display": "standalone",
-    "background_color": "#0c111d", "theme_color": "#1f4fd8",
-    "icons": [{"src": "/static/icon-192.png?v=kerzi", "sizes": "192x192", "type": "image/png"},
-              {"src": "/static/icon-512.png?v=kerzi", "sizes": "512x512", "type": "image/png"},
-              {"src": "/static/icon-maskable-512.png?v=kerzi", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+    "background_color": "#f5efe6", "theme_color": "#1f5e5b",
+    "icons": [{"src": "/static/icon-192.png?v=warm", "sizes": "192x192", "type": "image/png"},
+              {"src": "/static/icon-512.png?v=warm", "sizes": "512x512", "type": "image/png"},
+              {"src": "/static/icon-maskable-512.png?v=warm", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
 }
 
 # --- Login mit dauerhafter Sitzung (nur aktiv, wenn APP_PASSWORD gesetzt ist) ---
@@ -9281,26 +9281,28 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Stocky">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=kerzi">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=kerzi">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=warm">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=warm">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#1f4fd8">
+<meta name="theme-color" content="#f5efe6">
 <title>Anmelden · Stocky</title>
 <style>
-:root{--bg:#f5f6f8;--surface:#fff;--border:#d0d5dd;--text:#101828;--text-2:#475467;--accent:#1f4fd8;--accent-soft:#eef3ff;--neg:#b42318;--neg-soft:#fef3f2}
-@media (prefers-color-scheme:dark){:root{--bg:#0c111d;--surface:#131a2a;--border:#334056;--text:#f2f4f7;--text-2:#b4bccb;--accent:#7c9cff;--accent-soft:#1a2547;--neg:#f97066;--neg-soft:#2f1414}}
+:root{--bg:#f5efe6;--surface:#fffcf7;--border:#d8cab6;--text:#2b2521;--text-2:#5f554d;--accent:#1f5e5b;--accent-soft:#e4efeb;--neg:#a83a2c;--neg-soft:#fbece8}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1613;--surface:#231e1a;--border:#4d4239;--text:#f2ebe1;--text-2:#cbbfb1;--accent:#76b8ac;--accent-soft:#1e322f;--neg:#ec8a74;--neg-soft:#331d18}}
+@font-face{font-family:"Source Sans 3";src:url(/static/source-sans-3.woff2) format("woff2");font-weight:200 900;font-display:swap}
+@font-face{font-family:"Fraunces";src:url(/static/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
-  font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+  font:16px/1.5 "Source Sans 3",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
 .box{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
 .logo{width:40px;height:40px;border-radius:10px;background:var(--accent);display:grid;place-items:center;margin-bottom:16px}
-h1{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}
+h1{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
 p{margin:0 0 20px;color:var(--text-2);font-size:14px}
 label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
 input{width:100%;height:46px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
   color:var(--text);font:inherit;font-size:16px}
 input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;background:var(--accent);color:#fff;
+button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;background:var(--accent);color:var(--surface);
   font:inherit;font-weight:600;font-size:15px;cursor:pointer}
 .err{background:var(--neg-soft);color:var(--neg);font-size:13.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px}
 small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-align:center}
@@ -9312,10 +9314,10 @@ small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-al
 </style></head><body>
 <form class="box" method="post" action="/login">
   <div class="logo"><svg width="28" height="34" viewBox="0 0 100 120" aria-hidden="true"><line x1="50" y1="6" x2="50" y2="114"
-    stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="30" y1="56" x2="12" y2="34" stroke="#1baf7a" stroke-width="9"
-    stroke-linecap="round"/><line x1="70" y1="56" x2="88" y2="34" stroke="#1baf7a" stroke-width="9" stroke-linecap="round"/><rect
-    x="28" y="26" width="44" height="70" rx="9" fill="#1baf7a"/><circle cx="41" cy="50" r="5" fill="#0b3d27"/><circle cx="59"
-    cy="50" r="5" fill="#0b3d27"/><path d="M40 64 Q50 74 60 64" fill="none" stroke="#0b3d27" stroke-width="4.5"
+    stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="30" y1="56" x2="12" y2="34" stroke="#7dbb57" stroke-width="9"
+    stroke-linecap="round"/><line x1="70" y1="56" x2="88" y2="34" stroke="#7dbb57" stroke-width="9" stroke-linecap="round"/><rect
+    x="28" y="26" width="44" height="70" rx="9" fill="#7dbb57"/><circle cx="41" cy="50" r="5" fill="#1f3a12"/><circle cx="59"
+    cy="50" r="5" fill="#1f3a12"/><path d="M40 64 Q50 74 60 64" fill="none" stroke="#1f3a12" stroke-width="4.5"
     stroke-linecap="round"/></svg></div>
   <h1>Stocky</h1>
   <p>Bitte einmal anmelden – dieses Gerät bleibt danach angemeldet.</p>
@@ -9778,10 +9780,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(WEB_MANIFEST, ensure_ascii=False), "application/manifest+json; charset=utf-8")
         if u.path.startswith("/static/"):
             f = STATIC_DIR / Path(u.path).name  # nur Dateien direkt im Ordner, kein Pfad-Ausbruch
-            if f.suffix in (".png", ".json") and f.is_file():
+            if f.suffix in (".png", ".json", ".woff2") and f.is_file():
                 data = f.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "image/png" if f.suffix == ".png" else "application/json; charset=utf-8")
+                self.send_header("Content-Type", {".png": "image/png", ".woff2": "font/woff2"}.get(f.suffix, "application/json; charset=utf-8"))
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "public, max-age=604800")
                 self.end_headers()

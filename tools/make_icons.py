@@ -8,10 +8,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
-BG = (31, 79, 216)          # Markenblau (--accent)
-BODY = (27, 175, 122)       # Kerzengrün
-FACE = (11, 61, 39)
-WICK = (255, 255, 255)
+BG = (31, 94, 91)           # Markenfarbe Petrol (--accent)
+BODY = (125, 187, 87)       # Kerzengrün (warm)
+FACE = (31, 58, 18)
+WICK = (250, 244, 234)      # Creme
 SS = 4                      # Supersampling für glatte Kanten
 
 
