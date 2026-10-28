@@ -4039,8 +4039,9 @@ function incEstNote(E) {
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
   const D = INC.data[INC.freq]; if (!D) return;
-  // gemeldete Jahre + Prognosen (laufendes und folgendes Geschäftsjahr: Analystenkonsens, danach Fortschreibung)
-  const E = INC.freq === "annual" ? (D.estimates || []) : [];
+  // gemeldete Perioden + Prognosen (Jahre: laufendes und folgendes Geschäftsjahr als Konsens, danach Fortschreibung;
+  // Quartale: laufendes und nächstes Quartal als Konsens)
+  const E = D.estimates || [];
   const P = [...D.periods, ...E], n = P.length, nAct = D.periods.length;
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const m = {l: 44, r: 62, t: 12, b: 28};
