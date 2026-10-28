@@ -1692,22 +1692,7 @@ class TestYahooBlock(unittest.TestCase):
             a.YQ_STATE.update(blocked=False, checked=float("inf"))
 
 
-class TestAlphaVantage(unittest.TestCase):
-    def test_apply_revenue(self):
-        periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 10.0}]
-        est = [{"end": "2026-12-31", "revenue": 104.0, "net_income": 11.0, "est": "consensus", "rev_trend": True},
-               {"end": "2027-12-31", "revenue": 108.0, "net_income": 12.0, "est": "consensus", "rev_trend": True},
-               {"end": "2028-12-31", "revenue": 112.0, "net_income": 13.0, "est": "consensus", "rev_trend": True}]
-        av = {2026: {"rev": 110.0, "rev_low": 105.0, "rev_high": 115.0, "rev_n": 20},
-              2027: {"rev": 121.0, "rev_low": 115.0, "rev_high": 127.0, "rev_n": 18}}
-        a.apply_av_revenue(est, periods, "USD", av)
-        self.assertEqual((est[0]["revenue"], est[0]["rev_src"], est[0]["n_rev"]), (110.0, "Alpha Vantage", 20))
-        self.assertAlmostEqual(est[0]["margin"], 0.1)
-        self.assertAlmostEqual(est[2]["revenue"], 121.0 * 1.1)    # Folgejahr: Wachstum des letzten Konsensjahres
-        est2 = [{"end": "2026-12-31", "revenue": 104.0, "net_income": None, "est": "trend"}]
-        a.apply_av_revenue(est2, periods, "USD", {2026: {"rev": 500.0, "rev_n": 3}})   # unplausibel -> verworfen
-        self.assertEqual(est2[0]["revenue"], 104.0)
-
+class TestTrendEstimates(unittest.TestCase):
     def test_trend_hides_unstable_net_income(self):
         per = [{"end": f"{y}-12-31", "revenue": 100.0 + y - 2023, "net_income": ni, "margin": ni / (100.0 + y - 2023)}
                for y, ni in ((2023, -2.0), (2024, 1.0), (2025, 3.0))]

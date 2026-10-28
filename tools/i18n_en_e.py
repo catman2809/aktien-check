@@ -258,11 +258,8 @@ DEPOT_WILD += [
 ]
 DEPOT_WILD += [("{0} gegenüber Vorjahr", "{0} vs. prior year")]
 DEPOT_WILD += [
-    ("{*}: Umsatz aus dem Konsens von {*1}, {*2}.", "{*}: revenue from the {*1} consensus, {*2}."),
     ("{*}: Umsatz fortgeschrieben, {*1}.", "{*}: revenue extrapolated, {*1}."),
     ("{*}: Umsatz aus dem Analystenkonsens (Yahoo Finance), {*1}.", "{*}: revenue from the analyst consensus (Yahoo Finance), {*1}."),
-    ("Umsatz: Konsens {*} ({0} Analysten) · Reinertrag: Nasdaq-Konsens ({1} Analysten)", "Revenue: {*} consensus ({0} analysts) · net income: Nasdaq consensus ({1} analysts)"),
-    ("Umsatz: Konsens {*} ({0} Analysten)", "Revenue: {*} consensus ({0} analysts)"),
 ]
 DEPOT_EXACT.update({
     "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)": "net income from the EPS consensus (Nasdaq, data from Zacks)",
