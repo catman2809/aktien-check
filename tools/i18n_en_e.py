@@ -209,3 +209,8 @@ DEPOT_EXACT.update({
     "Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).":
         "Operating income derived: expected net margin plus the usual gap to the operating margin (median of recent periods).",
 })
+DEPOT_EXACT.update({
+    "Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).":
+        "Free cash flow derived: expected net income times the usual cash conversion (free cash flow per unit of profit, half median of recent periods, half latest period).",
+})
+DEPOT_WILD += [("Free Cashflow: {*}", "Free cash flow: {*}"), ("· FCF {*}", "· FCF {*}")]

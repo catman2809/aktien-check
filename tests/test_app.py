@@ -1628,6 +1628,23 @@ class TestIncomeEstimates(unittest.TestCase):
         self.assertNotIn("op_margin", est2[0])
 
 
+class TestFcfEstimates(unittest.TestCase):
+    def test_conversion_and_matching(self):
+        import pandas as pd
+        periods = [{"end": e, "revenue": 100.0, "net_income": ni} for e, ni in
+                   (("2023-12-31", 10.0), ("2024-12-31", 10.0), ("2025-12-31", 10.0))]
+        cf = pd.DataFrame({pd.Timestamp("2025-12-28"): [None, 13.0, -6.0], pd.Timestamp("2024-12-31"): [12.0, None, None],
+                           pd.Timestamp("2023-12-31"): [11.0, None, None]},
+                          index=["Free Cash Flow", "Operating Cash Flow", "Capital Expenditure"])
+        a.fcf_by_period(cf, periods)
+        self.assertEqual([p_["fcf"] for p_ in periods], [11.0, 12.0, 7.0])   # 2025: 13 − 6, Periodenende 3 Tage abweichend
+        est = [{"revenue": 120.0, "net_income": 20.0}, {"revenue": 130.0, "net_income": None}]
+        a.add_fcf_estimates(periods, est, 3)
+        self.assertAlmostEqual(est[0]["fcf"], 20.0 * (1.1 + 0.7) / 2)        # halb Median (1,1), halb jüngstes Jahr (0,7)
+        self.assertAlmostEqual(est[1]["fcf"], 130.0 * (0.11 + 0.07) / 2)     # ohne Gewinnprognose: Free-Cashflow-Marge
+        self.assertTrue(est[0]["fcf_derived"])
+
+
 class TestMovers(unittest.TestCase):
     def test_top_and_flop(self):
         import unittest.mock as um

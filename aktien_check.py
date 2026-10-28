@@ -3541,12 +3541,55 @@ def add_op_estimates(periods, estimates, n):
             e["op_derived"] = True
 
 
+def add_fcf_estimates(periods, estimates, n):
+    """Free Cashflow für die Prognosen ableiten (dafür gibt es bei Yahoo keinen Konsens): erwarteter Reinertrag ×
+    Cash-Umwandlung (Free Cashflow / Reinertrag); ohne Gewinnprognose erwarteter Umsatz × Free-Cashflow-Marge.
+    Die Quote ist je zur Hälfte der Median der letzten n Perioden (gegen Sondereffekte) und die jüngste Periode
+    (damit z. B. stark steigende Investitionen nicht übersehen werden)."""
+    med = lambda xs: (sorted(xs)[len(xs) // 2] if len(xs) % 2 else sum(sorted(xs)[len(xs) // 2 - 1:len(xs) // 2 + 1]) / 2) if xs else None
+    recent = [p_ for p_ in periods[-n:] if p_.get("fcf") is not None]
+
+    def blend(xs):
+        return (med(xs) + xs[-1]) / 2 if xs else None
+    conv = blend([p_["fcf"] / p_["net_income"] for p_ in recent if p_["net_income"] and p_["net_income"] > 0])
+    margin = blend([p_["fcf"] / p_["revenue"] for p_ in recent if p_["revenue"]])
+    if len(recent) < min(2, n):
+        return
+    conv = conv if conv is not None and 0.3 <= conv <= 2.5 else None   # sonst Sondereffekte im Gewinn
+    for e in estimates:
+        if conv is not None and e.get("net_income") and e["net_income"] > 0:
+            e["fcf"] = e["net_income"] * conv
+        elif margin is not None and -0.5 <= margin <= 0.6:
+            e["fcf"] = e["revenue"] * margin
+        else:
+            continue
+        e["fcf_derived"] = True
+
+
+def fcf_by_period(cf, periods):
+    """Free Cashflow je gemeldeter Periode (Cashflow-Rechnung; sonst operativer Cashflow + Investitionen)."""
+    if cf is None or getattr(cf, "empty", True):
+        return
+    vals = {}
+    for col in cf.columns:
+        f_ = num(cf.loc["Free Cash Flow", col]) if "Free Cash Flow" in cf.index else None
+        if f_ is None and "Operating Cash Flow" in cf.index and "Capital Expenditure" in cf.index:
+            o_, c_ = num(cf.loc["Operating Cash Flow", col]), num(cf.loc["Capital Expenditure", col])
+            f_ = o_ + c_ if o_ is not None and c_ is not None else None
+        if f_ is not None:
+            vals[col.date() if hasattr(col, "date") else col] = f_
+    for p_ in periods:
+        end = datetime.fromisoformat(p_["end"]).date()
+        hit = next((v for d, v in vals.items() if abs((d - end).days) <= 20), None)
+        p_["fcf"] = hit
+
+
 def income_data(symbol, freq):
     """Erfolgsrechnung (Umsatz, Reinertrag, Nettomarge) je Geschäftsjahr oder Quartal, in Berichtswährung."""
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v4")  # v4: Prognosen inkl. operativem Ergebnis
+    key = (symbol, freq, "v5")  # v5: Prognosen inkl. operativem Ergebnis und Free Cashflow
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3603,12 +3646,18 @@ def income_data(symbol, freq):
            "currency": "USD" if source else financial_currency(symbol) or safe(lambda: t.fast_info.currency) or ""}
     if source:
         out["source"] = source
+    cf_sec = st["cashflow"][0 if freq == "annual" else 1] if st else None
+    cf = safe(lambda: t.cashflow if freq == "annual" else t.quarterly_cashflow)
+    if cf_sec is not None and not cf_sec.empty:
+        cf = merge_frames(cf_sec, cf)
+    safe(lambda: fcf_by_period(cf, periods))
     eps_row = row("Diluted EPS", "Basic EPS")
     last_col = next((c for c in df.columns if (c.date() if hasattr(c, "date") else c).isoformat() == periods[-1]["end"]), None)
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     est_fn = income_estimates if freq == "annual" else income_estimates_q
     out["estimates"] = safe(lambda: est_fn(t, periods, out["currency"], eps_last), []) or []
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
+    safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     INCOME_CACHE[key] = (time.time(), out)
     return out
 

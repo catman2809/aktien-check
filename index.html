@@ -29,7 +29,7 @@
   --track:#ece3d6; --shadow:0 1px 2px rgba(70,45,20,.05),0 2px 8px rgba(70,45,20,.05);
   --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#008300; --c7:#6250d6; --c8:#e34948; --c-other:#98a2b3;
   --sma50:#eb6834; --sma200:#6250d6;
-  --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834;
+  --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834; --inc-fcf:#6250d6;
   --radius:14px;
   --serif:"Fraunces",Georgia,"Times New Roman",serif;
 }
@@ -44,7 +44,7 @@
     --track:#3a322b; --shadow:none;
   --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767; --c-other:#667085;
     --sma50:#d95926; --sma200:#9085e9;
-    --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
+    --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926; --inc-fcf:#9085e9;
   }
 }
 :root[data-theme="dark"]{
@@ -57,7 +57,7 @@
   --track:#3a322b; --shadow:none;
   --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767; --c-other:#667085;
   --sma50:#d95926; --sma200:#9085e9;
-  --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926;
+  --inc-rev:#5a82e8; --inc-ni:#2ba3a3; --inc-mar:#d95926; --inc-fcf:#9085e9;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:120px}
@@ -931,7 +931,7 @@ table.peers .neg{color:var(--neg)}
     --text:#2b2521; --text-2:#4f463f; --text-3:#7d7166; --accent:#1f5e5b; --accent-soft:#e4efeb; --on-accent:#fffcf7;
     --pos:#3f7a1f; --pos-soft:#eef5e6; --pos-line:#c5dcb0; --neu:#a8620a; --neu-soft:#fbf2e1; --neu-line:#ecd2a3;
     --neg:#a83a2c; --neg-soft:#fbece8; --neg-line:#efc4bb; --track:#ece3d6; --shadow:none;
-    --sma50:#eb6834; --sma200:#6250d6; --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834;
+    --sma50:#eb6834; --sma200:#6250d6; --inc-rev:#2f6bdb; --inc-ni:#1f9e9e; --inc-mar:#eb6834; --inc-fcf:#6250d6;
   }
   @page{size:A4;margin:14mm 12mm}
   html,body{background:#fff !important;font-size:12px}
@@ -4027,7 +4027,7 @@ function incHead(p, D, unit) {
   $("#inc-val").innerHTML = `${v}<small>${u} ${esc(D.currency)} Umsatz${p.est ? " (Prognose)" : ""}</small>`;
   const mc = p.margin >= 0 ? "var(--pos)" : "var(--neg)";
   $("#inc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">${p.net_income != null ? `Reinertrag ${big(p.net_income).join(" ")} ·
-    Netto <b style="color:${mc}">${pc(p.margin, 1)}</b>` : "Reinertrag ohne Prognose"}${p.op_margin != null ? ` · Operativ <b style="color:${p.op_margin >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(p.op_margin, 1)}</b>` : ""}</span><span>${esc(p.label)}</span>`;
+    Netto <b style="color:${mc}">${pc(p.margin, 1)}</b>` : "Reinertrag ohne Prognose"}${p.fcf != null ? ` · FCF ${big(p.fcf).join(" ")}` : ""}${p.op_margin != null ? ` · Operativ <b style="color:${p.op_margin >= 0 ? "var(--pos)" : "var(--neg)"}">${pc(p.op_margin, 1)}</b>` : ""}</span><span>${esc(p.label)}</span>`;
 }
 function incEstNote(E) {
   // eigene Spans je Satzteil, damit die englische Übersetzung greift
@@ -4035,6 +4035,7 @@ function incEstNote(E) {
   return `<span>e = erwartet.</span> <span>${esc(cons.join(" / "))}: Analystenkonsens (Yahoo Finance).</span>` +
     (trend ? ` <span>${esc(trend.label)}: eigene Fortschreibung des Trends, dafür gibt es keine Analystenschätzung.</span>` : "") +
     (E.some(p => p.net_income != null) ? ` <span>Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.</span>` : "") +
+    (E.some(p => p.fcf_derived) ? ` <span>Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
     (E.some(p => p.op_derived) ? ` <span>Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).</span>` : "");
 }
 function drawIncome() {
@@ -4050,7 +4051,8 @@ function drawIncome() {
   // Rechte Achse: Beträge (Einheit nach größtem Umsatz)
   const maxV = Math.max(...P.map(p => p.revenue));
   const [div, unit] = maxV >= 1e12 ? [1e12, "Bio."] : maxV >= 1e9 ? [1e9, "Mrd."] : [1e6, "Mio."];
-  const minV = Math.min(0, ...P.map(p => p.net_income).filter(v => v != null));
+  const minV = Math.min(0, ...P.flatMap(p => [p.net_income, p.fcf]).filter(v => v != null));
+  const hasFcf = P.some(p => p.fcf != null);
   const {ticks, step} = niceTicks(minV / div, maxV / div * 1.04, 5);
   const vLo = Math.min(0, ticks[0]), vHi = ticks[ticks.length - 1] < maxV / div ? ticks[ticks.length - 1] + step : ticks[ticks.length - 1];
   const grid = [...new Set([...ticks.filter(t => t >= vLo), vHi])];
@@ -4063,7 +4065,9 @@ function drawIncome() {
   mLo -= mp; mHi += mp;
   const Ym = v => m.t + (1 - (v - mLo) / (mHi - mLo)) * ph;
   const mAt = y => mLo + (1 - (y - m.t) / ph) * (mHi - mLo);
-  const cw = pw / n, bw = Math.min(34, cw * 0.3), gap = Math.min(10, cw * 0.08);
+  const nb = hasFcf ? 3 : 2;  // Balken je Periode: Umsatz, Reinertrag, ggf. Free Cashflow
+  const cw = pw / n, bw = Math.min(nb === 3 ? 26 : 34, cw * (nb === 3 ? 0.22 : 0.3)), gap = Math.min(nb === 3 ? 6 : 10, cw * 0.06);
+  const bx = (i, k) => cx(i) - (nb * bw + (nb - 1) * gap) / 2 + k * (bw + gap);
   const cx = i => m.l + cw * (i + 0.5);
   const bar = (x, v, cls, est) => {   // Balken mit gerundetem Ende, am Nullpunkt verankert; Prognosen hell mit Rahmen
     if (v == null) return "";
@@ -4090,7 +4094,8 @@ function drawIncome() {
   const opEstLine = opEst.length ? "M" + [...opAnchor, ...opEst].map(i => `${cx(i).toFixed(1)},${Ym(P[i].op_margin).toFixed(1)}`).join("L") : "";
   const tickV = t => nf(t, step < 1 ? (step < 0.1 ? 2 : 1) : 0);
   const aria = `Erfolgsrechnung ${INC.freq === "annual" ? "jährlich" : "vierteljährlich"}: ` +
-    P.map(p => `${p.label} Umsatz ${big(p.revenue).join(" ")}, Reinertrag ${big(p.net_income).join(" ")}, Nettomarge ${pc(p.margin, 1)}` +
+    P.map(p => `${p.label} Umsatz ${big(p.revenue).join(" ")}` + (p.net_income != null ? `, Reinertrag ${big(p.net_income).join(" ")}, Nettomarge ${pc(p.margin, 1)}` : "") +
+      (p.fcf != null ? `, Free Cashflow ${big(p.fcf).join(" ")}` : "") +
       (p.op_margin != null ? `, operative Marge ${pc(p.op_margin, 1)}` : "")).join("; ");
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
     ${P.map((p, i) => `<g class="col" data-i="${i}"><rect class="bg" x="${(m.l + cw * i + 2).toFixed(1)}" y="${m.t}" width="${(cw - 4).toFixed(1)}" height="${ph}" rx="6" fill="transparent"/></g>`).join("")}
@@ -4103,7 +4108,8 @@ function drawIncome() {
     ${minV < 0 ? `<line class="zero" x1="${m.l}" x2="${m.l + pw}" y1="${Yv(0).toFixed(1)}" y2="${Yv(0).toFixed(1)}"/>` : ""}
     ${sepX != null ? `<line x1="${sepX.toFixed(1)}" x2="${sepX.toFixed(1)}" y1="${m.t}" y2="${m.t + ph}" stroke="var(--border-strong)" stroke-dasharray="3 4"/>
       <text class="inc-est-lab" x="${(sepX + 6).toFixed(1)}" y="${m.t + 11}">Prognose</text>` : ""}
-    ${P.map((p, i) => bar(cx(i) - bw - gap / 2, p.revenue, "--inc-rev", p.est) + bar(cx(i) + gap / 2, p.net_income, "--inc-ni", p.est)).join("")}
+    ${P.map((p, i) => bar(bx(i, 0), p.revenue, "--inc-rev", p.est) + bar(bx(i, 1), p.net_income, "--inc-ni", p.est)
+      + (hasFcf ? bar(bx(i, 2), p.fcf, "--inc-fcf", p.est) : "")).join("")}
     ${hasOp ? `<path d="${opLine}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
       ${opEstLine ? `<path d="${opEstLine}" fill="none" stroke="var(--text-2)" stroke-opacity=".55" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
       ${P.map((p, i) => p.op_margin == null ? "" : `<rect x="${(cx(i) - 4).toFixed(1)}" y="${(Ym(p.op_margin) - 4).toFixed(1)}" width="8" height="8" rx="1.5" fill="var(--surface)" stroke="var(--text-2)" stroke-width="2"${p.est ? ` stroke-opacity=".55"` : ""}/>`).join("")}` : ""}
@@ -4117,6 +4123,7 @@ function drawIncome() {
   $("#inc-foot").innerHTML = `<div class="legend">
       <span style="color:var(--inc-rev)"><i class="box"></i><span style="color:var(--text-2)">Umsatz</span></span>
       <span style="color:var(--inc-ni)"><i class="box"></i><span style="color:var(--text-2)">Reinertrag</span></span>
+      ${hasFcf ? `<span style="color:var(--inc-fcf)"><i class="box"></i><span style="color:var(--text-2)">Free Cashflow</span></span>` : ""}
       <span style="color:var(--inc-mar)"><i class="mar"></i><span style="color:var(--text-2)">Nettomarge %</span></span>
       ${hasOp ? `<span style="color:var(--text-2)"><i class="mar op"></i>Operative Marge %</span>` : ""}
       ${E.length ? `<span style="color:var(--text-2)"><i class="box est"></i>Prognose</span>` : ""}
@@ -4135,6 +4142,7 @@ function drawIncome() {
         : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">Fortschreibung des Trends, keine Analystenschätzung</span>` : ""}
       <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>
       ${p.net_income != null ? `<span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}${rngTxt(p.ni_low, p.ni_high)}</span>` : ""}
+      ${p.fcf != null ? `<span style="display:block">Free Cashflow: ${big(p.fcf).join(" ")} ${esc(D.currency)}${p.fcf_derived ? ` <span style="color:var(--text-3)">(abgeleitet)</span>` : ""}</span>` : ""}
       ${p.op_income != null ? `<span style="display:block">Operatives Ergebnis: ${big(p.op_income).join(" ")} ${esc(D.currency)}${p.op_derived ? ` <span style="color:var(--text-3)">(abgeleitet)</span>` : ""}</span>` : ""}
       ${p.margin != null ? `<span style="display:block">Nettomarge: ${pc(p.margin, 1)}</span>` : ""}
       ${p.op_margin != null ? `<span style="display:block">Operative Marge: ${pc(p.op_margin, 1)}</span>` : ""}`;
