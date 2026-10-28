@@ -4101,7 +4101,8 @@ function incTable(D) {
   const chg = (v, prev) => {
     if (v == null || prev == null || prev <= 0) return "";
     const r = v / prev - 1, up = r >= 0;
-    return `<span class="inc-chg ${up ? "up" : "down"}" title="${pc(r, 1, true)} gegenüber Vorjahr"><span aria-hidden="true">${up ? "▲" : "▼"}</span> ${pc(Math.abs(r), 1)}</span>`;
+    const big = r > 5;  // sehr kleiner Vorjahreswert (BP 2025) -> keine Riesenzahl anzeigen
+    return `<span class="inc-chg ${up ? "up" : "down"}" title="${pc(r, 1, true)} gegenüber Vorjahr"><span aria-hidden="true">${up ? "▲" : "▼"}</span> ${big ? "> " + pc(5, 0) : pc(Math.abs(r), 1)}</span>`;
   };
   const cell = (c, html, derived, delta) => `<td class="num${c.est ? " est" : ""}">${html}${c.est && derived && html !== "–" ? "<sup>*</sup>" : ""}${delta || ""}</td>`;
   const row = (lab, fn, cls, derived, val) => `<tr class="${cls || ""}"><th scope="row">${lab}</th>${cols.map((c, i) =>

@@ -3737,26 +3737,41 @@ def _onvista_isin(symbol, name=None):
     if not name:
         own = next((r_ for q in (symbol, base) for r_ in safe(lambda: search_symbols(q), []) or [] if r_.get("symbol") == symbol), None)
         name = own and own.get("name")
-    core = [w for w in _legal_tokens(name or "") if w not in ONVISTA_GENERIC]
+    def toks(n):  # Kernname: ohne Rechtsform, allgemeine Wörter, Artikel (L'Air Liquide) und Gattung (Volvo B)
+        t_ = [w for w in _legal_tokens(n or "") if w not in ONVISTA_GENERIC]
+        while t_ and len(t_[0]) == 1:
+            t_ = t_[1:]
+        while len(t_) > 1 and len(t_[-1]) == 1:
+            t_ = t_[:-1]
+        return t_
+    core = toks(name)
     if not core:
         return None
     land = ONVISTA_ISIN_COUNTRY.get(suf, "") if suf else "US"
     full = _legal_tokens(name)
-    cands = []
+    hits, other = [], []  # Sitzland passt zum Börsenplatz / anderes Land (Airbus: niederländische ISIN in Paris)
     for q in dict.fromkeys(q_ for q_ in (" ".join(core), core[0], " ".join(core[1:])) if q_):
         for x in find(q):
             nm, isin = x.get("name") or "", x.get("isin") or ""
             if x.get("entityType") != "STOCK" or re.search(r"\bADR\b|\bCDR\b|Linie|Vz\.?$", nm, re.I):
                 continue
-            if land and not isin.startswith(land):
+            # Name gleich, oder onvista führt die Kurzform (Toyota für Toyota Motor); auch Kürzel in Klammern (GSK)
+            names = [toks(nm)] + [toks(m_) for m_ in re.findall(r"\(([^)]+)\)", nm)]
+            same = _legal_tokens(nm) == full or any(t_ and (t_ == core or t_ == core[:len(t_)]) for t_ in names)
+            if not same:
                 continue
-            their = [w for w in _legal_tokens(nm) if w not in ONVISTA_GENERIC]
-            if _legal_tokens(nm) == full:
-                return isin
-            if their == core or (their and (their == core[:len(their)] or core == their[:len(core)])):
-                cands.append(isin)
-        if cands:
-            return cands[0]
+            if not land or isin.startswith(land):
+                hits.append(isin)
+            elif suf and not isin.startswith("US"):
+                other.append(isin)
+        if hits:
+            return hits[0]
+    if other:
+        return other[0]
+    if suf and land:  # zuletzt über das Börsenkürzel (ITX -> Inditex), nur bei genau einem Treffer im Sitzland
+        cand = {x.get("isin") for x in find(base) if x.get("entityType") == "STOCK" and (x.get("isin") or "").startswith(land)}
+        if len(cand) == 1:
+            return cand.pop()
     return None
 
 
@@ -3783,7 +3798,7 @@ def onvista_data(symbol):
     return out
 
 
-def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="Nasdaq", eps_cur="USD"):
+def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="Nasdaq", eps_cur="USD", shares_out=None):
     """Ersatz, wenn Yahoo keine Analystenschätzungen liefert (Yahoo sperrt diese Schnittstelle für manche Server):
     Reinertrag aus einem Konsens für den Gewinn je Aktie (Nasdaq/Zacks oder onvista; Aktienzahl × Gewinn je Aktie,
     in Berichtswährung umgerechnet), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben."""
@@ -3793,10 +3808,23 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     end = datetime.fromisoformat(last["end"])
     shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
     k = fx_rate(eps_cur, currency) if eps_cur and currency and currency != eps_cur else 1.0
+    # Gemeldete Aktienzahl als Ersatz, wenn der Vorjahresgewinn als Basis nicht taugt: Verlust oder starke
+    # Sonderbelastung (bereinigter Konsens > 2,5 × berichteter Gewinn, z. B. GM, AbbVie). Nur bei gleicher Aktienbasis
+    # (keine ADR) – dann wird nur gegen die Gewinnhistorie und den Umsatz geprüft.
+    first = nasdaq.get(end.year + 1) or {}
+    alt = bool(shares_out and k and first.get("avg") and (
+        not shares or not 0.4 <= shares * first["avg"] * k / last["net_income"] <= 2.5))
+    if alt:
+        ni0 = shares_out * first["avg"] * k
+        best = max([p_["net_income"] for p_ in periods if p_.get("net_income")] + [0])
+        if not (0 < ni0 <= max(3 * best, 0.02 * last["revenue"]) and ni0 <= 0.6 * last["revenue"]):
+            alt = False
+        else:
+            shares = shares_out
     if not shares or not k:
         return []
     g = trend_growth(rev_hist)
-    out, rev, prev_ni = [], last["revenue"], last["net_income"]
+    out, rev, prev_ni = [], last["revenue"], (None if alt else last["net_income"])
     for i in (1, 2, 3):
         try:
             d = end.replace(year=end.year + i)
@@ -3806,7 +3834,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
         if not e or not e.get("avg") or e["avg"] <= 0:
             break
         ni = shares * e["avg"] * k
-        if not 0.4 <= ni / prev_ni <= 2.5:
+        if prev_ni and not 0.4 <= ni / prev_ni <= 2.5:
             break  # andere Aktienbasis (ADR-Verhältnis) oder Geschäftsjahr anders zugeordnet
         rev = rev * (1 + g) if g is not None and rev else None
         out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
@@ -4091,7 +4119,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v13")  # v13: Fortschreibung gewichtet das letzte Jahr, Nasdaq/onvista-Abgleich
+    key = (symbol, freq, "v14")  # v13: Fortschreibung gewichtet das letzte Jahr, Nasdaq/onvista-Abgleich
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4160,6 +4188,11 @@ def income_data(symbol, freq):
     eps_row = row("Diluted EPS", "Basic EPS")
     last_col = next((c for c in df.columns if (c.date() if hasattr(c, "date") else c).isoformat() == periods[-1]["end"]), None)
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
+    sh_row = row("Diluted Average Shares", "Basic Average Shares")
+    shares_last = num(sh_row.get(last_col)) if sh_row is not None and last_col is not None else None
+    if not shares_last and sh_row is not None:  # letzte Spalte oft noch ohne Aktienzahl (Sika) -> jüngste vorhandene
+        prev_sh = sorted(((c, num(v)) for c, v in sh_row.items() if num(v)), key=lambda cv: str(cv[0]))
+        shares_last = prev_sh[-1][1] if prev_sh else None
     if freq == "annual":
         us_sym = safe(lambda: us_listing(symbol))
         has_yahoo_est = bool(yq(lambda: len(t.earnings_estimate.index)))
@@ -4178,9 +4211,10 @@ def income_data(symbol, freq):
             ov_eps = {y: e for y, e in ((ov or {}).get("eps") or {}).items() if e["est"] and e["avg"]}
             if ov_eps:
                 ov_est = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, ov_eps, rev_hist, "onvista",
-                                                              ov.get("currency") or out["currency"]), []) or []
+                                                              ov.get("currency") or out["currency"], shares_last), []) or []
         if not out["estimates"] and nasdaq:
-            out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq, rev_hist), []) or []
+            out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq, rev_hist,
+                                                                    shares_out=shares_last if us_sym == symbol else None), []) or []
             # Zacks rechnet mit bereinigtem Gewinn je Aktie; weicht das stark vom berichteten Gewinn ab (Pfizer: 2,94 $
             # bereinigt gegenüber 1,22 $ berichtet), passt die Hochrechnung nicht zur Vorjahresbasis. Dann onvista
             # nehmen, wenn es fürs selbe Jahr deutlich näher am Vorjahr liegt. Nur bei Geschäftsjahr ≈ Kalenderjahr,
@@ -4198,7 +4232,8 @@ def income_data(symbol, freq):
             out["estimates"] = ov_est
         # Konsens beruht meist auf bereinigtem Gewinn (ohne Sondereffekte): starker Sprung zum berichteten Vorjahr kennzeichnen
         e0 = out["estimates"][0] if out["estimates"] else None
-        if e0 and e0.get("ni_consensus") and e0.get("net_income") and periods[-1]["net_income"] > 0                 and e0["net_income"] / periods[-1]["net_income"] > 1.4:
+        if e0 and e0.get("ni_consensus") and e0.get("net_income") and (
+                periods[-1]["net_income"] <= 0 or e0["net_income"] / periods[-1]["net_income"] > 1.4):
             e0["adj_jump"] = True
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
@@ -5486,7 +5521,7 @@ def issuer_holdings(symbol, name, query=""):
     hs = sorted(res["holdings"], key=lambda x: -x["w"])
     by_country = res.get("countries_all") or _sum_by(hs, "country")  # SEC: über alle Positionen, sonst Liste
     out = {"source": res["source"], "url": res["url"], "asof": res.get("asof"), "isin": isin,
-           "synthetic": bool(re.search(r"swap|synthet", (name or "").lower())),
+           "synthetic": bool(re.search(r"\bswap\b|synthet", (name or "").lower())),
            "total": int(res.get("total") or len(hs)), "delayed": bool(res.get("delayed")),
            "countries": _shares(by_country) if by_country else [],
            "sectors": _shares(_sum_by(hs, "sector")),

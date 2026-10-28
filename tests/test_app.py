@@ -1733,6 +1733,27 @@ class TestOnvista(unittest.TestCase):
         self.assertAlmostEqual(est[0]["net_income"], 11.0)          # 1 Mrd. Aktien × 11,00
         self.assertEqual(est[0]["ni_consensus"], "onvista")
 
+    def test_share_count_when_prior_year_depressed(self):
+        # berichteter Gewinn durch Sonderbelastung gedrückt (bereinigter Konsens > 2,5 ×) -> gemeldete Aktienzahl nehmen
+        periods = [{"end": "2024-12-31", "revenue": 180.0, "net_income": 6.0}, {"end": "2025-12-31", "revenue": 185.0, "net_income": 2.8}]
+        eps = {2026: {"avg": 12.0}, 2027: {"avg": 13.0}}
+        self.assertEqual(a.income_estimates_nasdaq(periods, "USD", 2.9, eps, [180.0, 185.0]), [])
+        est = a.income_estimates_nasdaq(periods, "USD", 2.9, eps, [180.0, 185.0], shares_out=0.95)
+        self.assertAlmostEqual(est[0]["net_income"], 11.4)
+        self.assertEqual(len(est), 2)
+        absurd = {2026: {"avg": 120.0}}                                         # > 60 % des Umsatzes -> verwerfen
+        self.assertEqual(a.income_estimates_nasdaq(periods, "USD", 2.9, absurd, [180.0, 185.0], shares_out=0.95), [])
+
+    def test_isin_name_matching(self):
+        import unittest.mock as mock
+        res = {"air liquide": [{"entityType": "STOCK", "name": "Air Liquide", "isin": "FR0000120073"}],
+               "volvo": [{"entityType": "STOCK", "name": "Volvo Car", "isin": "SE0021628898"},
+                         {"entityType": "STOCK", "name": "Volvo B", "isin": "SE0000115446"}]}
+        fake = lambda url, **k: a.json.dumps({"list": res.get(a.urllib.parse.parse_qs(url.split("?")[1])["searchValue"][0], [])}).encode()
+        with mock.patch.object(a, "_fetch", side_effect=fake):
+            self.assertEqual(a._onvista_isin("AI.PA", "L'Air Liquide S.A."), "FR0000120073")
+            self.assertEqual(a._onvista_isin("VOLV-B.ST", "AB Volvo (publ)"), "SE0000115446")   # nicht Volvo Cars
+
     def test_target_from_onvista_page(self):
         today = a.datetime.now().strftime("%Y-%m-%d")
         page = ('"targetPrice":312.25,"numberRecommendations":29,"numberBuyRecommendations":17},"recommendationList":'
