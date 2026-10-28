@@ -1263,6 +1263,12 @@ def chart_extras(m, t, inc, bs, divs):
             avg = avg * kx if avg else None
             if avg and eps[-1][1] > 0 and 0.33 < avg / eps[-1][1] < 3:
                 est.append([(last_d.replace(year=last_d.year + i_)).strftime("%Y-%m-%d"), round(avg, 4)])
+    # zweites Folgejahr (keine Analystenschätzung): Gewinnwachstum des Vorjahres fortgeschrieben, begrenzt
+    est_trend = None
+    if len(est) == 2 and est[0][1] > 0 and est[1][1] > 0:
+        d2 = datetime.strptime(est[1][0], "%Y-%m-%d")
+        est_trend = [d2.replace(year=d2.year + 1).strftime("%Y-%m-%d"),
+                     round(est[1][1] * (1 + clamp(est[1][1] / est[0][1] - 1, -0.30, 0.40)), 4)]
     # Monatskurse (unbereinigt) für Bewertungschart und KGV-Verlauf
     h = safe(lambda: t.history(period="7y", interval="1mo", auto_adjust=False))
     prices = []
@@ -1279,7 +1285,7 @@ def chart_extras(m, t, inc, bs, divs):
             cur = [v for d, v in eps_dt if d <= ts]
             if cur and cur[-1] > 0:
                 pe_series.append([ts, round(c / cur[-1], 2)])
-    m["valchart"] = {"eps": eps, "est": est, "prices": prices, "pe_norm": round(pe_norm, 1), "pe": pe_series,
+    m["valchart"] = {"eps": eps, "est": est, "est_trend": est_trend, "prices": prices, "pe_norm": round(pe_norm, 1), "pe": pe_series,
                      "pe_avg": round(sum(x[1] for x in pe_series) / len(pe_series), 2) if pe_series else None}
     # Bilanz über die Jahre
     def brow(*names):

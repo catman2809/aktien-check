@@ -794,6 +794,7 @@ table.trk tr:last-child td{border-bottom:0}
 @media (max-width:640px){.about-row{padding:11px 16px}}
 .legend i.box.est{background:color-mix(in srgb,var(--text-3) 30%,transparent);border:1.5px solid var(--text-3)}
 .inc-est-lab{font-size:11.5px;fill:var(--text-3);font-weight:600}
+.vc-fwd{font-size:11.5px;fill:var(--accent);font-weight:700}
 .inc-est-note{display:block;color:var(--text-3);font-size:12px;margin-top:4px}
 .legend i.mar.op{border-top-style:dashed}
 .legend i.mar.op::after{border-radius:1.5px}
@@ -2740,6 +2741,12 @@ function initValChart(d) {
   let last = 0;
   new ResizeObserver(() => { const w = $("#vc-wrap")?.clientWidth; if (w && w !== last) { last = w; drawValChart(); } }).observe($("#vc-wrap"));
 }
+function vcFwdNote(fwd) {
+  const cons = fwd.filter(f => f.kind === "consensus").map(f => f.label), trend = fwd.find(f => f.kind === "trend");
+  return `<span>KGV-Prognose = heutiger Kurs / erwarteter Gewinn je Aktie.</span> <span>${esc(cons.join(" / "))}: Analystenkonsens.</span>` +
+    (trend ? ` <span>${esc(trend.label)}: Gewinnwachstum fortgeschrieben, keine Analystenschätzung.</span>` : "") +
+    ` <span>Bleibt der Kurs gleich und tritt der Gewinn ein, sinkt das KGV entsprechend.</span>`;
+}
 function drawValChart() {
   const d = VC.d, v = d?.valchart, wrap = $("#vc-wrap"); if (!v || !wrap) return;
   document.querySelectorAll("#vc-seg button").forEach(b => b.classList.toggle("on", b.dataset.m === VC.mode));
@@ -2747,14 +2754,19 @@ function drawValChart() {
   const toTs = s_ => new Date(s_ + "T00:00:00").getTime();
   const P = v.prices, t0 = P[0][0];
   const epsAll = [...v.eps.map(e => [toTs(e[0]), e[1], false]), ...(v.est || []).map(e => [toTs(e[0]), e[1], true])];
-  const t1 = Math.max(P[P.length - 1][0], ...epsAll.map(e => e[0]));
+  // KGV-Prognose: heutiger Kurs / erwarteter Gewinn je Aktie (Konsens für laufendes und nächstes GJ, danach Fortschreibung)
+  const price = d.price || P[P.length - 1][1];
+  const fwd = VC.mode === "pe" ? [...(v.est || []).map(e => ({t: toTs(e[0]), eps: e[1], kind: "consensus"})),
+    ...(v.est_trend ? [{t: toTs(v.est_trend[0]), eps: v.est_trend[1], kind: "trend"}] : [])]
+    .filter(f => f.eps > 0).map(f => ({...f, pe: price / f.eps, label: new Date(f.t).getFullYear() + "e"})) : [];
+  const t1 = Math.max(P[P.length - 1][0], ...epsAll.map(e => e[0]), ...fwd.map(f => f.t));
   const X = t => m.l + (t - t0) / (t1 - t0) * pw;
   const yrs = [...new Set(P.map(p => new Date(p[0]).getFullYear()))].filter(y => new Date(y, 0, 1).getTime() >= t0);
   const axisX = yrs.filter((y, i) => i % Math.ceil(yrs.length / (W < 420 ? 4 : 7)) === 0)
     .map(y => `<text x="${X(new Date(y, 0, 1).getTime()).toFixed(1)}" y="${H - 6}" text-anchor="middle">${y}</text>`).join("");
   if (VC.mode === "pe") {
     const S = v.pe || []; if (S.length < 2) { wrap.innerHTML = `<div class="chart-msg">Kein KGV-Verlauf verfügbar (Verluste oder zu wenig Daten).</div>`; return; }
-    const vals = [...S.map(x => x[1]), v.pe_avg, v.pe_norm].filter(x => x != null);
+    const vals = [...S.map(x => x[1]), v.pe_avg, v.pe_norm, ...fwd.map(f => f.pe)].filter(x => x != null);
     let lo = Math.min(...vals) * 0.9, hi = Math.max(...vals) * 1.08; const {ticks} = niceTicks(lo, hi, 4);
     const Y = y => m.t + (1 - (y - lo) / (hi - lo)) * ph;
     wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="KGV-Verlauf">
@@ -2762,12 +2774,19 @@ function drawValChart() {
       <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${Y(t) + 4}" text-anchor="end">${nf(t, 0)}</text>`).join("")}${axisX}</g>
       ${v.pe_avg ? `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(v.pe_avg)}" y2="${Y(v.pe_avg)}" stroke="var(--text-3)" stroke-dasharray="5 4"/>` : ""}
       <path d="${S.map((x, i) => `${i ? "L" : "M"}${X(x[0]).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      ${fwd.length ? `<path d="M${X(S[S.length - 1][0]).toFixed(1)},${Y(S[S.length - 1][1]).toFixed(1)}${fwd.map(f => `L${X(f.t).toFixed(1)},${Y(f.pe).toFixed(1)}`).join("")}"
+          fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
+        ${fwd.map(f => `<circle cx="${X(f.t).toFixed(1)}" cy="${Y(f.pe).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"${f.kind === "trend" ? ` stroke-dasharray="2 2"` : ""}><title>KGV ${f.label}: ${nf(f.pe, 1)}${f.kind === "trend" ? " (Fortschreibung)" : " (Analystenkonsens)"}</title></circle>
+          <text class="vc-fwd" x="${X(f.t).toFixed(1)}" y="${(Y(f.pe) - 10).toFixed(1)}" text-anchor="middle">${nf(f.pe, 1)}</text>`).join("")}` : ""}
     </svg>`;
     const cur = S[S.length - 1][1];
-    $("#vc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">KGV aktuell <b class="num">${nf(cur, 1)}</b> · Ø ${nf(v.pe_avg, 1)}</span>
+    $("#vc-sub").innerHTML = `<span style="color:var(--text-2);margin:0">KGV aktuell <b class="num">${nf(cur, 1)}</b> · Ø ${nf(v.pe_avg, 1)}${fwd.length
+        ? ` · Prognose ${fwd.map(f => `<span>${f.label}</span> <b class="num">${nf(f.pe, 1)}</b>`).join(" · ")}` : ""}</span>
       <span>${cur > v.pe_avg * 1.15 ? "über dem eigenen Durchschnitt" : cur < v.pe_avg * 0.85 ? "unter dem eigenen Durchschnitt" : "nahe am Durchschnitt"}</span>`;
     $("#vc-foot").innerHTML = `<div class="legend"><span style="color:var(--accent)"><i></i><span style="color:var(--text-2)">KGV (Kurs / Gewinn des letzten Geschäftsjahres)</span></span>
-      <span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Durchschnitt</span></span></div>`;
+      <span style="color:var(--text-3)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">Durchschnitt</span></span>
+      ${fwd.length ? `<span style="color:var(--accent)"><i style="border-top-style:dashed"></i><span style="color:var(--text-2)">KGV-Prognose</span></span>` : ""}</div>
+      ${fwd.length ? `<span class="inc-est-note">${vcFwdNote(fwd)}</span>` : ""}`;
     return;
   }
   // Faire Linie: Gewinn je Geschäftsjahr × Normal-KGV, gilt ab Ende des Vorjahres bis Ende des Geschäftsjahres

@@ -224,3 +224,13 @@ DEPOT_WILD += [
     ("{*}: {0} {*1} (Prognose, +{1} %, davon bereits gezahlt {2})", "{*}: {0} {*1} (forecast, +{1}%, of which already paid {2})"),
     ("{*}: {0} {*1} (Prognose, +{1} %)", "{*}: {0} {*1} (forecast, +{1}%)"),
 ]
+DEPOT_EXACT.update({
+    "KGV-Prognose": "P/E forecast", "KGV-Prognose = heutiger Kurs / erwarteter Gewinn je Aktie.": "P/E forecast = today's price / expected earnings per share.",
+    "Bleibt der Kurs gleich und tritt der Gewinn ein, sinkt das KGV entsprechend.": "If the price stays the same and the earnings materialise, the P/E falls accordingly.",
+})
+DEPOT_WILD += [
+    ("{*}: Analystenkonsens.", "{*}: analyst consensus."),
+    ("{*}: Gewinnwachstum fortgeschrieben, keine Analystenschätzung.", "{*}: earnings growth extrapolated, no analyst estimate."),
+    ("KGV {*}: {0} (Analystenkonsens)", "P/E {*}: {0} (analyst consensus)"),
+    ("KGV {*}: {0} (Fortschreibung)", "P/E {*}: {0} (extrapolation)"),
+]
