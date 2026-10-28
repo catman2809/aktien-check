@@ -204,3 +204,8 @@ DEPOT_WILD += [
     ("Prognose · Konsens von {0} Analysten (Gewinn: {1})", "Forecast · consensus of {0} analysts (earnings: {1})"),
     ("Prognose · Konsens von {0} Analysten", "Forecast · consensus of {0} analysts"),
 ]
+DEPOT_EXACT.update({
+    "(abgeleitet)": "(derived)",
+    "Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).":
+        "Operating income derived: expected net margin plus the usual gap to the operating margin (median of recent periods).",
+})

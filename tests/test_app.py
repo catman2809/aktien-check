@@ -1613,6 +1613,21 @@ class TestEnglish(unittest.TestCase):
                          "Events next week:\n• Tue Oct 27 SAP SE: Quarterly results")
 
 
+class TestIncomeEstimates(unittest.TestCase):
+    def test_operating_margin_derived(self):
+        per = lambda m, om: {"margin": m, "op_margin": om}
+        periods = [per(0.20, 0.26), per(0.09, 0.23), per(0.19, 0.26)]   # Mittleres Jahr mit Sondereffekt im Reinertrag
+        est = [{"revenue": 100.0, "margin": 0.21}, {"revenue": 110.0, "margin": None}]
+        a.add_op_estimates(periods, est, 3)
+        self.assertAlmostEqual(est[0]["op_margin"], 0.21 + 0.07)          # Median der Differenzen (0,06 / 0,14 / 0,07)
+        self.assertAlmostEqual(est[0]["op_income"], 28.0)
+        self.assertTrue(est[0]["op_derived"])
+        self.assertNotIn("op_margin", est[1])                              # ohne Nettomarge keine Ableitung
+        est2 = [{"revenue": 100.0, "margin": 0.1}]
+        a.add_op_estimates([per(0.1, 0.7), per(0.1, 0.7)], est2, 3)       # unplausible Differenz -> nichts
+        self.assertNotIn("op_margin", est2[0])
+
+
 class TestMovers(unittest.TestCase):
     def test_top_and_flop(self):
         import unittest.mock as um

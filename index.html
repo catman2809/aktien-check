@@ -4034,7 +4034,8 @@ function incEstNote(E) {
   const cons = E.filter(p => p.est === "consensus").map(p => p.label), trend = E.find(p => p.est === "trend");
   return `<span>e = erwartet.</span> <span>${esc(cons.join(" / "))}: Analystenkonsens (Yahoo Finance).</span>` +
     (trend ? ` <span>${esc(trend.label)}: eigene Fortschreibung des Trends, dafür gibt es keine Analystenschätzung.</span>` : "") +
-    (E.some(p => p.net_income != null) ? ` <span>Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.</span>` : "");
+    (E.some(p => p.net_income != null) ? ` <span>Reinertrag aus dem erwarteten Gewinn je Aktie berechnet.</span>` : "") +
+    (E.some(p => p.op_derived) ? ` <span>Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).</span>` : "");
 }
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
@@ -4081,8 +4082,12 @@ function drawIncome() {
   const estLine = estIdx.length && actIdx.length ? "M" + pts([actIdx[actIdx.length - 1], ...estIdx]).join("L") : "";
   const sepX = E.length ? m.l + cw * nAct : null;
   let opLine = "", pen = false;
-  P.forEach((p, i) => { if (p.op_margin == null) { pen = false; return; }
+  P.forEach((p, i) => { if (i >= nAct || p.op_margin == null) { pen = false; return; }
     opLine += `${pen ? "L" : "M"}${cx(i).toFixed(1)},${Ym(p.op_margin).toFixed(1)}`; pen = true; });
+  // abgeleitete operative Marge der Prognosen: vom letzten gemeldeten Punkt aus, heller und feiner gestrichelt
+  const opEst = P.map((p, i) => i).filter(i => i >= nAct && P[i].op_margin != null);
+  const opAnchor = P[nAct - 1]?.op_margin != null ? [nAct - 1] : [];
+  const opEstLine = opEst.length ? "M" + [...opAnchor, ...opEst].map(i => `${cx(i).toFixed(1)},${Ym(P[i].op_margin).toFixed(1)}`).join("L") : "";
   const tickV = t => nf(t, step < 1 ? (step < 0.1 ? 2 : 1) : 0);
   const aria = `Erfolgsrechnung ${INC.freq === "annual" ? "jährlich" : "vierteljährlich"}: ` +
     P.map(p => `${p.label} Umsatz ${big(p.revenue).join(" ")}, Reinertrag ${big(p.net_income).join(" ")}, Nettomarge ${pc(p.margin, 1)}` +
@@ -4100,7 +4105,8 @@ function drawIncome() {
       <text class="inc-est-lab" x="${(sepX + 6).toFixed(1)}" y="${m.t + 11}">Prognose</text>` : ""}
     ${P.map((p, i) => bar(cx(i) - bw - gap / 2, p.revenue, "--inc-rev", p.est) + bar(cx(i) + gap / 2, p.net_income, "--inc-ni", p.est)).join("")}
     ${hasOp ? `<path d="${opLine}" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
-      ${P.map((p, i) => p.op_margin == null ? "" : `<rect x="${(cx(i) - 4).toFixed(1)}" y="${(Ym(p.op_margin) - 4).toFixed(1)}" width="8" height="8" rx="1.5" fill="var(--surface)" stroke="var(--text-2)" stroke-width="2"/>`).join("")}` : ""}
+      ${opEstLine ? `<path d="${opEstLine}" fill="none" stroke="var(--text-2)" stroke-opacity=".55" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+      ${P.map((p, i) => p.op_margin == null ? "" : `<rect x="${(cx(i) - 4).toFixed(1)}" y="${(Ym(p.op_margin) - 4).toFixed(1)}" width="8" height="8" rx="1.5" fill="var(--surface)" stroke="var(--text-2)" stroke-width="2"${p.est ? ` stroke-opacity=".55"` : ""}/>`).join("")}` : ""}
     <path d="${line}" fill="none" stroke="var(--inc-mar)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     ${estLine ? `<path d="${estLine}" fill="none" stroke="var(--inc-mar)" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round"/>` : ""}
     ${P.map((p, i) => p.margin == null ? "" : `<circle cx="${cx(i).toFixed(1)}" cy="${Ym(p.margin).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--inc-mar)" stroke-width="2"${p.est ? ` stroke-dasharray="3 2"` : ""}/>`).join("")}
@@ -4129,7 +4135,7 @@ function drawIncome() {
         : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">Fortschreibung des Trends, keine Analystenschätzung</span>` : ""}
       <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>
       ${p.net_income != null ? `<span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}${rngTxt(p.ni_low, p.ni_high)}</span>` : ""}
-      ${p.op_income != null ? `<span style="display:block">Operatives Ergebnis: ${big(p.op_income).join(" ")} ${esc(D.currency)}</span>` : ""}
+      ${p.op_income != null ? `<span style="display:block">Operatives Ergebnis: ${big(p.op_income).join(" ")} ${esc(D.currency)}${p.op_derived ? ` <span style="color:var(--text-3)">(abgeleitet)</span>` : ""}</span>` : ""}
       ${p.margin != null ? `<span style="display:block">Nettomarge: ${pc(p.margin, 1)}</span>` : ""}
       ${p.op_margin != null ? `<span style="display:block">Operative Marge: ${pc(p.op_margin, 1)}</span>` : ""}`;
     tip.style.display = "block";

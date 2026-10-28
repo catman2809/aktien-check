@@ -3523,12 +3523,30 @@ def income_estimates_q(t, periods, currency, eps_last):
     return out
 
 
+def add_op_estimates(periods, estimates, n):
+    """Operatives Ergebnis für die Prognosen ableiten (Analysten-Konsens gibt es dafür bei Yahoo nicht):
+    operative Marge = prognostizierte Nettomarge + übliche Differenz zwischen operativer und Nettomarge
+    (Median der letzten n gemeldeten Perioden; Zinsen, Steuern und Finanzergebnis sind meist recht stabil)."""
+    gaps = sorted(p_["op_margin"] - p_["margin"] for p_ in periods[-n:]
+                  if p_.get("op_margin") is not None and p_.get("margin") is not None)
+    if len(gaps) < min(2, n):
+        return
+    gap = gaps[len(gaps) // 2] if len(gaps) % 2 else (gaps[len(gaps) // 2 - 1] + gaps[len(gaps) // 2]) / 2
+    if not -0.1 <= gap <= 0.4:
+        return  # ungewöhnlich große Differenz (Sondereffekte) -> keine Ableitung
+    for e in estimates:
+        if e.get("margin") is not None:
+            e["op_margin"] = e["margin"] + gap
+            e["op_income"] = e["op_margin"] * e["revenue"]
+            e["op_derived"] = True
+
+
 def income_data(symbol, freq):
     """Erfolgsrechnung (Umsatz, Reinertrag, Nettomarge) je Geschäftsjahr oder Quartal, in Berichtswährung."""
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v3")  # v3: mit Prognosen (auch Quartale)
+    key = (symbol, freq, "v4")  # v4: Prognosen inkl. operativem Ergebnis
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3590,6 +3608,7 @@ def income_data(symbol, freq):
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     est_fn = income_estimates if freq == "annual" else income_estimates_q
     out["estimates"] = safe(lambda: est_fn(t, periods, out["currency"], eps_last), []) or []
+    safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     INCOME_CACHE[key] = (time.time(), out)
     return out
 
