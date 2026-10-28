@@ -3803,7 +3803,13 @@ def income_data(symbol, freq):
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     if freq == "annual":
         us_sym = safe(lambda: us_listing(symbol))
-        nasdaq = safe(lambda: nasdaq_eps_forecast(us_sym)) if us_sym else None
+        nasdaq = None
+        if us_sym:
+            try:
+                nasdaq = nasdaq_eps_forecast(us_sym)
+                LOG.info("[Nasdaq] %s: Gewinnprognosen für %s", us_sym, ", ".join(map(str, sorted(nasdaq))) or "keine Jahre")
+            except Exception as e:
+                LOG.warning("[Nasdaq] %s: nicht erreichbar (%s)", us_sym, type(e).__name__)
         out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq), []) or []
     else:
         out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
