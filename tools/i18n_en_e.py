@@ -251,3 +251,8 @@ DEPOT_WILD += [
      "{*}: revenue and net income extrapolated, no freely available analyst estimate exists for it."),
 ]
 DEPOT_WILD += [("Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens ({0} Analysten)", "Revenue extrapolated · net income from the Nasdaq consensus ({0} analysts)")]
+DEPOT_WILD += [
+    ("{*}: Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben.",
+     "{*}: net income from the EPS consensus (Nasdaq, data from Zacks), revenue extrapolated with the growth of recent years."),
+    ("Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens ({0} Analysten)", "Revenue extrapolated · net income from the Nasdaq consensus ({0} analysts)"),
+]

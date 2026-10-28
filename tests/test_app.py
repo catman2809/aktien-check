@@ -1660,6 +1660,24 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertIsNone(est[0]["margin"])
 
 
+class TestIncomeFallbacks(unittest.TestCase):
+    PER = [{"end": f"{y}-12-31", "revenue": r, "net_income": r * 0.2, "margin": 0.2} for y, r in ((2023, 80.0), (2024, 90.0), (2025, 100.0))]
+
+    def test_nasdaq_only(self):
+        nq = {2026: {"avg": 2.2, "n": 9}, 2027: {"avg": 2.5, "n": 8}, 2028: {"avg": 2.8, "n": 3}}
+        est = a.income_estimates_nasdaq(self.PER, "USD", 2.0, nq, [80.0, 90.0, 100.0])
+        self.assertEqual([e["label"] for e in est], ["2026e", "2027e", "2028e"])
+        self.assertAlmostEqual(est[0]["net_income"], 10 * 2.2)                 # 10 Aktien (20 / 2,00) × 2,20
+        self.assertAlmostEqual(est[0]["revenue"], 100 * (1 + 0.1111), places=2)  # Median-Wachstum der letzten Jahre
+        self.assertTrue(est[0]["rev_trend"])
+        self.assertEqual(est[2]["n_eps"], 3)
+
+    def test_trend_only(self):
+        est = a.income_estimates_trend(self.PER)
+        self.assertTrue(est and all(e["est"] == "trend" for e in est))
+        self.assertAlmostEqual(est[0]["net_income"], est[0]["revenue"] * 0.2)
+
+
 class TestFcfEstimates(unittest.TestCase):
     def test_conversion_and_matching(self):
         import pandas as pd

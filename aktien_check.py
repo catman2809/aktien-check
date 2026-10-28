@@ -3508,6 +3508,67 @@ def nasdaq_eps_forecast(us_sym):
     return out
 
 
+def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist):
+    """Ersatz, wenn Yahoo keine Analystenschätzungen liefert (Yahoo sperrt diese Schnittstelle für manche Server):
+    Reinertrag aus dem Nasdaq-Konsens (Zacks) für den Gewinn je Aktie (Aktienzahl × Gewinn je Aktie, in
+    Berichtswährung umgerechnet), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben."""
+    if not periods or not nasdaq:
+        return []
+    last = periods[-1]
+    end = datetime.fromisoformat(last["end"])
+    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    k = fx_rate("USD", currency) if currency and currency != "USD" else 1.0
+    if not shares or not k:
+        return []
+    growth = [b / a - 1 for a, b in zip(rev_hist, rev_hist[1:]) if a and b and a > 0]
+    g = clamp(sorted(growth)[len(growth) // 2], -0.10, 0.30) if growth else None
+    out, rev, prev_ni = [], last["revenue"], last["net_income"]
+    for i in (1, 2, 3):
+        try:
+            d = end.replace(year=end.year + i)
+        except ValueError:
+            d = end.replace(year=end.year + i, day=28)
+        e = nasdaq.get(d.year)
+        if not e or not e.get("avg") or e["avg"] <= 0:
+            break
+        ni = shares * e["avg"] * k
+        if not 0.4 <= ni / prev_ni <= 2.5:
+            break  # andere Aktienbasis (ADR-Verhältnis) oder Geschäftsjahr anders zugeordnet
+        rev = rev * (1 + g) if g is not None and rev else None
+        out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
+                    "margin": ni / rev if rev else None, "op_income": None, "op_margin": None,
+                    "est": "consensus", "n_rev": 0, "n_eps": e.get("n") or 0, "ni_consensus": "Nasdaq", "rev_trend": rev is not None,
+                    "ni_low": shares * e["low"] * k if e.get("low") else None, "ni_high": shares * e["high"] * k if e.get("high") else None})
+        prev_ni = ni
+    return out
+
+
+def income_estimates_trend(periods):
+    """Letzte Stufe ohne jede Analystenschätzung: Umsatz mit dem mittleren Wachstum der letzten Jahre fortgeschrieben,
+    Reinertrag = Umsatz × mittlere Nettomarge – bis einschließlich des nächsten Geschäftsjahres."""
+    if len(periods) < 3:
+        return []
+    revs = [p_["revenue"] for p_ in periods]
+    growth = sorted(b / a - 1 for a, b in zip(revs, revs[1:]) if a and b and a > 0)
+    margins = sorted(p_["margin"] for p_ in periods[-3:] if p_.get("margin") is not None)
+    if not growth or not margins:
+        return []
+    g, mg = clamp(growth[len(growth) // 2], -0.10, 0.25), margins[len(margins) // 2]
+    end, limit = datetime.fromisoformat(periods[-1]["end"]), datetime.now() + timedelta(days=730)
+    out, rev = [], revs[-1]
+    for i in (1, 2, 3):
+        try:
+            d = end.replace(year=end.year + i)
+        except ValueError:
+            d = end.replace(year=end.year + i, day=28)
+        if d > limit:
+            break
+        rev = rev * (1 + g)
+        out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": rev * mg, "margin": mg,
+                    "op_income": None, "op_margin": None, "est": "trend", "n_rev": 0, "n_eps": 0})
+    return out
+
+
 def income_estimates(t, periods, currency, eps_last, nasdaq=None):
     """Prognosen für die Erfolgsrechnung: laufendes und folgendes Geschäftsjahr aus dem Analystenkonsens (Yahoo),
     das zweite Folgejahr als Fortschreibung des Trends (dafür gibt es keinen Konsens). Umsatz direkt aus der
@@ -3732,7 +3793,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v7")  # v7: + Nasdaq-Konsens fürs zweite Folgejahr
+    key = (symbol, freq, "v8")  # v8: Nasdaq-Konsens auch als Ersatz für fehlende Yahoo-Schätzungen
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3803,6 +3864,7 @@ def income_data(symbol, freq):
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     if freq == "annual":
         us_sym = safe(lambda: us_listing(symbol))
+        has_yahoo_est = bool(safe(lambda: len(t.earnings_estimate.index)))
         nasdaq = None
         if us_sym:
             try:
@@ -3811,6 +3873,13 @@ def income_data(symbol, freq):
             except Exception as e:
                 LOG.warning("[Nasdaq] %s: nicht erreichbar (%s)", us_sym, type(e).__name__)
         out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq), []) or []
+        if not out["estimates"] and nasdaq:  # keine Yahoo-Schätzungen (z. B. auf dem Server gesperrt) -> Nasdaq-Konsens
+            out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq,
+                                                                    [p_["revenue"] for p_ in periods]), []) or []
+        if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
+            out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
+        LOG.info("[Prognose] %s: Yahoo-Schätzungen %s, Nasdaq %s -> %s", symbol, "ja" if has_yahoo_est else "nein",
+                 "ja" if nasdaq else "nein", ", ".join(e_["label"] for e_ in out["estimates"]) or "keine Prognosen")
     else:
         out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
