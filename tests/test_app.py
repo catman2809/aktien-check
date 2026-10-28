@@ -1737,6 +1737,15 @@ class TestOnvista(unittest.TestCase):
         self.assertEqual([it["firm"] for it in m["target_items"]], ["Jp Morgan", "Jefferies & Co"])  # alte Ziele weg
         self.assertEqual((m["target_low"], m["target_high"]), (300, 345))
 
+    def test_stale_onvista_consensus_uses_fresh_targets(self):
+        import unittest.mock as mock
+        items = [{"firm": f"B{i}", "value": v, "date": "", "rating": "", "age": 3} for i, v in enumerate((258, 250, 250, 240, 235, 201, 175))]
+        with mock.patch.object(a, "onvista_target", return_value={"mean": 199.57, "n": 34, "items": items}):
+            m = {"price": 211.2, "currency": "EUR", "upside": None}
+            a.apply_onvista_target(m, "SAP.DE")
+        self.assertEqual((m["target"], m["target_n"]), (240, 7))     # Konsens hinkt nach -> Median der frischen Ziele
+        self.assertNotIn("age", m["target_items"][0])
+
 
 class TestFcfEstimates(unittest.TestCase):
     def test_conversion_and_matching(self):

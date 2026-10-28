@@ -3553,6 +3553,10 @@ def us_listing(symbol):
         return hit[1] or None
     res = safe(lambda: search_symbols(symbol.split(".")[0]), []) or []
     own = next((r_ for r_ in res if r_.get("symbol") == symbol), None)
+    if not own:
+        own = next((r_ for r_ in safe(lambda: search_symbols(symbol), []) or [] if r_.get("symbol") == symbol), None)
+    if own and own.get("name"):  # ADR über den Firmennamen suchen (Börsenkürzel der Heimatbörse ≠ US-Kürzel)
+        res = res + (safe(lambda: search_symbols(own["name"]), []) or [])
     norm = lambda n: " ".join(_legal_tokens(n or ""))
     us = next((r_["symbol"] for r_ in res if own and r_.get("exchange") in ("NYSE", "NASDAQ", "NYSE American")
                and "." not in r_["symbol"] and norm(r_.get("name")) == norm(own.get("name"))), "")
@@ -3583,14 +3587,14 @@ def nasdaq_price_target(us_sym):
 ONVISTA_TARGET_CACHE = {}  # Symbol -> (Zeit, Kursziel-Konsens von onvista oder None)
 
 
-def onvista_target(symbol):
+def onvista_target(symbol, name=None):
     """Kursziel-Konsens von der onvista-Analyseseite (Mittel, Zahl der Empfehlungen) plus die jüngsten Kursziele
     einzelner Banken (Euro). 12 Stunden zwischengespeichert."""
     hit = ONVISTA_TARGET_CACHE.get(symbol)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
     out = None
-    isin = onvista_isin(symbol)
+    isin = onvista_isin(symbol, name)
     if isin:  # der Namensteil der Adresse ist beliebig, onvista leitet auf die richtige Seite weiter
         page = _fetch(f"https://www.onvista.de/aktien/analysen/Aktie-{isin}", headers={**ONVISTA_UA, "Accept": "text/html"},
                       timeout=20).decode("utf-8", "replace")
@@ -3603,7 +3607,7 @@ def onvista_target(symbol):
                 dt = safe(lambda: datetime.fromisoformat(r_["date"][:10]))
                 if v and dt and (datetime.now() - dt).days <= 180:
                     items.append({"firm": html_mod.unescape(str(r_.get("bank") or "k. A.")).title(), "value": v,
-                                  "date": dt.strftime("%d.%m."), "rating": r_.get("rating") or ""})
+                                  "date": dt.strftime("%d.%m."), "rating": r_.get("rating") or "", "age": (datetime.now() - dt).days})
             out = {"mean": num(c.group(1)), "n": int(c.group(2)), "items": sorted(items, key=lambda x: -x["value"])}
     ONVISTA_TARGET_CACHE[symbol] = (time.time(), out)
     return out
@@ -3613,7 +3617,7 @@ def apply_onvista_target(m, symbol):
     """Kursziel aus dem onvista-Konsens (Euro), wenn noch keines vorliegt – v. a. für deutsche und europäische Werte."""
     if m.get("upside") is not None or not m.get("price"):
         return
-    tg = onvista_target(symbol)
+    tg = onvista_target(symbol, m.get("name"))
     if not tg or tg["n"] < 2:
         return
     cur = m.get("currency") or "EUR"
@@ -3622,13 +3626,19 @@ def apply_onvista_target(m, symbol):
         return  # Währung oder Aktienbasis passt offenbar nicht
     vals = [it["value"] * k for it in tg["items"]]
     m["target"] = tg["mean"] * k
-    m["upside"] = m["target"] / m["price"] - 1
+    fresh = sorted(it["value"] * k for it in tg["items"] if it.get("age", 999) <= 30)
+    fresh_med = (fresh[len(fresh) // 2] if len(fresh) % 2 else (fresh[len(fresh) // 2 - 1] + fresh[len(fresh) // 2]) / 2) if fresh else None
     m["target_low"] = min(vals) if len(vals) >= 2 else None
     m["target_high"] = max(vals) if len(vals) >= 2 else None
     m["target_n"] = tg["n"]
     m["target_src"] = f"Konsens von {tg['n']} Analysten (onvista)"
+    if len(fresh) >= 5 and abs(fresh_med / m["target"] - 1) > 0.15:  # Konsens hinkt nach (z. B. nach Quartalszahlen)
+        m["target"], m["target_n"] = fresh_med, len(fresh)
+        m["target_src"] = (f"Median der {len(fresh)} Kursziele der letzten 30 Tage (onvista); "
+                           f"der ältere Konsens von {tg['n']} Analysten liegt bei {tg['mean'] * k:.2f}")
+    m["upside"] = m["target"] / m["price"] - 1
     if tg["items"]:
-        m["target_items"] = [{**it, "value": it["value"] * k} for it in tg["items"]]
+        m["target_items"] = [{**{k_: v_ for k_, v_ in it.items() if k_ != "age"}, "value": it["value"] * k} for it in tg["items"]]
 
 
 def apply_nasdaq_target(m, symbol):
@@ -3682,11 +3692,11 @@ ONVISTA_DE_SUFFIX = {"DE", "F", "BE", "MU", "SG", "HM", "DU", "HA"}
 ONVISTA_ISIN = {}         # Symbol -> (Zeit, ISIN oder "")
 
 
-def onvista_isin(symbol):
+def onvista_isin(symbol, name=None):
     hit = ONVISTA_ISIN.get(symbol)
-    if hit and time.time() - hit[0] < 7 * 86400:
+    if hit and (hit[1] or not name) and time.time() - hit[0] < 7 * 86400:
         return hit[1] or None
-    isin = _onvista_isin(symbol)
+    isin = _onvista_isin(symbol, name)
     ONVISTA_ISIN[symbol] = (time.time(), isin or "")
     return isin
 
@@ -3708,9 +3718,15 @@ def onvista_rating_news(symbol):
     return out
 
 
-def _onvista_isin(symbol):
+ONVISTA_ISIN_COUNTRY = {"PA": "FR", "AS": "NL", "BR": "BE", "LS": "PT", "MI": "IT", "MC": "ES", "SW": "CH", "VI": "AT",
+                        "CO": "DK", "ST": "SE", "OL": "NO", "HE": "FI", "L": "GB", "IR": "IE", "T": "JP", "HK": "",
+                        "TO": "CA", "AX": "AU", "WA": "PL"}
+ONVISTA_GENERIC = {"corporation", "corp", "holding", "holdings", "group", "limited", "ltd", "company", "co", "the", "inc"}
+
+
+def _onvista_isin(symbol, name=None):
     """ISIN eines Werts über die onvista-Suche: deutsche Notierungen über das Börsenkürzel (SIE.DE -> SIE),
-    sonst über den gleichen Firmennamen wie bei Yahoo."""
+    sonst über den Firmennamen (Kernname ohne Rechtsform; ISIN-Land muss zum Börsenplatz passen)."""
     base, _, suf = symbol.partition(".")
     find = lambda q: (json.loads(_fetch("https://api.onvista.de/api/v1/instruments/query?" + urllib.parse.urlencode(
         {"searchValue": q, "limit": 10}), headers=ONVISTA_UA, timeout=15)) or {}).get("list") or []
@@ -3718,12 +3734,30 @@ def _onvista_isin(symbol):
         hit = next((x for x in find(base) if x.get("entityType") == "STOCK" and (x.get("symbol") or "").upper() == base.upper()), None)
         if hit:
             return hit.get("isin")
-    own = next((r_ for r_ in safe(lambda: search_symbols(base), []) or [] if r_.get("symbol") == symbol), None)
-    if not own:
+    if not name:
+        own = next((r_ for q in (symbol, base) for r_ in safe(lambda: search_symbols(q), []) or [] if r_.get("symbol") == symbol), None)
+        name = own and own.get("name")
+    core = [w for w in _legal_tokens(name or "") if w not in ONVISTA_GENERIC]
+    if not core:
         return None
-    norm = lambda n: " ".join(_legal_tokens(n or ""))
-    hit = next((x for x in find(own["name"]) if x.get("entityType") == "STOCK" and norm(x.get("name")) == norm(own["name"])), None)
-    return hit.get("isin") if hit else None
+    land = ONVISTA_ISIN_COUNTRY.get(suf, "") if suf else "US"
+    full = _legal_tokens(name)
+    cands = []
+    for q in dict.fromkeys(q_ for q_ in (" ".join(core), core[0], " ".join(core[1:])) if q_):
+        for x in find(q):
+            nm, isin = x.get("name") or "", x.get("isin") or ""
+            if x.get("entityType") != "STOCK" or re.search(r"\bADR\b|\bCDR\b|Linie|Vz\.?$", nm, re.I):
+                continue
+            if land and not isin.startswith(land):
+                continue
+            their = [w for w in _legal_tokens(nm) if w not in ONVISTA_GENERIC]
+            if _legal_tokens(nm) == full:
+                return isin
+            if their == core or (their and (their == core[:len(their)] or core == their[:len(core)])):
+                cands.append(isin)
+        if cands:
+            return cands[0]
+    return None
 
 
 def onvista_data(symbol):
