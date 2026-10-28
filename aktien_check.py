@@ -10,6 +10,7 @@ import gzip
 import hashlib
 import heapq
 import hmac
+import html as html_mod
 import io
 import itertools
 import http.cookies
@@ -2994,7 +2995,7 @@ def firm_key(firm):
             "gs": "goldmansachs", "ms": "morganstanley"}.get(k, k)
 
 
-def news_targets(company, currency, price, siblings=(), days=90):
+def news_targets(company, currency, price, siblings=(), days=90, symbol=None):
     """Median der Analysten-Kursziele aus Schlagzeilen (nur Börsenwährung, je Analysehaus die neueste Meldung)."""
     out = {"median": None, "n": 0, "items": []}
     if not price:
@@ -3002,9 +3003,12 @@ def news_targets(company, currency, price, siblings=(), days=90):
     want = {"GBp": "GBp", "GBX": "GBp"}.get(currency, currency)
     jobs = {"de": lambda: google_news(f'"{company}" Kursziel', "de", days),
             "en": lambda: google_news(f'"{company}" "price target"', "en", days)}
+    if symbol:  # Analysten-Meldungen von onvista (dpa-AFX), v. a. für deutsche und europäische Werte
+        since = datetime.now() - timedelta(days=days)
+        jobs["onvista"] = lambda: [it for it in onvista_rating_news(symbol) if it["date"] and it["date"] >= since]
     found = {}
     tokens = [w for w in re.findall(r"[a-zäöüß0-9]{3,}", company.lower())][:1] or [company.lower()]
-    with ThreadPoolExecutor(max_workers=2) as ex:
+    with ThreadPoolExecutor(max_workers=3) as ex:
         futs = {lang: ex.submit(fn) for lang, fn in jobs.items()}
         for lang, f in futs.items():
             for it in safe(lambda: f.result(timeout=20), []) or []:
@@ -3012,7 +3016,7 @@ def news_targets(company, currency, price, siblings=(), days=90):
                     continue
                 if re.search(r"dividend", it["title"].lower()):
                     continue
-                parsed = parse_target(it["title"], lang)
+                parsed = parse_target(it["title"], "de" if lang == "onvista" else lang)
                 if not parsed:
                     continue
                 firm, value, cur = parsed
@@ -3556,6 +3560,98 @@ def us_listing(symbol):
     return us or None
 
 
+NASDAQ_TARGET_CACHE = {}  # US-Symbol -> (Zeit, Kursziel-Konsens)
+
+
+def nasdaq_price_target(us_sym):
+    """Kursziel-Konsens von Nasdaq (Mittel, Spanne, Zahl der Analysten) in Dollar der US-Notierung."""
+    hit = NASDAQ_TARGET_CACHE.get(us_sym)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+           "Accept": "application/json"}
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym)}/targetprice", headers=hdr, timeout=15))
+    c = (((d or {}).get("data") or {}).get("consensusOverview") or {})
+    out = None
+    if num(c.get("priceTarget")):
+        n = sum(int(num(c.get(k)) or 0) for k in ("buy", "hold", "sell"))
+        out = {"mean": num(c["priceTarget"]), "low": num(c.get("lowPriceTarget")), "high": num(c.get("highPriceTarget")), "n": n}
+    NASDAQ_TARGET_CACHE[us_sym] = (time.time(), out)
+    return out
+
+
+ONVISTA_TARGET_CACHE = {}  # Symbol -> (Zeit, Kursziel-Konsens von onvista oder None)
+
+
+def onvista_target(symbol):
+    """Kursziel-Konsens von der onvista-Analyseseite (Mittel, Zahl der Empfehlungen) plus die jüngsten Kursziele
+    einzelner Banken (Euro). 12 Stunden zwischengespeichert."""
+    hit = ONVISTA_TARGET_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    out = None
+    isin = onvista_isin(symbol)
+    if isin:  # der Namensteil der Adresse ist beliebig, onvista leitet auf die richtige Seite weiter
+        page = _fetch(f"https://www.onvista.de/aktien/analysen/Aktie-{isin}", headers={**ONVISTA_UA, "Accept": "text/html"},
+                      timeout=20).decode("utf-8", "replace")
+        c = re.search(r'"targetPrice":([\d.]+),"numberRecommendations":(\d+)', page)
+        if c and num(c.group(1)):
+            items = []
+            lst = re.search(r'"recommendationList":\{.*?"list":(\[.*?\])\}', page)
+            for r_ in (safe(lambda: json.loads(lst.group(1)), []) if lst else []) or []:
+                v = num(r_.get("targetPriceEur"))
+                dt = safe(lambda: datetime.fromisoformat(r_["date"][:10]))
+                if v and dt and (datetime.now() - dt).days <= 180:
+                    items.append({"firm": html_mod.unescape(str(r_.get("bank") or "k. A.")).title(), "value": v,
+                                  "date": dt.strftime("%d.%m."), "rating": r_.get("rating") or ""})
+            out = {"mean": num(c.group(1)), "n": int(c.group(2)), "items": sorted(items, key=lambda x: -x["value"])}
+    ONVISTA_TARGET_CACHE[symbol] = (time.time(), out)
+    return out
+
+
+def apply_onvista_target(m, symbol):
+    """Kursziel aus dem onvista-Konsens (Euro), wenn noch keines vorliegt – v. a. für deutsche und europäische Werte."""
+    if m.get("upside") is not None or not m.get("price"):
+        return
+    tg = onvista_target(symbol)
+    if not tg or tg["n"] < 2:
+        return
+    cur = m.get("currency") or "EUR"
+    k = fx_rate("EUR", cur) if cur != "EUR" else 1.0
+    if not k or not 0.33 < tg["mean"] * k / m["price"] < 3:
+        return  # Währung oder Aktienbasis passt offenbar nicht
+    vals = [it["value"] * k for it in tg["items"]]
+    m["target"] = tg["mean"] * k
+    m["upside"] = m["target"] / m["price"] - 1
+    m["target_low"] = min(vals) if len(vals) >= 2 else None
+    m["target_high"] = max(vals) if len(vals) >= 2 else None
+    m["target_n"] = tg["n"]
+    m["target_src"] = f"Konsens von {tg['n']} Analysten (onvista)"
+    if tg["items"]:
+        m["target_items"] = [{**it, "value": it["value"] * k} for it in tg["items"]]
+
+
+def apply_nasdaq_target(m, symbol):
+    """Kursziel aus dem Nasdaq-Konsens übernehmen, wenn Yahoo keines liefert. Bei ausländischen Werten über die ADR:
+    Potenzial in Dollar berechnen und auf den eigenen Kurs übertragen (wie bei Finnhub)."""
+    if m.get("upside") is not None or not m.get("price"):
+        return
+    us_sym = us_listing(symbol)
+    tg = nasdaq_price_target(us_sym) if us_sym else None
+    if not tg or (tg["n"] or 0) < 2:
+        return
+    px = m["price"] if us_sym == symbol else num(safe(lambda: yf.Ticker(us_sym).fast_info.last_price))
+    if not px or not 0.33 < tg["mean"] / px < 3:
+        return  # Kurs der Notierung fehlt oder Kursziel offenbar in anderer Währung/Aktienbasis
+    k = m["price"] / px
+    m["upside"] = tg["mean"] / px - 1
+    m["target"] = tg["mean"] * k
+    m["target_low"] = tg["low"] * k if tg.get("low") else None
+    m["target_high"] = tg["high"] * k if tg.get("high") else None
+    m["target_n"] = tg["n"]
+    m["target_src"] = f"Konsens von {tg['n']} Analysten (Nasdaq)" + (f", über die US-Notierung {us_sym}" if us_sym != symbol else "")
+
+
 def nasdaq_eps_forecast(us_sym):
     """Jährliche Konsensprognosen für den Gewinn je Aktie von Nasdaq (Daten von Zacks), bis zu vier Geschäftsjahre:
     {Jahr des Geschäftsjahresendes: {"avg", "low", "high", "n", "month"}}."""
@@ -3583,7 +3679,36 @@ ONVISTA_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebK
 ONVISTA_DE_SUFFIX = {"DE", "F", "BE", "MU", "SG", "HM", "DU", "HA"}
 
 
+ONVISTA_ISIN = {}         # Symbol -> (Zeit, ISIN oder "")
+
+
 def onvista_isin(symbol):
+    hit = ONVISTA_ISIN.get(symbol)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1] or None
+    isin = _onvista_isin(symbol)
+    ONVISTA_ISIN[symbol] = (time.time(), isin or "")
+    return isin
+
+
+def onvista_rating_news(symbol):
+    """Analysten-Einstufungen (dpa-AFX „Aktieneinstufung“) von der onvista-Nachrichtenseite eines Werts:
+    [{"title", "date", "source"}] – Format wie google_news, damit dieselbe Kursziel-Auswertung greift."""
+    isin = onvista_isin(symbol)
+    if not isin:
+        return []
+    page = _fetch(f"https://www.onvista.de/news/aktien/News-{isin}", headers={**ONVISTA_UA, "Accept": "text/html"},
+                  timeout=20).decode("utf-8", "replace")
+    out = []
+    for m_ in re.finditer(r'"articleSubTypeName":"Aktieneinstufung","headline":"((?:[^"\\]|\\.)*)".{0,400}?"datetimePublication":"([^"]+)"',
+                          page):
+        title = html_mod.unescape(json.loads('"' + m_.group(1) + '"'))
+        dt = safe(lambda: datetime.fromisoformat(m_.group(2)[:19]))
+        out.append({"title": title, "date": dt, "source": "onvista (dpa-AFX)"})
+    return out
+
+
+def _onvista_isin(symbol):
     """ISIN eines Werts über die onvista-Suche: deutsche Notierungen über das Börsenkürzel (SIE.DE -> SIE),
     sonst über den gleichen Firmennamen wie bei Yahoo."""
     base, _, suf = symbol.partition(".")
@@ -6935,7 +7060,8 @@ def analyze(query):
         fmac = ex.submit(timed("Makro", gather_macro, info.get("currency") or ""))
         siblings = sibling_names(company, symbol)
         fnews = ex.submit(timed("Nachrichten", collect_news, symbol, company, info.get("website") or "", siblings))
-        ftgt = ex.submit(timed("Kursziele", news_targets, company, info.get("currency") or "", current_price(info), siblings))
+        ftgt = ex.submit(timed("Kursziele", news_targets, company, info.get("currency") or "", current_price(info), siblings,
+                               symbol=symbol))
         fev = ex.submit(timed("Termine", company_events, symbol, alternatives, info.get("currency") or ""))
         fpeer = ex.submit(timed("Konkurrenz", competitors, symbol, info, alternatives))
         fprof = ex.submit(timed("Profil", company_profile, symbol, info, company))
@@ -6971,6 +7097,10 @@ def analyze(query):
     if comp["summary"]["pe"]["n"] >= 3:
         m["peer_pe_med"], m["peer_n"] = comp["summary"]["pe"]["median"], comp["summary"]["pe"]["n"]
     m["target_n"], m["target_src"], m["target_items"] = 0, "", tgt["items"]
+    # Konsens-Kursziele: US-Werte zuerst über Nasdaq, andere zuerst über onvista
+    order = (apply_nasdaq_target, apply_onvista_target) if "." not in symbol else (apply_onvista_target, apply_nasdaq_target)
+    for fn in order:
+        safe(lambda: fn(m, symbol))
     if m["upside"] is None and tgt["n"] >= 2:
         m["target"] = tgt["median"]
         m["upside"] = tgt["median"] / m["price"] - 1
@@ -9347,7 +9477,9 @@ def cache_rules():
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
             ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
-            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
+            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300),
+            ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
+            ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
 def prune_caches():

@@ -1719,6 +1719,24 @@ class TestOnvista(unittest.TestCase):
         self.assertAlmostEqual(est[0]["net_income"], 11.0)          # 1 Mrd. Aktien × 11,00
         self.assertEqual(est[0]["ni_consensus"], "onvista")
 
+    def test_target_from_onvista_page(self):
+        today = a.datetime.now().strftime("%Y-%m-%d")
+        page = ('"targetPrice":312.25,"numberRecommendations":29,"numberBuyRecommendations":17},"recommendationList":'
+                '{"expires":1,"total":2,"list":[{"date":"' + today + 'T00:00:00.000+00:00","targetPrice":300,"targetPriceEur":300,'
+                '"bank":"JEFFERIES \\u0026 CO","rating":"HOLD"},{"date":"' + today + 'T00:00:00.000+00:00","targetPriceEur":345,'
+                '"bank":"JP MORGAN","rating":"BUY"},{"date":"2019-01-01T00:00:00.000+00:00","targetPriceEur":99,"bank":"ALT"}]}')
+        import unittest.mock as mock
+        a.ONVISTA_TARGET_CACHE.clear()
+        with mock.patch.object(a, "onvista_isin", return_value="DE0007236101"), \
+                mock.patch.object(a, "_fetch", return_value=page.encode()):
+            m = {"price": 290.0, "currency": "EUR", "upside": None}
+            a.apply_onvista_target(m, "SIE.DE")
+        a.ONVISTA_TARGET_CACHE.clear()
+        self.assertAlmostEqual(m["target"], 312.25)
+        self.assertEqual(m["target_n"], 29)
+        self.assertEqual([it["firm"] for it in m["target_items"]], ["Jp Morgan", "Jefferies & Co"])  # alte Ziele weg
+        self.assertEqual((m["target_low"], m["target_high"]), (300, 345))
+
 
 class TestFcfEstimates(unittest.TestCase):
     def test_conversion_and_matching(self):
