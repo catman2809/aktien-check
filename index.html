@@ -2985,12 +2985,12 @@ function healthSection(d) {
       ...F.map(f => ({y: f.done ? String(f.year) : f.year + "e", v: f.dps, est: !f.done, f}))];
     const mx = Math.max(...cols.map(c => c.v)), S = Dv.safety, dfmt = v => nf(v, v < 1 ? 3 : 2);
     const nAll = cols.length, step = nAll > 12 ? 5 : nAll > 6 ? 2 : 1;
-    const dTip = c => c.f ? `${c.y}: ${dfmt(c.v)} ${Dv.currency}` + (c.f.done ? " (alle Zahlungen des Jahres erfolgt)" : ` (Prognose, +${nf(c.f.growth * 100, 1)} %` +
+    const dTip = c => c.f ? `${c.y}: ${dfmt(c.v)} ${Dv.currency}` + (c.f.done ? " (alle Zahlungen des Jahres erfolgt)" : ` (${c.f.src ? "Konsens " + c.f.src : "Prognose"}, ${c.f.growth >= 0 ? "+" : ""}${nf(c.f.growth * 100, 1)} %` +
       (c.f.paid ? `, davon bereits gezahlt ${dfmt(c.f.paid)}` : "") + ")") : `${c.y}: ${dfmt(c.v)} ${Dv.currency}`;
     div = `<div class="card pad"><h3>Dividendenhistorie <span class="stamp">je Aktie, ${esc(Dv.currency)}</span></h3>
       <div class="db">${cols.map((c, i) => { const show = (nAll - 1 - i) % step === 0;
         return `<div class="db-c${c.est ? " est" : ""}" title="${esc(dTip(c))}"><i style="height:${c.v / mx * 100}%"></i><small>${show ? c.y : "&nbsp;"}</small></div>`; }).join("")}</div>
-      ${F.some(f => !f.done) ? `<p class="stamp db-note"><span>e = erwartet (heller).</span> <span>Prognose abgeleitet: Dividendenwachstum der letzten 5 Jahre, höchstens so stark wie das erwartete Gewinnwachstum, keine Kürzung angenommen.</span></p>` : ""}
+      ${F.some(f => !f.done) ? `<p class="stamp db-note"><span>e = erwartet (heller).</span> ${F.some(f => f.src) ? `<span>Prognose: Analystenkonsens (${esc(F.find(f => f.src).src)}).</span>` : ""}${F.some(f => !f.done && !f.src) ? ` <span>Prognose abgeleitet: Dividendenwachstum der letzten 5 Jahre, höchstens so stark wie das erwartete Gewinnwachstum, keine Kürzung angenommen.</span>` : ""}</p>` : ""}
       <dl class="dv-stats">
         <div><dt>Wachstum 5 J. p. a.</dt><dd class="num">${pc(Dv.g5, 1, true)}</dd></div>
         <div><dt>Wachstum 10 J. p. a.</dt><dd class="num">${pc(Dv.g10, 1, true)}</dd></div>
@@ -4122,7 +4122,8 @@ function incTable(D) {
 // Quelle je Prognosejahr: Umsatz (Yahoo / fortgeschrieben) und Reinertrag (Yahoo / Nasdaq / fortgeschrieben)
 function estSources(E) {
   const revS = e => (e.rev_trend || e.est === "trend") ? "Umsatz fortgeschrieben" : "Umsatz aus dem Analystenkonsens (Yahoo Finance)";
-  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
+  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus === "Nasdaq" ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
+    : e.ni_consensus ? `Reinertrag aus dem Konsens für den Gewinn je Aktie (${e.ni_consensus})`
     : e.est === "trend" ? "Reinertrag fortgeschrieben" : "Reinertrag aus dem Analystenkonsens (Yahoo Finance)";
   const groups = [];
   E.forEach(e => { const k = revS(e) + ", " + niS(e), g = groups.find(x => x.k === k); g ? g.l.push(e.label) : groups.push({k, l: [e.label]}); });
@@ -4232,9 +4233,9 @@ function drawIncome() {
     cols.forEach(c => c.classList.toggle("on", +c.dataset.i === i));
     const rngTxt = (lo, hi) => lo != null && hi != null && hi > lo ? ` <span style="color:var(--text-3)">(${big(lo).join(" ")} – ${big(hi).join(" ")})</span>` : "";
     tip.innerHTML = `<b>${esc(p.label)}</b>
-      ${p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens (${p.n_eps} Analysten)</span>`
+      ${p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">Umsatz fortgeschrieben · Reinertrag aus dem ${p.ni_consensus}-Konsens${p.n_eps ? ` (${p.n_eps} Analysten)` : ""}</span>`
         : p.est === "consensus" ? `<span style="display:block;color:var(--text-3)">Prognose · Konsens von ${p.n_rev} Analysten${p.n_eps ? ` (Gewinn: ${p.n_eps})` : ""}</span>`
-        : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">${p.ni_consensus ? `Umsatz fortgeschrieben · Reinertrag aus dem Nasdaq-Konsens (${p.n_eps} Analysten)` : "Fortschreibung des Trends, keine Analystenschätzung"}</span>` : ""}
+        : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">${p.ni_consensus ? `Umsatz fortgeschrieben · Reinertrag aus dem ${p.ni_consensus}-Konsens${p.n_eps ? ` (${p.n_eps} Analysten)` : ""}` : "Fortschreibung des Trends, keine Analystenschätzung"}</span>` : ""}
       <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>
       ${p.net_income != null ? `<span style="display:block">Reinertrag: ${big(p.net_income).join(" ")} ${esc(D.currency)}${rngTxt(p.ni_low, p.ni_high)}</span>` : ""}
       ${p.fcf != null ? `<span style="display:block">Free Cashflow: ${big(p.fcf).join(" ")} ${esc(D.currency)}${p.fcf_derived ? ` <span style="color:var(--text-3)">(abgeleitet)</span>` : ""}</span>` : ""}

@@ -1701,6 +1701,25 @@ class TestTrendEstimates(unittest.TestCase):
         self.assertTrue(all(e["revenue"] for e in est))
 
 
+class TestOnvista(unittest.TestCase):
+    def test_dividend_year_offset(self):
+        y = a.datetime.now().year
+        D = {"years": [y - 2, y - 1], "dps": [4.7, 5.2], "currency": "EUR", "ytd": 5.35, "per_year": 1, "paid_now": 1}
+        ov = {"dps": {y - 2: {"dps": 5.2, "est": False, "cur": "EUR"}, y - 1: {"dps": 5.35, "est": False, "cur": "EUR"},
+                      y: {"dps": 5.6, "est": True, "cur": "EUR"}, y + 1: {"dps": 5.9, "est": True, "cur": "EUR"}}}
+        self.assertEqual(a.onvista_dps_forecast(D, ov), {y + 1: 5.6, y + 2: 5.9})   # Auszahlung im Folgejahr
+        ov_bad = {"dps": {y - 1: {"dps": 9.0, "est": False, "cur": "EUR"}, y: {"dps": 9.5, "est": True, "cur": "EUR"}}}
+        self.assertEqual(a.onvista_dps_forecast(D, ov_bad), {})                      # passt nicht -> nichts übernehmen
+
+    def test_net_income_from_onvista_eps(self):
+        periods = [{"end": "2025-09-30", "revenue": 80.0, "net_income": 10.0}, {"end": "2024-09-30", "revenue": 75.0, "net_income": 9.0}][::-1]
+        eps = {2026: {"avg": 11.0, "est": True}, 2027: {"avg": 12.5, "est": True}}
+        est = a.income_estimates_nasdaq(periods, "EUR", 10.0, eps, [75.0, 80.0], "onvista", "EUR")
+        self.assertEqual([e["label"] for e in est], ["2026e", "2027e"])
+        self.assertAlmostEqual(est[0]["net_income"], 11.0)          # 1 Mrd. Aktien × 11,00
+        self.assertEqual(est[0]["ni_consensus"], "onvista")
+
+
 class TestFcfEstimates(unittest.TestCase):
     def test_conversion_and_matching(self):
         import pandas as pd

@@ -1826,7 +1826,33 @@ def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5, first
     return equity / shares if equity > 0 and shares else None
 
 
-def dividend_forecast(m):
+def onvista_dps_forecast(D, ov):
+    """Dividendenprognosen von onvista auf Kalenderjahre der Auszahlung umlegen. onvista zählt je Geschäftsjahr; viele
+    Unternehmen zahlen erst im Folgejahr aus (Siemens: Dividende für 2025/26 im Februar 2027). Der Versatz wird an den
+    gezahlten Vorjahren abgeglichen; passt keiner, wird nichts übernommen."""
+    if not ov or not ov.get("dps") or not D.get("years"):
+        return {}
+    paid = dict(zip(D["years"], D["dps"]))
+    if D.get("ytd") and D.get("per_year") and D.get("paid_now", 0) >= D["per_year"]:
+        paid[datetime.now().year] = D["ytd"]  # laufendes Jahr schon vollständig ausgezahlt -> zählt zum Abgleich
+    past = {y: e for y, e in ov["dps"].items() if not e["est"] and e["dps"]}
+    best = None
+    for off in (0, 1):
+        errs = sorted(abs(paid[y + off] / e["dps"] - 1) for y, e in past.items() if paid.get(y + off))
+        if errs and (best is None or (errs[len(errs) // 2], -len(errs)) < (best[1], -best[2])):
+            best = (off, errs[len(errs) // 2], len(errs))
+    if not best or best[1] > (0.1 if best[2] >= 2 else 0.03):  # bei nur einem Vergleichsjahr strenger
+        return {}
+    out = {}
+    for y, e in ov["dps"].items():
+        if e["est"] and e["dps"]:
+            k = fx_rate(e["cur"], D.get("currency")) if e.get("cur") and D.get("currency") and e["cur"] != D["currency"] else 1.0
+            if k:
+                out[y + best[0]] = e["dps"] * k
+    return out
+
+
+def dividend_forecast(m, symbol=None):
     """Dividendenprognose je Aktie für das laufende und die zwei folgenden Kalenderjahre (Yahoo liefert dafür keine
     Analystenschätzung). Wachstum je Jahr = bisheriges Dividendenwachstum der letzten 5 Jahre, aber höchstens das
     erwartete Gewinnwachstum (Analystenkonsens): Unternehmen erhöhen im gewohnten Tempo, auf Dauer aber nicht schneller
@@ -1859,12 +1885,13 @@ def dividend_forecast(m):
             return None
         return clamp(v, 0.0, 0.25)
     rates = [g(g_eps[0]), g(g_eps[1]), g(g_eps[1])]
-    if rates[0] is None:
+    cons = safe(lambda: onvista_dps_forecast(D, onvista_data(symbol)), {}) if symbol else {}
+    if rates[0] is None and not cons:
         return None
     out, v = [], base
     for i, r_ in enumerate(rates):
-        r_ = rates[i - 1] if r_ is None else r_
-        v = v * (1 + r_)
+        r_ = (rates[i - 1] if i else 0.0) if r_ is None else r_
+        v = cons[this_year + i] if cons.get(this_year + i) else v * (1 + r_)
         done = False
         if i == 0 and D.get("ytd"):
             if D.get("per_year") and D.get("paid_now", 0) >= D["per_year"]:
@@ -1872,7 +1899,8 @@ def dividend_forecast(m):
             else:
                 v = max(v, D["ytd"])  # mindestens das schon Gezahlte
         out.append({"year": this_year + i, "dps": round(v, 4), "growth": v / (out[-1]["dps"] if out else base) - 1,
-                    "paid": D.get("ytd") if i == 0 else None, "done": done})
+                    "paid": D.get("ytd") if i == 0 else None, "done": done,
+                    "src": "onvista" if cons.get(this_year + i) and not done else None})
     return out
 
 
@@ -3549,16 +3577,63 @@ def nasdaq_eps_forecast(us_sym):
     return out
 
 
-def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist):
+ONVISTA_CACHE = {}        # Symbol -> (Zeit, Kennzahlen mit Schätzjahren oder None)
+ONVISTA_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+              "Accept": "application/json"}
+ONVISTA_DE_SUFFIX = {"DE", "F", "BE", "MU", "SG", "HM", "DU", "HA"}
+
+
+def onvista_isin(symbol):
+    """ISIN eines Werts über die onvista-Suche: deutsche Notierungen über das Börsenkürzel (SIE.DE -> SIE),
+    sonst über den gleichen Firmennamen wie bei Yahoo."""
+    base, _, suf = symbol.partition(".")
+    find = lambda q: (json.loads(_fetch("https://api.onvista.de/api/v1/instruments/query?" + urllib.parse.urlencode(
+        {"searchValue": q, "limit": 10}), headers=ONVISTA_UA, timeout=15)) or {}).get("list") or []
+    if suf in ONVISTA_DE_SUFFIX:
+        hit = next((x for x in find(base) if x.get("entityType") == "STOCK" and (x.get("symbol") or "").upper() == base.upper()), None)
+        if hit:
+            return hit.get("isin")
+    own = next((r_ for r_ in safe(lambda: search_symbols(base), []) or [] if r_.get("symbol") == symbol), None)
+    if not own:
+        return None
+    norm = lambda n: " ".join(_legal_tokens(n or ""))
+    hit = next((x for x in find(own["name"]) if x.get("entityType") == "STOCK" and norm(x.get("name")) == norm(own["name"])), None)
+    return hit.get("isin") if hit else None
+
+
+def onvista_data(symbol):
+    """Kennzahlen von onvista je Geschäftsjahr inkl. Analystenschätzungen („e“): bereinigter Gewinn je Aktie und
+    Dividende je Aktie, für drei Schätzjahre. Keine Umsatzprognosen. 12 Stunden zwischengespeichert."""
+    hit = ONVISTA_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    out = None
+    isin = onvista_isin(symbol)
+    if isin:
+        d = json.loads(_fetch(f"https://api.onvista.de/api/v1/stocks/ISIN:{isin}/snapshot", headers=ONVISTA_UA, timeout=20))
+        fin, fun = d.get("stocksCnFinancialList") or {}, d.get("stocksCnFundamentalList") or {}
+        eps = {e["idYear"]: {"avg": num(e.get("cnEpsAdj")), "est": str(e.get("label", "")).endswith("e")}
+               for e in fin.get("list") or [] if e.get("idYear") and num(e.get("cnEpsAdj")) is not None}
+        dps = {e["idYear"]: {"dps": num(e.get("cnDps")), "est": str(e.get("label", "")).endswith("e"), "cur": e.get("isoCurrency")}
+               for e in fun.get("list") or [] if e.get("idYear") and num(e.get("cnDps")) is not None}
+        out = {"isin": isin, "currency": fin.get("isoCurrency"), "eps": eps, "dps": dps}
+        LOG.info("[onvista] %s (%s): Gewinnprognosen für %s, Dividendenprognosen für %s", symbol, isin,
+                 ", ".join(str(y) for y, e in sorted(eps.items()) if e["est"]) or "keine Jahre",
+                 ", ".join(str(y) for y, e in sorted(dps.items()) if e["est"]) or "keine Jahre")
+    ONVISTA_CACHE[symbol] = (time.time(), out)
+    return out
+
+
+def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="Nasdaq", eps_cur="USD"):
     """Ersatz, wenn Yahoo keine Analystenschätzungen liefert (Yahoo sperrt diese Schnittstelle für manche Server):
-    Reinertrag aus dem Nasdaq-Konsens (Zacks) für den Gewinn je Aktie (Aktienzahl × Gewinn je Aktie, in
-    Berichtswährung umgerechnet), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben."""
+    Reinertrag aus einem Konsens für den Gewinn je Aktie (Nasdaq/Zacks oder onvista; Aktienzahl × Gewinn je Aktie,
+    in Berichtswährung umgerechnet), Umsatz mit dem Wachstum der letzten Jahre fortgeschrieben."""
     if not periods or not nasdaq:
         return []
     last = periods[-1]
     end = datetime.fromisoformat(last["end"])
     shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
-    k = fx_rate("USD", currency) if currency and currency != "USD" else 1.0
+    k = fx_rate(eps_cur, currency) if eps_cur and currency and currency != eps_cur else 1.0
     if not shares or not k:
         return []
     growth = [b / a - 1 for a, b in zip(rev_hist, rev_hist[1:]) if a and b and a > 0]
@@ -3578,7 +3653,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist):
         rev = rev * (1 + g) if g is not None and rev else None
         out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
                     "margin": ni / rev if rev else None, "op_income": None, "op_margin": None,
-                    "est": "consensus", "n_rev": 0, "n_eps": e.get("n") or 0, "ni_consensus": "Nasdaq", "rev_trend": rev is not None,
+                    "est": "consensus", "n_rev": 0, "n_eps": e.get("n") or 0, "ni_consensus": src, "rev_trend": rev is not None,
                     "ni_low": shares * e["low"] * k if e.get("low") else None, "ni_high": shares * e["high"] * k if e.get("high") else None})
         prev_ni = ni
     return out
@@ -3837,7 +3912,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v10")  # v10: stabile Margen für die Fortschreibung
+    key = (symbol, freq, "v11")  # v11: + onvista-Konsens
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -3920,6 +3995,13 @@ def income_data(symbol, freq):
         if not out["estimates"] and nasdaq:  # keine Yahoo-Schätzungen (z. B. auf dem Server gesperrt) -> Nasdaq-Konsens
             out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq,
                                                                     [p_["revenue"] for p_ in periods]), []) or []
+        if not out["estimates"]:  # kein Yahoo/Nasdaq -> onvista-Konsens (v. a. deutsche Werte ohne US-Notierung)
+            ov = safe(lambda: onvista_data(symbol))
+            ov_eps = {y: e for y, e in ((ov or {}).get("eps") or {}).items() if e["est"] and e["avg"]}
+            if ov_eps:
+                out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, ov_eps,
+                                                                        [p_["revenue"] for p_ in periods], "onvista",
+                                                                        ov.get("currency") or out["currency"]), []) or []
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
         LOG.info("[Prognose] %s: Yahoo-Schätzungen %s, Nasdaq %s -> %s", symbol, "ja" if has_yahoo_est else "nein",
@@ -6963,7 +7045,7 @@ def analyze(query):
         "fair": m.get("fair"),
         "checklist": safe(lambda: checklist(m, cats), []) or [],
         "valchart": m.get("valchart"), "balance": m.get("balance"),
-        "divhist": (dict(m["divhist"], forecast=safe(lambda: dividend_forecast(m))) if m.get("divhist") else None),
+        "divhist": (dict(m["divhist"], forecast=safe(lambda: dividend_forecast(m, symbol))) if m.get("divhist") else None),
         "holders": m.get("holders"), "eps_quarters": m.get("eps_quarters"),
         "targets": {"low": m.get("target_low"), "high": m.get("target_high"), "mean": m.get("target"),
                     "median": m.get("target_median"), "n": m.get("n_analysts"), "hist": m.get("rec_hist"),
@@ -9265,7 +9347,7 @@ def cache_rules():
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
             ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
-            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
+            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
 def prune_caches():

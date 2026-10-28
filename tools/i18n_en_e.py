@@ -266,3 +266,13 @@ DEPOT_EXACT.update({
     "Reinertrag fortgeschrieben": "net income extrapolated", "Reinertrag aus dem Analystenkonsens (Yahoo Finance)": "net income from the analyst consensus (Yahoo Finance)",
     "kein Reinertrag (Margen zu schwankend)": "no net income (margins too volatile)",
 })
+DEPOT_WILD += [
+    ("Prognose: Analystenkonsens ({*}).", "Forecast: analyst consensus ({*})."),
+    ("Reinertrag aus dem Konsens für den Gewinn je Aktie ({*})", "net income from the EPS consensus ({*})"),
+    ("Umsatz fortgeschrieben · Reinertrag aus dem {*}-Konsens ({0} Analysten)", "Revenue extrapolated · net income from the {*} consensus ({0} analysts)"),
+    ("Umsatz fortgeschrieben · Reinertrag aus dem {*}-Konsens", "Revenue extrapolated · net income from the {*} consensus"),
+    ("{*}: {0} {*1} (Konsens {*2}, {1} %)", "{*}: {0} {*1} (consensus {*2}, {1}%)"),
+    ("{*}: {0} {*1} (Konsens {*2}, {1} %, davon bereits gezahlt {2})", "{*}: {0} {*1} (consensus {*2}, {1}%, of which already paid {2})"),
+    ("{*}: {0} {*1} (Prognose, {1} %, davon bereits gezahlt {2})", "{*}: {0} {*1} (forecast, {1}%, of which already paid {2})"),
+    ("{*}: {0} {*1} (Prognose, {1} %)", "{*}: {0} {*1} (forecast, {1}%)"),
+]
