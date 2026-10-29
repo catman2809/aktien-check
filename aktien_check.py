@@ -3929,7 +3929,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     return out
 
 
-def couple_revenue(periods, est, rel=0.10, share=0.75):
+def couple_revenue(periods, est, rel=0.10, share=0.75, gap=1.0):
     """Fortgeschriebenen Umsatz an den Gewinnkonsens koppeln: Ergäbe der erwartete Reinertrag auf dem fortgeschriebenen
     Umsatz eine Nettomarge über der Obergrenze, wird der Umsatz angehoben – um drei Viertel des Wegs bis zu dem Umsatz,
     bei dem die Marge genau auf der Obergrenze läge (der Rest gilt als Margenausweitung bzw. Sondereffekt im
@@ -3947,10 +3947,12 @@ def couple_revenue(periods, est, rel=0.10, share=0.75):
         if e.get("revenue") is not None and trend:
             e["revenue"] *= f
         base = max(best, prev_m or 0)
-        if trend and e.get("revenue") and e.get("net_income") and base > 0:
+        # bereinigter Konsens (Nasdaq) -> auf die berichtete Basis umrechnen, bevor er mit berichteten Margen verglichen wird
+        ni_rep = e["net_income"] / gap if e.get("net_income") and e.get("ni_consensus") == "Nasdaq" else e.get("net_income")
+        if trend and e.get("revenue") and ni_rep and base > 0:
             cap = base * (1 + rel) + 0.01
-            if e["net_income"] / e["revenue"] > cap:
-                need = min(e["net_income"] / cap, 2 * prev_rev)
+            if ni_rep / e["revenue"] > cap:
+                need = min(ni_rep / cap, 2 * prev_rev)
                 new = e["revenue"] + share * (need - e["revenue"])
                 if new > e["revenue"]:
                     f *= new / e["revenue"]
@@ -4149,6 +4151,47 @@ def income_estimates_q(t, periods, currency, eps_last):
     return out
 
 
+NASDAQ_ACT_CACHE = {}  # US-Symbol -> (Zeit, bereinigter Gewinn je Aktie der letzten vier Quartale)
+
+
+def nasdaq_eps_ttm(us_sym):
+    """Bereinigter Ist-Gewinn je Aktie der letzten vier gemeldeten Quartale (Nasdaq/Zacks, gleiche Basis wie die
+    Prognosen) – zum Vergleich mit dem berichteten Gewinn: {"eps": Summe, "end": letztes Quartalsende (Jahr, Monat)}."""
+    hit = NASDAQ_ACT_CACHE.get(us_sym)
+    if hit and time.time() - hit[0] < 24 * 3600:
+        return hit[1]
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+           "Accept": "application/json"}
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/company/{urllib.parse.quote(us_sym.replace('-', '.'))}/earnings-surprise",
+                          headers=hdr, timeout=15))
+    rows = (((d or {}).get("data") or {}).get("earningsSurpriseTable") or {}).get("rows") or []
+    vals = [num(r_.get("eps")) for r_ in rows[:4]]
+    out = None
+    if len(vals) == 4 and all(v is not None for v in vals):
+        m_ = re.match(r"([A-Za-z]{3}) (\d{4})", str(rows[0].get("fiscalQtrEnd") or ""))
+        out = {"eps": sum(vals), "end": (int(m_.group(2)), MONTHS_EN.get(m_.group(1))) if m_ else None}
+    NASDAQ_ACT_CACHE[us_sym] = (time.time(), out)
+    return out
+
+
+def adjusted_gap(symbol, t, shares):
+    """Verhältnis bereinigter zu berichtetem Gewinn der letzten vier Quartale (z. B. AbbVie ≈ 4 wegen Abschreibungen auf
+    Übernahmen, Applied Materials ≈ 1,1). Damit wird der bereinigte Gewinnkonsens für die Umsatzkopplung auf die
+    berichtete Basis umgerechnet. 1,0, wenn nichts Verlässliches vorliegt; begrenzt auf 1–5."""
+    act = nasdaq_eps_ttm(symbol) if shares else None
+    q = safe(lambda: t.quarterly_income_stmt)
+    if not act or q is None or getattr(q, "empty", True) or "Net Income" not in q.index:
+        return 1.0
+    cols = sorted(q.columns)[-4:]
+    ni = [num(q.loc["Net Income", c]) for c in cols]
+    if len(ni) < 4 or any(v is None for v in ni) or sum(ni) <= 0:
+        return 1.0
+    last = cols[-1]
+    if act["end"] and abs((last.year * 12 + last.month) - (act["end"][0] * 12 + (act["end"][1] or last.month))) > 1:
+        return 1.0  # Quartale passen nicht zusammen
+    return clamp(act["eps"] * shares / sum(ni), 1.0, 5.0)
+
+
 NASDAQ_Q_CACHE = {}  # US-Symbol -> (Zeit, {(Jahr, Monat): Quartalsprognose Gewinn je Aktie})
 
 
@@ -4308,7 +4351,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v20")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
+    key = (symbol, freq, "v21")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4423,7 +4466,11 @@ def income_data(symbol, freq):
         if not out["estimates"]:  # Yahoo gesperrt -> aus Vorjahresquartal und Jahresprognose ableiten
             out["estimates"] = safe(lambda: income_estimates_q_fallback(symbol, periods, eps_last), []) or []
     if freq == "annual":
-        safe(lambda: couple_revenue(periods, out["estimates"]))
+        gap = (safe(lambda: adjusted_gap(symbol, t, shares_last), 1.0) or 1.0) if any(
+            e_.get("ni_consensus") == "Nasdaq" for e_ in out["estimates"]) and "." not in symbol else 1.0
+        if gap > 1.05:
+            LOG.info("[Prognose] %s: bereinigter Gewinn %.1f-mal so hoch wie berichtet", symbol, gap)
+        safe(lambda: couple_revenue(periods, out["estimates"], gap=gap))
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4, by_margin=freq == "annual"))
     safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
