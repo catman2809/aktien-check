@@ -3850,6 +3850,35 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     return out
 
 
+def couple_revenue(periods, est, rel=0.10):
+    """Fortgeschriebenen Umsatz an den Gewinnkonsens koppeln: Ergäbe der erwartete Reinertrag auf dem fortgeschriebenen
+    Umsatz eine Nettomarge über der Obergrenze, wird der Umsatz so weit angehoben, dass die Marge genau auf der
+    Obergrenze liegt. Obergrenze = beste Marge der letzten fünf Jahre (bzw. die Marge des Vorjahres der Prognose,
+    falls höher) × 1,1 + 1 Prozentpunkt. Höchstens Verdopplung je Jahr; Folgejahre wachsen vom angehobenen Niveau.
+    Abgeglichen am Analystenkonsens für den Umsatz (Applied Materials, Nvidia, ASML, SAP, Siemens): mittlere
+    Abweichung rund 6 % statt rund 25 % bei reiner Fortschreibung."""
+    hist = [p_["margin"] for p_ in periods[-5:] if p_.get("margin") is not None]
+    if not hist or not est:
+        return
+    best, prev_m, prev_rev, f = max(hist), periods[-1].get("margin"), periods[-1]["revenue"], 1.0
+    for e in est:
+        trend = e.get("rev_trend") or (e.get("est") == "trend" and e.get("ni_consensus"))
+        if e.get("revenue") is not None and trend:
+            e["revenue"] *= f
+        base = max(best, prev_m or 0)
+        if trend and e.get("revenue") and e.get("net_income") and base > 0:
+            cap = base * (1 + rel) + 0.01
+            if e["net_income"] / e["revenue"] > cap:
+                new = min(e["net_income"] / cap, 2 * prev_rev)
+                if new > e["revenue"]:
+                    f *= new / e["revenue"]
+                    e["revenue"], e["rev_coupled"] = new, True
+        if e.get("revenue") and e.get("net_income") is not None:
+            e["margin"] = e["net_income"] / e["revenue"]
+            prev_m = e["margin"]
+        prev_rev = e.get("revenue") or prev_rev
+
+
 def trend_growth(revs, cap=0.25):
     """Jährliches Umsatzwachstum für die Fortschreibung: ein Viertel echter Median aller Jahresraten, ein Viertel
     Schnitt der letzten zwei Jahre, die Hälfte das letzte Jahr – ein einzelnes Sprungjahr (Übernahme, Boom) soll
@@ -4124,7 +4153,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v14")  # v13: Fortschreibung gewichtet das letzte Jahr, Nasdaq/onvista-Abgleich
+    key = (symbol, freq, "v15")  # v15: Umsatz an den Gewinnkonsens gekoppelt
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4246,6 +4275,8 @@ def income_data(symbol, freq):
                  "ja" if nasdaq else "nein", ", ".join(e_["label"] for e_ in out["estimates"]) or "keine Prognosen")
     else:
         out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
+    if freq == "annual":
+        safe(lambda: couple_revenue(periods, out["estimates"]))
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))

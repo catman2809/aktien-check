@@ -1711,6 +1711,22 @@ class TestTrendEstimates(unittest.TestCase):
         self.assertTrue(est and all(e["net_income"] is None for e in est))   # Verlustjahr -> kein Reinertrag
         self.assertTrue(all(e["revenue"] for e in est))
 
+    def test_couple_revenue_to_earnings_consensus(self):
+        # Applied-Materials-Fall: Gewinn +48 %, Umsatz nur +4 % fortgeschrieben -> Marge 35 % > Deckel (26,4 % × 1,1 + 1 Pkt.)
+        per = [{"end": f"202{i}-10-31", "revenue": r, "net_income": n, "margin": n / r}
+               for i, (r, n) in enumerate(((23.1, 5.9), (25.8, 6.5), (26.5, 6.9), (27.2, 7.2), (28.4, 7.0)), 1)]
+        est = [{"label": "2026e", "revenue": 29.5, "net_income": 10.34, "rev_trend": True, "est": "consensus"},
+               {"label": "2027e", "revenue": 30.7, "net_income": 14.77, "rev_trend": True, "est": "consensus"},
+               {"label": "2028e", "revenue": 31.9, "net_income": None, "rev_trend": True, "est": "consensus"}]
+        a.couple_revenue(per, est)
+        cap = max(n / r for _, r, n in [(0, p_["revenue"], p_["net_income"]) for p_ in per]) * 1.1 + 0.01
+        self.assertAlmostEqual(est[0]["revenue"], 10.34 / cap)
+        self.assertTrue(est[0]["rev_coupled"] and est[1]["rev_coupled"])
+        self.assertAlmostEqual(est[2]["revenue"] / est[1]["revenue"], 31.9 / 30.7)   # Folgejahr wächst vom neuen Niveau
+        flat = [{"label": "2026e", "revenue": 30.0, "net_income": 7.5, "rev_trend": True, "est": "consensus"}]
+        a.couple_revenue(per, flat)
+        self.assertEqual(flat[0]["revenue"], 30.0)                                   # Marge im Rahmen -> unverändert
+
     def test_trend_growth_weights_recent_years(self):
         self.assertAlmostEqual(a.trend_growth([100, 125, 150, 160]), 0.25 * 0.2 + 0.25 * (0.2 + 1 / 15) / 2 + 0.5 / 15)
         self.assertEqual(a.trend_growth([10, 30, 90]), 0.25)            # Deckel
