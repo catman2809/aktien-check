@@ -1324,6 +1324,9 @@ const big = x => {
   return [nf(v, a >= 1e6 ? 1 : 2), u];
 };
 const tone = s => s == null ? "" : s >= 0.15 ? "pos" : s <= -0.15 ? "neg" : "neu";
+// Score-Anzeige 0–100 (50 = neutral); intern bleibt −100…+100, damit Schwellen, Verlauf und Alarme gleich bleiben
+const sc100 = v => v == null ? null : Math.max(0, Math.min(100, (v + 100) / 2));
+const scTxt = (v, d = 0) => v == null ? "–" : nf(sc100(v), d);
 const toneText = {pos: "positiv", neu: "neutral", neg: "negativ"};
 const groupTone = {Kaufen: "pos", Halten: "neu", Verkaufen: "neg"};
 
@@ -1484,7 +1487,7 @@ function wlRow(x) {
     <div class="wl-price num m-hide">${x.price != null ? nf(x.price) + " " + esc(x.currency || "") : "–"}
       <small style="color:${x.perf_1m == null ? "var(--text-3)" : x.perf_1m >= 0 ? "var(--pos)" : "var(--neg)"}">${x.perf_1m != null ? pc(x.perf_1m, 1, true) + " 1M" : ""}</small></div>
     <div class="wl-rating">${busy ? KERZI_MINI : x.label ? `<span class="tone ${t}">${esc(x.label)}</span>` : `<span class="stamp">–</span>`}</div>
-    <div class="wl-score num m-hide">${x.score != null ? (x.score > 0 ? "+" : "") + nf(x.score, 1) : "–"}</div>
+    <div class="wl-score num m-hide">${scTxt(x.score)}</div>
     <div class="m-hide">${esc(x.summary || "")}</div>
     <div class="wl-time m-hide">${busy ? "wird aktualisiert …" : ago(x.updated)}</div>
     <div class="wl-btns">${bellBtn(x.symbol)}
@@ -2842,7 +2845,7 @@ function renderScreener() {
         <td class="stamp">${i + 1}</td>
         <td><b>${esc(r.name)}</b><div class="stamp">${esc(r.symbol)}${r.model && r.model !== "Standardmodell" ? " · " + esc(r.model.replace("-Modell", "")) : ""}</div></td>
         <td><span style="color:${GROUP_COL[r.group] || "inherit"};font-weight:600">${esc(r.label)}</span></td>
-        <td class="num"><b>${r.score > 0 ? "+" : ""}${nf(r.score, 1)}</b></td>
+        <td class="num"><b>${scTxt(r.score)}</b></td>
         <td class="num" ${col(r.fair_up)}>${r.fair_up != null ? pc(r.fair_up, 0, true) : "–"}</td>
         <td class="num">${r.pe > 0 ? nf(r.pe, 1) : "–"}</td>
         <td class="num">${r.div ? pc(r.div, 1) : "–"}</td>
@@ -4519,7 +4522,7 @@ function historyCard(d) {
   const changes = [];
   for (let i = 1; i < H.length; i++) if (H[i][2] !== H[i - 1][2]) changes.push([H[i - 1], H[i]]);
   const fmtD = s => new Date(s + "T12:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"});
-  const scoreTxt = v => (v > 0 ? "+" : "") + nf(v, 1);
+  const scoreTxt = v => scTxt(v);
   let body;
   if (H.length < 2) {
     body = `<div class="hist-empty">Der Verlauf startet ${H.length ? `am <b>${fmtD(H[0][0])}</b> mit <b>${esc(H[0][2])}</b> (Score ${scoreTxt(H[0][1])})` : "mit dieser Analyse"}.
@@ -4561,9 +4564,9 @@ function drawHistory(d) {
   const tone = g => g >= 15 ? "var(--pos)" : g <= -15 ? "var(--neg)" : "var(--neu)";
   const ticks = [-50, 0, 50].filter(v => v > lo && v < hi);
   const fmtS = s => new Date(s + "T12:00:00").toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit"});
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Score-Verlauf von ${nf(H[0][1], 1)} auf ${nf(H[n - 1][1], 1)}">
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Score-Verlauf von ${scTxt(H[0][1])} auf ${scTxt(H[n - 1][1])}">
     ${zone(15, 999, "zone-pos", "Kaufen", "var(--pos)")}${zone(-15, 15, "zone-neu", "Halten", "var(--neu)")}${zone(-999, -15, "zone-neg", "Verkaufen", "var(--neg)")}
-    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${t > 0 ? "+" : ""}${t}</text>`).join("")}
+    <g class="axis">${ticks.map(t => `<text x="${W - 4}" y="${(Y(t) + 4).toFixed(1)}" text-anchor="end">${scTxt(t)}</text>`).join("")}
       <text x="${m.l}" y="${Hh - 5}">${fmtS(H[0][0])}</text><text x="${m.l + pw}" y="${Hh - 5}" text-anchor="end">${fmtS(H[n - 1][0])}</text></g>
     <path d="${path}" fill="none" stroke="var(--text)" stroke-width="2" stroke-linejoin="round"/>
     ${H.map(h => `<circle class="hp" cx="${X(h[0]).toFixed(1)}" cy="${Y(h[1]).toFixed(1)}" r="${n > 60 ? 3 : 4.5}" fill="${tone(h[1])}"/>`).join("")}
@@ -4577,7 +4580,7 @@ function drawHistory(d) {
     H.forEach((h, i) => { if (Math.abs(X(h[0]) - x) < Math.abs(X(H[best][0]) - x)) best = i; });
     const h = H[best], px = X(h[0]);
     xl.setAttribute("x1", px); xl.setAttribute("x2", px); xl.style.display = "";
-    tip.innerHTML = `<b>${esc(h[2])} · Score ${(h[1] > 0 ? "+" : "") + nf(h[1], 1)}</b><span>${new Date(h[0] + "T12:00:00").toLocaleDateString("de-DE")}${h[3] ? " · Kurs " + nf(h[3]) + " " + esc(d.currency) : ""}</span>`;
+    tip.innerHTML = `<b>${esc(h[2])} · Score ${scTxt(h[1])}</b><span>${new Date(h[0] + "T12:00:00").toLocaleDateString("de-DE")}${h[3] ? " · Kurs " + nf(h[3]) + " " + esc(d.currency) : ""}</span>`;
     tip.style.display = "block";
     const tw = tip.offsetWidth;
     tip.style.left = Math.max(0, Math.min(W - tw, px - tw / 2)) + "px";
@@ -4971,7 +4974,7 @@ function render(d) {
       <div class="v-top">
         <div class="v-head">${kerziSVG({pos: "buy", neu: "hold", neg: "sell"}[gt] || "hold", 56, "Kerzi: " + R.group)}
           <div><span class="pill">${esc(R.group)}</span><div class="v-label">${esc(R.label)}</div></div></div>
-        <div class="v-score"><b class="num">${R.score > 0 ? "+" : ""}${nf(R.score, 1)}</b><span>Score (−100 bis +100)</span></div>
+        <div class="v-score"><b class="num">${scTxt(R.score)}</b><span>Score (0 bis 100)</span></div>
       </div>
       <div class="scale">
         <div class="scale-bar">${scaleBar}</div>
@@ -5095,7 +5098,7 @@ function render(d) {
       <ul class="reasons">${c.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
       ${c.options.length ? `<div class="options"><div class="lbl">Mögliche Ausprägungen</div>
         ${c.options.map(o => `<span class="opt ${o === c.adjective ? "sel" : ""}">${esc(o)}</span>`).join("")}</div>` : ""}
-      <div class="cat-foot"><span>Teilscore <b class="num">${c.score == null ? "–" : (c.score > 0 ? "+" : "") + nf(c.score * 100, 0)}</b></span>
+      <div class="cat-foot"><span>Teilscore <b class="num">${c.score == null ? "–" : scTxt(c.score * 100)}</b></span>
         <span>Gewicht ${nf(c.weight * 100, 0)} %</span></div>
     </article>`).join("")}
   </div>
@@ -5154,7 +5157,7 @@ function render(d) {
       <table class="wtable">${allCats.map(c => `<tr><td>${esc(c.title.replace(/ \(.*\)/, ""))}</td><td>${nf(c.weight * 100, 0)} %</td></tr>`).join("")}</table>
     </div>
     <div class="card pad"><h3>Regeln</h3><ul>
-      <li>Jede Kategorie erhält einen Teilscore von −100 bis +100 aus mehreren Kennzahlen; daraus folgt das passende Adjektiv.</li>
+      <li>Jede Kategorie erhält einen Teilscore von 0 bis 100 aus mehreren Kennzahlen (50 = neutral); daraus folgt das passende Adjektiv.</li>
       ${etf ? `<li>ETF-Modell: Kosten &amp; Struktur (TER, Fondsvolumen, Alter), Bewertung der enthaltenen Aktien (KGV, KBV),
         Rendite p. a. über 3/5/10 Jahre, Risiko und Streuung (Volatilität, Rückgänge, Top-10-Anteil, größte Branche) und Kurstrend.</li>
       <li>Thesaurierende ETFs: Ausschüttung zählt nicht (Erträge stecken in der Rendite).</li>`
@@ -5171,7 +5174,7 @@ function render(d) {
       <li>News: Tier 1 = 100 %, Tier 2 = 90 %, Tier 3 = 50 % (unbestätigt 25 %), Sonstige = 30 %.</li>
     </ul></div>
     <div class="card pad"><h3>Skala</h3><div class="scale-list num">
-      ${R.scale.map((s, i) => `<span>${i === R.scale.length - 1 ? "darunter" : "ab " + (s.min > 0 ? "+" : "") + s.min}</span><span style="${s.label === R.label ? "font-weight:700;color:var(--text)" : ""}">${esc(s.label)}</span>`).join("")}
+      ${R.scale.map((s, i) => `<span>${i === R.scale.length - 1 ? "darunter" : "ab " + scTxt(s.min, sc100(s.min) % 1 ? 1 : 0)}</span><span style="${s.label === R.label ? "font-weight:700;color:var(--text)" : ""}">${esc(s.label)}</span>`).join("")}
     </div></div>
   </div>
   <aside class="legal" role="note" aria-label="Rechtlicher Hinweis">

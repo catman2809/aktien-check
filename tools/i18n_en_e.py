@@ -312,3 +312,7 @@ DEPOT_WILD += [
     ("{0} Positionen", "{0} positions"), ("Stand der Auswertung: {*}", "Analysed: {*}"),
     ("Positionen gespeichert · {*}", "positions saved · {*}"), ("{0} € pro Monat", "€{0} per month"),
 ]
+DEPOT_EXACT.update({
+    "Jede Kategorie erhält einen Teilscore von {0} bis {1} aus mehreren Kennzahlen (50 = neutral); daraus folgt das passende Adjektiv.":
+        "Each category gets a sub-score from {0} to {1} from several figures (50 = neutral); the fitting adjective follows from it.",
+})

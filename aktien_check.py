@@ -1659,6 +1659,11 @@ def gather_macro(currency):
 
 
 # ---------------------------------------------------------------------------
+def score_100(v):
+    """Gesamtscore für die Anzeige: intern −100…+100, angezeigt 0…100 (50 = neutral)."""
+    return None if v is None else max(0.0, min(100.0, (v + 100) / 2))
+
+
 # Bewertungslogik: jede Kategorie -> Score (-1..+1), Adjektiv, Begründungen
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -9807,7 +9812,7 @@ def run_alert_checks(force_rating=False):
                     st["rating_checked"] = now
                     if old and label != old:
                         msgs.append((f"🔔 {name}: Empfehlung {old} → {label}",
-                                     f"Score {fnum(res['rating']['score'], 1)} · Urteil: {res['summary']['adjective']}",
+                                     f"Score {fnum(score_100(res['rating']['score']), 0)}/100 · Urteil: {res['summary']['adjective']}",
                                      ["bell"]))
                     st["last_label"] = label
             for title, msg, tags in msgs:
@@ -10901,7 +10906,7 @@ def main():
     if args:
         res = analyze(" ".join(args))
         print(f"{res['name']} ({res['symbol']}): {res['rating']['label']} [{res['rating']['group']}], "
-              f"Score {res['rating']['score']}, Urteil: {res['summary']['adjective']}")
+              f"Score {score_100(res['rating']['score']):.0f}/100, Urteil: {res['summary']['adjective']}")
         for c in res["categories"]:
             print(f"  {c['title']}: {c['adjective']}")
         return
