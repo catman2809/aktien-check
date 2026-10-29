@@ -318,8 +318,8 @@ DEPOT_EXACT.update({
 })
 DEPOT_EXACT.update({
     "Umsatz aus dem Gewinnkonsens abgeleitet": "revenue derived from the earnings consensus",
-    "Umsatz aus dem Gewinnkonsens abgeleitet: Für den Umsatz gibt es keine frei verfügbare Analystenschätzung. Wächst der erwartete Gewinn deutlich stärker als der fortgeschriebene Umsatz, wird der Umsatz so angehoben, dass die Nettomarge höchstens 10 % über der besten Marge der letzten fünf Jahre liegt.":
-        "Revenue derived from the earnings consensus: no freely available analyst estimate exists for revenue. If expected earnings grow much faster than extrapolated revenue, revenue is raised so that the net margin is at most 10 % above the best margin of the last five years.",
+    "Umsatz aus dem Gewinnkonsens abgeleitet: Für den Umsatz gibt es keine frei verfügbare Analystenschätzung. Wächst der erwartete Gewinn deutlich stärker als der fortgeschriebene Umsatz, wird der Umsatz angehoben – zu drei Vierteln bis zu dem Wert, bei dem die Nettomarge 10 % über der besten Marge der letzten fünf Jahre läge.":
+        "Revenue derived from the earnings consensus: no freely available analyst estimate exists for revenue. If expected earnings grow much faster than extrapolated revenue, revenue is raised – three quarters of the way to the level at which the net margin would be 10 % above the best margin of the last five years.",
 })
 DEPOT_WILD += [("Umsatz aus dem Gewinn abgeleitet · Reinertrag aus dem {*}-Konsens", "Revenue derived from earnings · net income from the {*} consensus"),
                ("{*}: Umsatz aus dem Gewinnkonsens abgeleitet, {*1}.", "{*}: revenue derived from the earnings consensus, {*1}.")]

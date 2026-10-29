@@ -3850,17 +3850,19 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     return out
 
 
-def couple_revenue(periods, est, rel=0.10):
+def couple_revenue(periods, est, rel=0.10, share=0.75):
     """Fortgeschriebenen Umsatz an den Gewinnkonsens koppeln: Ergäbe der erwartete Reinertrag auf dem fortgeschriebenen
-    Umsatz eine Nettomarge über der Obergrenze, wird der Umsatz so weit angehoben, dass die Marge genau auf der
-    Obergrenze liegt. Obergrenze = beste Marge der letzten fünf Jahre (bzw. die Marge des Vorjahres der Prognose,
-    falls höher) × 1,1 + 1 Prozentpunkt. Höchstens Verdopplung je Jahr; Folgejahre wachsen vom angehobenen Niveau.
-    Abgeglichen am Analystenkonsens für den Umsatz (Applied Materials, Nvidia, ASML, SAP, Siemens): mittlere
-    Abweichung rund 6 % statt rund 25 % bei reiner Fortschreibung."""
-    hist = [p_["margin"] for p_ in periods[-5:] if p_.get("margin") is not None]
+    Umsatz eine Nettomarge über der Obergrenze, wird der Umsatz angehoben – um drei Viertel des Wegs bis zu dem Umsatz,
+    bei dem die Marge genau auf der Obergrenze läge (der Rest gilt als Margenausweitung bzw. Sondereffekt im
+    bereinigten Gewinn). Obergrenze = beste Marge der letzten fünf Jahre (bzw. die Marge des Vorjahres der
+    Prognose, falls höher) × 1,1 + 1 Prozentpunkt. Höchstens Verdopplung je Jahr; Folgejahre wachsen vom angehobenen
+    Niveau. Abgeglichen am Yahoo-Umsatzkonsens von 68 Aktien (135 Prognosejahre): mittlere Abweichung 9,3 % statt
+    11,7 % bei reiner Fortschreibung, Ausreißer über 25 % 5 statt 20. Die beste statt der mittleren Marge schützt
+    Firmen mit gedrücktem berichtetem Gewinn (Intel, AbbVie) vor einem aufgeblähten Umsatz."""
+    hist = sorted(p_["margin"] for p_ in periods[-5:] if p_.get("margin") is not None)
     if not hist or not est:
         return
-    best, prev_m, prev_rev, f = max(hist), periods[-1].get("margin"), periods[-1]["revenue"], 1.0
+    best, prev_m, prev_rev, f = hist[-1], periods[-1].get("margin"), periods[-1]["revenue"], 1.0
     for e in est:
         trend = e.get("rev_trend") or (e.get("est") == "trend" and e.get("ni_consensus"))
         if e.get("revenue") is not None and trend:
@@ -3869,7 +3871,8 @@ def couple_revenue(periods, est, rel=0.10):
         if trend and e.get("revenue") and e.get("net_income") and base > 0:
             cap = base * (1 + rel) + 0.01
             if e["net_income"] / e["revenue"] > cap:
-                new = min(e["net_income"] / cap, 2 * prev_rev)
+                need = min(e["net_income"] / cap, 2 * prev_rev)
+                new = e["revenue"] + share * (need - e["revenue"])
                 if new > e["revenue"]:
                     f *= new / e["revenue"]
                     e["revenue"], e["rev_coupled"] = new, True
@@ -4153,7 +4156,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v15")  # v15: Umsatz an den Gewinnkonsens gekoppelt
+    key = (symbol, freq, "v17")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -10364,6 +10367,16 @@ class Handler(BaseHTTPRequestHandler):
         proto = self.headers.get("X-Forwarded-Proto", "http")
         return f"{proto}://{host}" if host else ""
 
+    def drain(self, limit=32_000_000):
+        """Ungelesenen Anfragekörper verwerfen, bevor früh abgelehnt wird – sonst bricht Windows die Verbindung ab,
+        während der Client noch sendet (der Client sieht dann einen Verbindungsfehler statt der Antwort)."""
+        left = min(int(self.headers.get("Content-Length") or 0), limit)
+        while left > 0:
+            chunk = self.rfile.read(min(left, 1 << 16))
+            if not chunk:
+                break
+            left -= len(chunk)
+
     def json_body(self, limit=16384):
         """Liest den JSON-Körper. Zu große oder ungültige Anfragen werden abgelehnt (nie stillschweigend als {} gewertet,
         sonst würde z. B. eine abgeschnittene Watchlist die gespeicherte überschreiben)."""
@@ -10404,8 +10417,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_login(u):
                 return
             if "application/json" not in self.headers.get("Content-Type", ""):
+                self.drain()
                 return self.send(415, json.dumps({"error": "JSON erwartet"}), "application/json")
             if u.path == "/api/admin/restore" and not self.is_admin():
+                self.drain()
                 return self.send_json({"error": "Nur für Administratoren"}, 403)
             try:
                 body = self.json_body(30_000_000 if u.path == "/api/admin/restore" else 300_000 if u.path == "/api/watchlist"

@@ -4332,7 +4332,7 @@ function incTableNote(est) {
   return `<span>e = erwartet.</span>${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` + coupledNote(est);
 }
 function coupledNote(E) {
-  return E.some(e => e.rev_coupled) ? ` <span>Umsatz aus dem Gewinnkonsens abgeleitet: Für den Umsatz gibt es keine frei verfügbare Analystenschätzung. Wächst der erwartete Gewinn deutlich stärker als der fortgeschriebene Umsatz, wird der Umsatz so angehoben, dass die Nettomarge höchstens 10 % über der besten Marge der letzten fünf Jahre liegt.</span>` : "";
+  return E.some(e => e.rev_coupled) ? ` <span>Umsatz aus dem Gewinnkonsens abgeleitet: Für den Umsatz gibt es keine frei verfügbare Analystenschätzung. Wächst der erwartete Gewinn deutlich stärker als der fortgeschriebene Umsatz, wird der Umsatz angehoben – zu drei Vierteln bis zu dem Wert, bei dem die Nettomarge 10 % über der besten Marge der letzten fünf Jahre läge.</span>` : "";
 }
 function drawIncome() {
   const wrap = $("#inc-wrap"); if (!wrap) return;
