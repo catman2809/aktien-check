@@ -1384,7 +1384,7 @@ def chart_extras(m, t, inc, bs, divs):
         per_year = int(counts.get(this_year - 1, 0) or 0)   # Zahlungen im letzten vollen Jahr (1 = jährlich, 4 = quartalsweise)
         paid_now = int(counts.get(this_year, 0) or 0)
         m["divhist"] = {"years": [y for y, _ in full], "dps": [v for _, v in full], "ytd": round(ytd, 4) if ytd else None,
-                        "per_year": per_year, "paid_now": paid_now,
+                        "per_year": per_year, "paid_now": paid_now, "last_amt": round(float(d.iloc[-1]), 6) if len(d) else None,
                         "g5": cagr(5), "g10": cagr(10), "payout": payout, "currency": m["currency"], "streak": streak,
                         "safety": {"label": label, "reasons": why} if full else None}
     # Aktionärsstruktur
@@ -1835,26 +1835,45 @@ def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5, first
 def onvista_dps_forecast(D, ov):
     """Dividendenprognosen von onvista auf Kalenderjahre der Auszahlung umlegen. onvista zählt je Geschäftsjahr; viele
     Unternehmen zahlen erst im Folgejahr aus (Siemens: Dividende für 2025/26 im Februar 2027). Der Versatz wird an den
-    gezahlten Vorjahren abgeglichen; passt keiner, wird nichts übernommen."""
+    gezahlten Vorjahren abgeglichen. onvista rechnet ausländische Dividenden oft in Euro um (Apple, Shell, Novo): Statt
+    über den heutigen Wechselkurs wird darum über das Verhältnis gezahlt ÷ onvista der Vorjahre skaliert – das muss
+    über die Jahre gleich bleiben (gleicher Versatz), sonst wird nichts übernommen. Ausreißer im Konsens (ein Jahr
+    mehr als 2,5-mal so hoch wie Vor- und Folgejahr, z. B. Bayer) werden verworfen."""
     if not ov or not ov.get("dps") or not D.get("years"):
         return {}
     paid = dict(zip(D["years"], D["dps"]))
     if D.get("ytd") and D.get("per_year") and D.get("paid_now", 0) >= D["per_year"]:
         paid[datetime.now().year] = D["ytd"]  # laufendes Jahr schon vollständig ausgezahlt -> zählt zum Abgleich
     past = {y: e for y, e in ov["dps"].items() if not e["est"] and e["dps"]}
+    same_cur = all((e.get("cur") or D.get("currency")) == D.get("currency") for e in ov["dps"].values())
     best = None
     for off in (0, 1):
-        errs = sorted(abs(paid[y + off] / e["dps"] - 1) for y, e in past.items() if paid.get(y + off))
-        if errs and (best is None or (errs[len(errs) // 2], -len(errs)) < (best[1], -best[2])):
-            best = (off, errs[len(errs) // 2], len(errs))
-    if not best or best[1] > (0.1 if best[2] >= 2 else 0.03):  # bei nur einem Vergleichsjahr strenger
+        ratios = sorted(paid[y + off] / e["dps"] for y, e in past.items() if paid.get(y + off))
+        if not ratios:
+            continue
+        mid = ratios[len(ratios) // 2]
+        devs = sorted(abs(r_ / mid - 1) for r_ in ratios)
+        spread = devs[len(devs) // 2]  # typische Abweichung; einzelne Sonderjahre (Corona, Sonderdividende) stören nicht
+        if same_cur and abs(mid - 1) > 0.1:
+            continue  # gleiche Währung, aber andere Höhe -> anderes Wertpapier oder andere Zählweise
+        key = (spread, -len(ratios))
+        if best is None or key < best[0]:
+            best = (key, off, mid, len(ratios))
+    if not best:
         return {}
+    n_match, spread_ = best[3], best[0][0]
+    if (n_match >= 3 and spread_ > 0.05) or (n_match == 2 and spread_ > 0.03) or             (n_match == 1 and not (same_cur and abs(best[2] - 1) <= 0.03)):  # ein Jahr reicht nur bei gleicher Währung
+        return {}
+    _, off, scale, _ = best
+    est = sorted((y, e["dps"]) for y, e in ov["dps"].items() if e["est"] and e["dps"])
+    last_paid = max(past.items())[1]["dps"] if past else None
     out = {}
-    for y, e in ov["dps"].items():
-        if e["est"] and e["dps"]:
-            k = fx_rate(e["cur"], D.get("currency")) if e.get("cur") and D.get("currency") and e["cur"] != D["currency"] else 1.0
-            if k:
-                out[y + best[0]] = e["dps"] * k
+    for i, (y, v) in enumerate(est):
+        prev = est[i - 1][1] if i else last_paid
+        nxt = est[i + 1][1] if i + 1 < len(est) else None
+        if prev and v > 2.5 * prev and (nxt is None or nxt < v / 2.5):
+            continue  # einzelner Ausreißer
+        out[y + off] = v * scale
     return out
 
 
@@ -1894,10 +1913,14 @@ def dividend_forecast(m, symbol=None):
     cons = safe(lambda: onvista_dps_forecast(D, onvista_data(symbol)), {}) if symbol else {}
     if rates[0] is None and not cons:
         return None
+    # Laufende Rate: letzte Zahlung × Zahlungen pro Jahr (Nvidia 2026: 0,01 $ -> 0,25 $ je Quartal)
+    run_rate = D["last_amt"] * D["per_year"] if D.get("last_amt") and D.get("per_year") else None
     out, v = [], base
     for i, r_ in enumerate(rates):
         r_ = (rates[i - 1] if i else 0.0) if r_ is None else r_
         v = cons[this_year + i] if cons.get(this_year + i) else v * (1 + r_)
+        if i >= 1 and run_rate and not cons.get(this_year + i):
+            v = max(v, run_rate)  # nach einer Erhöhung im laufenden Jahr mindestens die neue Jahresrate
         done = False
         if i == 0 and D.get("ytd"):
             if D.get("per_year") and D.get("paid_now", 0) >= D["per_year"]:

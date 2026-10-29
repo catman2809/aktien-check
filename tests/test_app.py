@@ -1752,6 +1752,25 @@ class TestOnvista(unittest.TestCase):
         ov_bad = {"dps": {y - 1: {"dps": 9.0, "est": False, "cur": "EUR"}, y: {"dps": 9.5, "est": True, "cur": "EUR"}}}
         self.assertEqual(a.onvista_dps_forecast(D, ov_bad), {})                      # passt nicht -> nichts übernehmen
 
+    def test_dividend_consensus_other_currency_and_outlier(self):
+        y = a.datetime.now().year
+        # gezahlt in Dollar, onvista in Euro (Faktor 1,16) -> über das Verhältnis der Vorjahre skalieren
+        D = {"years": [y - 4, y - 3, y - 2, y - 1], "dps": [0.91, 0.95, 0.99, 1.03], "currency": "USD"}
+        ov = {"dps": {**{y - 4 + i: {"dps": v / 1.16, "est": False, "cur": "EUR"} for i, v in enumerate((0.91, 0.95, 0.99, 1.03))},
+                      y: {"dps": 0.93, "est": True, "cur": "EUR"}, y + 1: {"dps": 0.98, "est": True, "cur": "EUR"}}}
+        out = a.onvista_dps_forecast(D, ov)
+        self.assertAlmostEqual(out[y], 0.93 * 1.16, places=6)
+        # Ausreißer: ein Jahr 13-mal so hoch wie Vor- und Folgejahr (Bayer) -> verworfen
+        D2 = {"years": [y - 3, y - 2, y - 1], "dps": [0.11, 0.11, 0.11], "currency": "EUR"}
+        ov2 = {"dps": {y - 3: {"dps": 0.11, "est": False, "cur": "EUR"}, y - 2: {"dps": 0.11, "est": False, "cur": "EUR"},
+                       y - 1: {"dps": 0.11, "est": False, "cur": "EUR"}, y: {"dps": 0.11, "est": True, "cur": "EUR"},
+                       y + 1: {"dps": 1.47, "est": True, "cur": "EUR"}, y + 2: {"dps": 0.11, "est": True, "cur": "EUR"}}}
+        self.assertEqual(sorted(a.onvista_dps_forecast(D2, ov2)), [y, y + 2])
+        # nur ein Vergleichsjahr in fremder Währung -> nichts übernehmen
+        D3 = {"years": [y - 1], "dps": [1.03], "currency": "USD"}
+        ov3 = {"dps": {y - 1: {"dps": 0.9, "est": False, "cur": "EUR"}, y: {"dps": 0.95, "est": True, "cur": "EUR"}}}
+        self.assertEqual(a.onvista_dps_forecast(D3, ov3), {})
+
     def test_net_income_from_onvista_eps(self):
         periods = [{"end": "2025-09-30", "revenue": 80.0, "net_income": 10.0}, {"end": "2024-09-30", "revenue": 75.0, "net_income": 9.0}][::-1]
         eps = {2026: {"avg": 11.0, "est": True}, 2027: {"avg": 12.5, "est": True}}
