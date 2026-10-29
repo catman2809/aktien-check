@@ -338,3 +338,8 @@ DEPOT_EXACT.update({
     "Free Cashflow abgeleitet: halb erwarteter Reinertrag mal übliche Cash-Umwandlung der letzten vier Quartale, halb Free-Cashflow-Marge desselben Quartals im Vorjahr (Saisonalität).":
         "Free cash flow derived: half expected net income times the usual cash conversion of the last four quarters, half the free cash flow margin of the same quarter a year earlier (seasonality).",
 })
+DEPOT_EXACT.update({
+    "Prognose: Forward-KGV": "Forecast: forward P/E", "neg.": "neg.", "Verlust – kein KGV": "Loss – no P/E",
+    "KGV: gemeldete Jahre = Kurs am Geschäftsjahresende ÷ Gewinn je Aktie; Prognosejahre = heutiger Kurs ÷ erwarteter Gewinn je Aktie (Forward-KGV).":
+        "P/E: reported years = price at fiscal year end ÷ earnings per share; forecast years = today's price ÷ expected earnings per share (forward P/E).",
+})

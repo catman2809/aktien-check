@@ -3929,6 +3929,56 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     return out
 
 
+def add_pe_row(t, out, sh_by_end):
+    """KGV je Geschäftsjahr für die Tabelle: gemeldete Jahre = Kurs am Geschäftsjahresende ÷ Gewinn je Aktie, Prognosejahre
+    = heutiger Kurs ÷ erwarteter Gewinn je Aktie (Forward-KGV). Gewinn je Aktie = Reinertrag ÷ verwässerte Aktienzahl,
+    auf die heutige Aktienbasis umgerechnet (Splits; Kurse von Yahoo sind splitbereinigt). Bilanzwährung wird in die
+    Kurswährung umgerechnet. Bei ADRs (ein Papier ≠ eine Aktie) wird nichts gezeigt – erkannt am Börsenwert."""
+    P, E = out["periods"], out["estimates"]
+    fi = t.fast_info
+    px_now, pcur, mcap = num(safe(lambda: fi.last_price)), safe(lambda: fi.currency), num(safe(lambda: fi.market_cap))
+    if not px_now or not P:
+        return
+    k = fx_rate(out["currency"], pcur) if out.get("currency") and pcur and out["currency"] != pcur else 1.0
+    if pcur == "GBp":
+        k = (fx_rate(out["currency"], "GBP") if out.get("currency") != "GBP" else 1.0) * 100
+    spl = safe(lambda: t.splits)
+
+    def split_after(d):
+        f_ = 1.0
+        if spl is not None:
+            for d_, r_ in spl.items():
+                if str(d_)[:10] > d and r_ and float(r_) > 0:
+                    f_ *= float(r_)
+        return f_
+    def adj(sh, end, ref):  # SEC rechnet frühere Aktienzahlen nach einem Split teils schon selbst um -> passenden Faktor wählen
+        f_ = split_after(end)
+        if not sh or f_ == 1.0 or not ref:
+            return sh * f_ if sh else 0
+        return min((sh, sh * f_), key=lambda x: abs(x / ref - 1))
+    last_end = P[-1]["end"]
+    ref_now = mcap / px_now if mcap else num(safe(lambda: fi.shares))
+    sh_now = adj(sh_by_end.get(last_end), last_end, ref_now)
+    if not sh_now or (mcap and not 0.6 < px_now * sh_now / mcap < 1.6):
+        return  # Aktienzahl passt nicht zum Börsenwert (ADR, mehrere Aktiengattungen) -> lieber kein KGV
+    h = safe(lambda: t.history(period="7y", interval="1mo", auto_adjust=False)["Close"].dropna())  # splitbereinigt
+    for p_ in P:
+        sh = adj(sh_by_end.get(p_["end"]), p_["end"], sh_now)
+        px = None
+        if h is not None and len(h):
+            before = [float(v) for d_, v in h.items() if str(d_)[:10] <= p_["end"]]
+            px = before[-1] if before else None
+        if sh and px and p_.get("net_income") and p_["net_income"] > 0:
+            p_["pe"] = round(px / (p_["net_income"] * k / sh), 2)
+        elif p_.get("net_income") is not None and p_["net_income"] <= 0:
+            p_["pe"] = "neg"
+    for e in E:
+        if e.get("net_income") and e["net_income"] > 0:
+            e["pe"] = round(px_now / (e["net_income"] * k / sh_now), 2)
+        elif e.get("net_income") is not None:
+            e["pe"] = "neg"
+
+
 def couple_revenue(periods, est, rel=0.10, share=0.75, gap=1.0):
     """Fortgeschriebenen Umsatz an den Gewinnkonsens koppeln: Ergäbe der erwartete Reinertrag auf dem fortgeschriebenen
     Umsatz eine Nettomarge über der Obergrenze, wird der Umsatz angehoben – um drei Viertel des Wegs bis zu dem Umsatz,
@@ -4384,7 +4434,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v28")  # v22: Quartals-Free-Cashflow mit Saisonalität
+    key = (symbol, freq, "v30")  # v22: Quartals-Free-Cashflow mit Saisonalität
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4455,6 +4505,13 @@ def income_data(symbol, freq):
     eps_last = num(eps_row.get(last_col)) if eps_row is not None and last_col is not None else None
     sh_row = row("Diluted Average Shares", "Basic Average Shares")
     shares_last = num(sh_row.get(last_col)) if sh_row is not None and last_col is not None else None
+    sh_by_end = {}  # gemeldete Aktienzahl je Periodenende (für das KGV je Jahr)
+    if sh_row is not None:
+        for c_, v_ in sh_row.items():
+            if num(v_):
+                sh_by_end[(c_.date() if hasattr(c_, "date") else c_).isoformat()] = num(v_)
+    if shares_last and periods[-1]["end"] not in sh_by_end:
+        sh_by_end[periods[-1]["end"]] = shares_last
     if not shares_last and sh_row is not None:  # letzte Spalte oft noch ohne Aktienzahl (Sika) -> jüngste vorhandene
         prev_sh = sorted(((c, num(v)) for c, v in sh_row.items() if num(v)), key=lambda cv: str(cv[0]))
         shares_last = prev_sh[-1][1] if prev_sh else None
@@ -4523,6 +4580,8 @@ def income_data(symbol, freq):
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4, by_margin=freq == "annual"))
     safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
+    if freq == "annual":
+        safe(lambda: add_pe_row(t, out, sh_by_end))
     INCOME_CACHE[key] = (time.time(), out)
     return out
 

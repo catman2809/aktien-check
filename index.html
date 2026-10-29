@@ -889,6 +889,8 @@ table.inc-tbl{min-width:520px}
 .mine-set select{height:38px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
   padding:0 10px;font:inherit;font-size:15px;max-width:60%}
 .mine-acct{max-width:640px}
+.inc-pe th small{display:block;font-weight:400;color:var(--text-3);font-size:11px}
+.inc-pe td,.inc-pe th{border-top:1px solid var(--border-strong)}
 .mine-acct > .eyebrow:first-child{margin-top:0}
 @media (max-width:640px){.mine-hello h1{font-size:22px} #mine-tabs{width:100%} #mine-tabs button{flex:1}}
 
@@ -4317,6 +4319,8 @@ function incTable(D) {
         ${hasE ? row("EBIT", c => amt(c.ebit), "", all, c => c.ebit) + row("EBIT-Marge", c => mg(c.ebit, c.revenue), "sub", all) : ""}
         ${row("Reinertrag", c => amt(c.net_income), "", niD, c => c.net_income)}
         ${row("Nettomarge", c => mg(c.net_income, c.revenue), "sub", c => revD(c) || niD(c))}
+        ${cols.some(c => c.pe != null) ? `<tr class="inc-pe"><th scope="row">KGV <small>Prognose: Forward-KGV</small></th>${cols.map(c =>
+          `<td class="num${c.est ? " est" : ""}">${c.pe == null ? "–" : c.pe === "neg" ? `<span class="stamp" title="Verlust – kein KGV">neg.</span>` : nf(c.pe, 1)}</td>`).join("")}</tr>` : ""}
       </tbody></table></div>
     ${est.length ? `<p class="stamp inc-tbl-note">${incTableNote(est)}</p>` : ""}`;
 }
@@ -4331,7 +4335,8 @@ function estSources(E) {
   return groups.map(g => ` <span>${esc(g.l.join(" / "))}: ${esc(g.k)}.</span>`).join("");
 }
 function incTableNote(est) {
-  return `<span>e = erwartet.</span>${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` + coupledNote(est);
+  return `<span>e = erwartet.</span>${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` + coupledNote(est) +
+    (est.some(e => e.pe != null) ? ` <span>KGV: gemeldete Jahre = Kurs am Geschäftsjahresende ÷ Gewinn je Aktie; Prognosejahre = heutiger Kurs ÷ erwarteter Gewinn je Aktie (Forward-KGV).</span>` : "");
 }
 function coupledNote(E) {
   return E.some(e => e.rev_coupled) ? ` <span>Umsatz aus dem Gewinnkonsens abgeleitet: Für den Umsatz gibt es keine frei verfügbare Analystenschätzung. Wächst der erwartete Gewinn deutlich stärker als der fortgeschriebene Umsatz, wird der Umsatz angehoben – zu drei Vierteln bis zu dem Wert, bei dem die Nettomarge 10 % über der besten Marge der letzten fünf Jahre läge.</span>` : "";
