@@ -4214,7 +4214,7 @@ def nasdaq_eps_quarterly(us_sym):
     return out
 
 
-def income_estimates_q_fallback(symbol, periods, eps_last):
+def income_estimates_q_fallback(symbol, periods, eps_last, t=None, shares_out=None):
     """Quartalsprognosen, wenn Yahoo keine liefert (auf dem Server gesperrt): Umsatz = gemeldetes Vorjahresquartal ×
     erwartetes Umsatzwachstum des Geschäftsjahres (so bleibt die Saisonalität erhalten); Reinertrag bei US-Werten aus
     dem Nasdaq-Quartalskonsens für den Gewinn je Aktie, sonst Vorjahresquartal × erwartetes Gewinnwachstum des Jahres.
@@ -4232,6 +4232,8 @@ def income_estimates_q_fallback(symbol, periods, eps_last):
     by_end = {datetime.fromisoformat(p_["end"]): p_ for p_ in periods}
     shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
     nq = safe(lambda: nasdaq_eps_quarterly(symbol)) if "." not in symbol else None
+    sh_gap = shares_out or shares
+    gap = (safe(lambda: adjusted_gap(symbol, t, sh_gap), 1.0) or 1.0) if t is not None and "." not in symbol and sh_gap else 1.0
     out = []
     for i in (1, 2):
         y, mo = divmod(end.month - 1 + 3 * i, 12)
@@ -4251,13 +4253,18 @@ def income_estimates_q_fallback(symbol, periods, eps_last):
         if q and shares:
             ni, src = shares * q["avg"], "Nasdaq"
         elif cur_y.get("net_income") and prev_y.get("net_income") and prev_y["net_income"] > 0 and ago["net_income"] > 0:
-            ni, src = ago["net_income"] * cur_y["net_income"] / prev_y["net_income"], "Jahresprognose"
+            # Jahreskonsens bereinigt, Vorjahr berichtet -> Wachstum erst auf gleiche Basis bringen (Pfizer)
+            g_ni = cur_y["net_income"] / prev_y["net_income"]
+            if cur_y.get("ni_consensus") == "Nasdaq" and not prev_y.get("est"):
+                g_ni /= gap
+            ni, src = ago["net_income"] * g_ni, "Jahresprognose"
         if ni is not None and ago["net_income"] > 0 and not 0.25 <= ni / ago["net_income"] <= 4:
             ni, src = None, None
         out.append({"label": f"{MONTHS_DE_SHORT[d.month - 1]} {str(d.year)[2:]}e", "end": d.date().isoformat(),
                     "revenue": rev, "net_income": ni, "margin": ni / rev if ni is not None else None,
                     "op_income": None, "op_margin": None, "est": "consensus", "n_rev": 0, "n_eps": q["n"] if src == "Nasdaq" else 0,
-                    "rev_trend": True, "rev_q_derived": True, "ni_consensus": src})
+                    "rev_trend": True, "rev_q_derived": True, "ni_consensus": src,
+                    **({"ni_gap": gap} if src == "Nasdaq" and gap > 1.05 else {})})
     return out
 
 
@@ -4274,7 +4281,8 @@ def add_op_estimates(periods, estimates, n):
         return  # ungewöhnlich große Differenz (Sondereffekte) -> keine Ableitung
     for e in estimates:
         if e.get("margin") is not None:
-            e["op_margin"] = e["margin"] + gap
+            # bereinigter Gewinn (ni_gap > 1) -> für die Ableitung auf die berichtete Basis zurückrechnen
+            e["op_margin"] = e["margin"] / (e.get("ni_gap") or 1.0) + gap
             e["op_income"] = e["op_margin"] * e["revenue"]
             e["op_derived"] = True
 
@@ -4296,7 +4304,7 @@ def add_table_estimates(periods, estimates, n):
         if gm_ is not None and 0 < gm_ <= 1:
             e["gross"] = e["revenue"] * gm_
         if gap_ is not None and -0.1 <= gap_ <= 0.45 and e.get("margin") is not None:
-            e["ebit"] = e["revenue"] * (e["margin"] + gap_)
+            e["ebit"] = e["revenue"] * (e["margin"] / (e.get("ni_gap") or 1.0) + gap_)
 
 
 def add_fcf_estimates(periods, estimates, n, by_margin=False):
@@ -4378,7 +4386,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v22")  # v22: Quartals-Free-Cashflow mit Saisonalität
+    key = (symbol, freq, "v24")  # v22: Quartals-Free-Cashflow mit Saisonalität
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4491,12 +4499,15 @@ def income_data(symbol, freq):
     else:
         out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
         if not out["estimates"]:  # Yahoo gesperrt -> aus Vorjahresquartal und Jahresprognose ableiten
-            out["estimates"] = safe(lambda: income_estimates_q_fallback(symbol, periods, eps_last), []) or []
+            out["estimates"] = safe(lambda: income_estimates_q_fallback(symbol, periods, eps_last, t, shares_last), []) or []
     if freq == "annual":
         gap = (safe(lambda: adjusted_gap(symbol, t, shares_last), 1.0) or 1.0) if any(
             e_.get("ni_consensus") == "Nasdaq" for e_ in out["estimates"]) and "." not in symbol else 1.0
         if gap > 1.05:
             LOG.info("[Prognose] %s: bereinigter Gewinn %.1f-mal so hoch wie berichtet", symbol, gap)
+            for e_ in out["estimates"]:
+                if e_.get("ni_consensus") == "Nasdaq":
+                    e_["ni_gap"] = gap
         safe(lambda: couple_revenue(periods, out["estimates"], gap=gap))
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4, by_margin=freq == "annual"))
