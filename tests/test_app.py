@@ -1733,6 +1733,17 @@ class TestOnvista(unittest.TestCase):
         self.assertAlmostEqual(est[0]["net_income"], 11.0)          # 1 Mrd. Aktien × 11,00
         self.assertEqual(est[0]["ni_consensus"], "onvista")
 
+    def test_news_targets_mix_google_and_onvista_dates(self):
+        import unittest.mock as mock
+        now = a.datetime.now(a.timezone.utc)
+        g = [{"title": "JPMorgan hebt Ziel für SAP auf 250 Euro", "date": now, "source": "x"}]
+        page = ('"articleSubTypeName":"Aktieneinstufung","headline":"JPMorgan hebt Ziel f\\u00fcr SAP auf 255 Euro",'
+                '"datetimePublication":"' + now.strftime("%Y-%m-%dT%H:%M:%S") + '.000+00:00"')
+        with mock.patch.object(a, "google_news", return_value=g), mock.patch.object(a, "onvista_isin", return_value="DE0007164600"), \
+                mock.patch.object(a, "_fetch", return_value=page.encode()):
+            out = a.news_targets("SAP", "EUR", 210.0, symbol="SAP.DE")   # früher: Absturz naiv vs. mit Zeitzone
+        self.assertEqual(out["n"], 1)
+
     def test_share_count_when_prior_year_depressed(self):
         # berichteter Gewinn durch Sonderbelastung gedrückt (bereinigter Konsens > 2,5 ×) -> gemeldete Aktienzahl nehmen
         periods = [{"end": "2024-12-31", "revenue": 180.0, "net_income": 6.0}, {"end": "2025-12-31", "revenue": 185.0, "net_income": 2.8}]

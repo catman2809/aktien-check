@@ -3004,7 +3004,7 @@ def news_targets(company, currency, price, siblings=(), days=90, symbol=None):
     jobs = {"de": lambda: google_news(f'"{company}" Kursziel', "de", days),
             "en": lambda: google_news(f'"{company}" "price target"', "en", days)}
     if symbol:  # Analysten-Meldungen von onvista (dpa-AFX), v. a. für deutsche und europäische Werte
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         jobs["onvista"] = lambda: [it for it in onvista_rating_news(symbol) if it["date"] and it["date"] >= since]
     found = {}
     tokens = [w for w in re.findall(r"[a-zäöüß0-9]{3,}", company.lower())][:1] or [company.lower()]
@@ -3713,7 +3713,7 @@ def onvista_rating_news(symbol):
     for m_ in re.finditer(r'"articleSubTypeName":"Aktieneinstufung","headline":"((?:[^"\\]|\\.)*)".{0,400}?"datetimePublication":"([^"]+)"',
                           page):
         title = html_mod.unescape(json.loads('"' + m_.group(1) + '"'))
-        dt = safe(lambda: datetime.fromisoformat(m_.group(2)[:19]))
+        dt = safe(lambda: datetime.fromisoformat(m_.group(2)[:19]).replace(tzinfo=timezone.utc))  # wie google_news: mit Zeitzone
         out.append({"title": title, "date": dt, "source": "onvista (dpa-AFX)"})
     return out
 

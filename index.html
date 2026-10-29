@@ -1116,8 +1116,8 @@ table.peers .neg{color:var(--neg)}
     <button class="home-btn" id="homebtn" type="button" title="Zurück zur Startseite" aria-label="Zurück zur Startseite">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
       <span>Startseite</span></button>
-    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#erfolg">Erfolgsrechnung</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#fairerwert">Fairer Wert</a><a href="#kategorien">Einschätzung im Detail</a>
-    <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#derivate">Derivate</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
+    <a href="#ueberblick">Überblick</a><a href="#termine">Termine</a><a href="#verlauf">Verlauf</a><a href="#technik">Technik</a><a href="#erfolg">Erfolgsrechnung</a><a href="#geschaeft">Geschäftsmodell</a><a href="#segmente">Segmente</a><a href="#quartal">Quartal</a><a href="#kategorien">Einschätzung im Detail</a>
+    <a href="#konkurrenz">Konkurrenz</a><a href="#analysten">Analysten</a><a href="#derivate">Derivate</a><a href="#bilanz">Bilanz & Dividende</a><a href="#fundamental">Fundamentaldaten</a><a href="#fairerwert">Fairer Wert</a><a href="#news">News</a><a href="#ueber">Über</a><a href="#methodik">Methodik</a>
     <span class="sym" id="navsym"></span>
   </div>
 </nav>
@@ -4873,8 +4873,6 @@ function render(d) {
 
   ${quarterSection(d)}
 
-  ${fairCard(d)}
-
   ${valChartCard(d)}
 
   <h2 class="section">Auf einen Blick</h2>
@@ -4928,6 +4926,8 @@ function render(d) {
         <div class="fv num">${esc(r[1])}</div></div>`).join("")}</div>
     </div>`).join("")}
   </div>
+
+  ${fairCard(d)}
 
   <h2 class="section" id="news">Nachrichten der letzten 30 Tage</h2>
   <p class="section-sub">${N.count} relevante Meldungen, davon ${N.count_trusted} aus Tier-1/2-Quellen. Punktfarbe = Tonalität der Schlagzeile.</p>
