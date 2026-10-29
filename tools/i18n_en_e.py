@@ -334,3 +334,7 @@ DEPOT_EXACT.update({
     "Free Cashflow abgeleitet: erwarteter Umsatz mal übliche Free-Cashflow-Marge (halb Median der letzten Perioden, halb jüngste Periode).":
         "Free cash flow derived: expected revenue times the usual free cash flow margin (half median of recent periods, half latest period).",
 })
+DEPOT_EXACT.update({
+    "Free Cashflow abgeleitet: halb erwarteter Reinertrag mal übliche Cash-Umwandlung der letzten vier Quartale, halb Free-Cashflow-Marge desselben Quartals im Vorjahr (Saisonalität).":
+        "Free cash flow derived: half expected net income times the usual cash conversion of the last four quarters, half the free cash flow margin of the same quarter a year earlier (seasonality).",
+})
