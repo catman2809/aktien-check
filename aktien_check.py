@@ -4308,7 +4308,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v19")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
+    key = (symbol, freq, "v20")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4404,19 +4404,9 @@ def income_data(symbol, freq):
         if not out["estimates"] and nasdaq:
             out["estimates"] = safe(lambda: income_estimates_nasdaq(periods, out["currency"], eps_last, nasdaq, rev_hist,
                                                                     shares_out=shares_last if us_sym == symbol else None), []) or []
-            # Zacks rechnet mit bereinigtem Gewinn je Aktie; weicht das stark vom berichteten Gewinn ab (Pfizer: 2,94 $
-            # bereinigt gegenüber 1,22 $ berichtet), passt die Hochrechnung nicht zur Vorjahresbasis. Dann onvista
-            # nehmen, wenn es fürs selbe Jahr deutlich näher am Vorjahr liegt. Nur bei Geschäftsjahr ≈ Kalenderjahr,
-            # sonst ordnet onvista die Jahre teils anders zu (Nvidia).
-            nq0 = out["estimates"][0] if out["estimates"] else None
-            ov0 = next((e_ for e_ in ov_est if nq0 and e_["label"] == nq0["label"]), None)
-            if nq0 and ov0 and datetime.fromisoformat(periods[-1]["end"]).month >= 9 and periods[-1]["net_income"] > 0:
-                base = periods[-1]["net_income"]
-                if abs(nq0["net_income"] / ov0["net_income"] - 1) > 0.35 and \
-                        abs(ov0["net_income"] / base - 1) < abs(nq0["net_income"] / base - 1):
-                    LOG.info("[Prognose] %s: Nasdaq %.0f%% vs. onvista %.0f%% zum Vorjahr – onvista (gleiche Gewinnbasis)",
-                             symbol, (nq0["net_income"] / base - 1) * 100, (ov0["net_income"] / base - 1) * 100)
-                    out["estimates"] = ov_est
+            # Zacks rechnet wie Yahoo mit dem bereinigten Gewinn je Aktie (Pfizer 2,94 $ zu Yahoo 2,96 $); onvista weicht
+            # davon oft ab. Ein großer Sprung zum berichteten Vorjahr wird darum nicht „korrigiert“, sondern erklärt
+            # (Hinweis auf bereinigte Gewinne, adj_jump).
         if not out["estimates"] and ov_est:  # kein Yahoo/Nasdaq -> onvista-Konsens (v. a. deutsche Werte ohne US-Notierung)
             out["estimates"] = ov_est
         # Konsens beruht meist auf bereinigtem Gewinn (ohne Sondereffekte): starker Sprung zum berichteten Vorjahr kennzeichnen
