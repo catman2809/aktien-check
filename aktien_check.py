@@ -1031,24 +1031,30 @@ def est_eps_fallback(m, symbol):
     Nasdaq nicht genutzt (Gewinn je ADR ≠ Gewinn je Aktie)."""
     if ((m.get("est_eps") or {}).get("0y") or {}).get("avg") or not m.get("fy_end"):
         return
-    y0 = int(m["fy_end"][:4]) + 1  # Jahr des Endes des laufenden Geschäftsjahres
+    y0 = int(m["fy_end"][:4]) + 1  # Jahr des Endes des laufenden Geschäftsjahres (erstes noch nicht in den Daten)
     src, out = None, {}
-    nq = safe(lambda: nasdaq_eps_forecast(symbol)) if "." not in symbol else None
-    if nq and nq.get(y0) and nq.get(y0 + 1):
+    # Nasdaq (Zacks) weist bei Immobilien den FFO je Aktie aus, nicht den Gewinn -> dort nur onvista
+    reit = m.get("biz") == "real_estate" or (m.get("sector") or "") == "Real Estate"
+    nq = safe(lambda: nasdaq_eps_forecast(symbol)) if "." not in symbol and not reit else None
+    y_n = y0 + 1 if nq and not nq.get(y0) and nq.get(y0 + 1) else y0  # schon gemeldet, Bilanzdaten noch nicht (Visa)
+    if nq and nq.get(y_n) and nq.get(y_n + 1):
+        y0 = y_n
         ago0 = m.get("eps_fy_last")
         for i, per in enumerate(("0y", "+1y")):
             e = nq[y0 + i]
-            ago = ago0 if i == 0 else nq[y0]["avg"]
-            out[per] = {"avg": e["avg"], "low": e.get("low"), "high": e.get("high"), "n": e.get("n"), "ago": ago,
+            ago = (nq.get(y0 - 1) or {}).get("avg") or ago0 if i == 0 else nq[y0]["avg"]
+            out[per] = {"avg": e["avg"], "low": e.get("low"), "high": e.get("high"), "n": e.get("n"), "ago": ago, "fy": y0 + i,
                         "growth": e["avg"] / ago - 1 if ago and ago > 0 and e["avg"] else None, "cur": "USD", "src": "Nasdaq"}
         src = "Nasdaq"
     if not out:
         ov = safe(lambda: onvista_data(symbol)) or {}
         eps = ov.get("eps") or {}
+        if not (eps.get(y0) or {}).get("est") and (eps.get(y0 + 1) or {}).get("est"):
+            y0 += 1  # bei onvista schon als Ist-Jahr geführt
         if (eps.get(y0) or {}).get("est") and (eps.get(y0 + 1) or {}).get("est") and eps[y0]["avg"] and eps[y0 + 1]["avg"]:
             for i, per in enumerate(("0y", "+1y")):
                 v, ago = eps[y0 + i]["avg"], (eps.get(y0 + i - 1) or {}).get("avg")
-                out[per] = {"avg": v, "low": None, "high": None, "n": None, "ago": ago,
+                out[per] = {"avg": v, "low": None, "high": None, "n": None, "ago": ago, "fy": y0 + i,
                             "growth": v / ago - 1 if ago and ago > 0 else None, "cur": ov.get("currency") or m["currency"],
                             "src": "onvista"}
             src = "onvista"
@@ -1346,8 +1352,10 @@ def chart_extras(m, t, inc, bs, divs):
         for i_, per in enumerate(("0y", "+1y"), start=1):
             avg = ((m.get("est_eps") or {}).get(per) or {}).get("avg")
             avg = avg * kx if avg else None
+            fy_ = ((m.get("est_eps") or {}).get(per) or {}).get("fy")
+            yr = fy_ if fy_ and fy_ > last_d.year else last_d.year + i_
             if avg and eps[-1][1] > 0 and 0.33 < avg / eps[-1][1] < 3:
-                est.append([(last_d.replace(year=last_d.year + i_)).strftime("%Y-%m-%d"), round(avg, 4)])
+                est.append([safe(lambda: last_d.replace(year=yr), last_d.replace(year=yr, day=28)).strftime("%Y-%m-%d"), round(avg, 4)])
     # zweites Folgejahr (keine Analystenschätzung): Gewinnwachstum des Vorjahres fortgeschrieben, begrenzt
     est_trend = None
     if len(est) == 2 and est[0][1] > 0 and est[1][1] > 0:
@@ -3813,8 +3821,8 @@ def _onvista_isin(symbol, name=None):
     if not name:
         own = next((r_ for q in (symbol, base) for r_ in safe(lambda: search_symbols(q), []) or [] if r_.get("symbol") == symbol), None)
         name = own and own.get("name")
-    def toks(n):  # Kernname: ohne Rechtsform, allgemeine Wörter, Artikel (L'Air Liquide) und Gattung (Volvo B)
-        t_ = [w for w in _legal_tokens(n or "") if w not in ONVISTA_GENERIC]
+    def toks(n):  # Kernname: ohne Rechtsform, Klammerzusatz, allgemeine Wörter, Artikel (L'Air Liquide), Gattung (Volvo B)
+        t_ = [w for w in _legal_tokens(re.sub(r"\(.*?\)", " ", n or "")) if w not in ONVISTA_GENERIC]
         while t_ and len(t_[0]) == 1:
             t_ = t_[1:]
         while len(t_) > 1 and len(t_[-1]) == 1:
