@@ -4873,7 +4873,6 @@ function render(d) {
 
   ${quarterSection(d)}
 
-  ${valChartCard(d)}
 
   <h2 class="section">Auf einen Blick</h2>
   <p class="section-sub">Das zutreffendste Adjektiv je Kategorie. Der Balken zeigt die Einordnung von negativ (links) bis positiv (rechts).</p>
@@ -4928,6 +4927,8 @@ function render(d) {
   </div>
 
   ${fairCard(d)}
+
+  ${valChartCard(d)}
 
   <h2 class="section" id="news">Nachrichten der letzten 30 Tage</h2>
   <p class="section-sub">${N.count} relevante Meldungen, davon ${N.count_trusted} aus Tier-1/2-Quellen. Punktfarbe = Tonalität der Schlagzeile.</p>
