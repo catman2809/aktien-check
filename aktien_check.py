@@ -4256,11 +4256,12 @@ def add_table_estimates(periods, estimates, n):
             e["ebit"] = e["revenue"] * (e["margin"] + gap_)
 
 
-def add_fcf_estimates(periods, estimates, n):
-    """Free Cashflow für die Prognosen ableiten (dafür gibt es bei Yahoo keinen Konsens): erwarteter Reinertrag ×
-    Cash-Umwandlung (Free Cashflow / Reinertrag); ohne Gewinnprognose erwarteter Umsatz × Free-Cashflow-Marge.
-    Die Quote ist je zur Hälfte der Median der letzten n Perioden (gegen Sondereffekte) und die jüngste Periode
-    (damit z. B. stark steigende Investitionen nicht übersehen werden)."""
+def add_fcf_estimates(periods, estimates, n, by_margin=False):
+    """Free Cashflow für die Prognosen ableiten (dafür gibt es keinen frei verfügbaren Konsens). Jahre (by_margin):
+    erwarteter Umsatz × Free-Cashflow-Marge – im Rückblick über 55 Aktien genauer als über den Gewinn (mittlerer
+    Fehler 5,0 statt 6,3 % vom Umsatz) und unempfindlich gegen einmalige Gewinnsprünge im Konsens (Alphabet, Ölwerte);
+    ersatzweise erwarteter Reinertrag × Cash-Umwandlung. Quartale: umgekehrt. Die Quote ist je zur Hälfte der Median der
+    letzten n Perioden (gegen Sondereffekte) und die jüngste Periode (damit steigende Investitionen zählen)."""
     med = lambda xs: (sorted(xs)[len(xs) // 2] if len(xs) % 2 else sum(sorted(xs)[len(xs) // 2 - 1:len(xs) // 2 + 1]) / 2) if xs else None
     recent = [p_ for p_ in periods[-n:] if p_.get("fcf") is not None]
 
@@ -4271,11 +4272,14 @@ def add_fcf_estimates(periods, estimates, n):
     if len(recent) < min(2, n):
         return
     conv = conv if conv is not None and 0.3 <= conv <= 2.5 else None   # sonst Sondereffekte im Gewinn
+    margin = margin if margin is not None and -0.5 <= margin <= 0.6 else None
     for e in estimates:
-        if conv is not None and e.get("net_income") and e["net_income"] > 0:
-            e["fcf"] = e["net_income"] * conv
-        elif margin is not None and -0.5 <= margin <= 0.6 and e.get("revenue"):
-            e["fcf"] = e["revenue"] * margin
+        by_ni = conv is not None and e.get("net_income") and e["net_income"] > 0
+        by_rev = margin is not None and e.get("revenue")
+        if by_rev and (by_margin or not by_ni):
+            e["fcf"], e["fcf_basis"] = e["revenue"] * margin, "margin"
+        elif by_ni:
+            e["fcf"], e["fcf_basis"] = e["net_income"] * conv, "conv"
         else:
             continue
         e["fcf_derived"] = True
@@ -4304,7 +4308,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v18")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
+    key = (symbol, freq, "v19")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4431,7 +4435,7 @@ def income_data(symbol, freq):
     if freq == "annual":
         safe(lambda: couple_revenue(periods, out["estimates"]))
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
-    safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
+    safe(lambda: add_fcf_estimates(periods, out["estimates"], 3 if freq == "annual" else 4, by_margin=freq == "annual"))
     safe(lambda: add_table_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
     INCOME_CACHE[key] = (time.time(), out)
     return out

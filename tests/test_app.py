@@ -1854,6 +1854,10 @@ class TestFcfEstimates(unittest.TestCase):
         self.assertAlmostEqual(est[0]["fcf"], 20.0 * (1.1 + 0.7) / 2)        # halb Median (1,1), halb jüngstes Jahr (0,7)
         self.assertAlmostEqual(est[1]["fcf"], 130.0 * (0.11 + 0.07) / 2)     # ohne Gewinnprognose: Free-Cashflow-Marge
         self.assertTrue(est[0]["fcf_derived"])
+        est2 = [{"revenue": 120.0, "net_income": 40.0}]                       # Gewinnsprung (Sondereffekt) im Konsens
+        a.add_fcf_estimates(periods, est2, 3, by_margin=True)
+        self.assertAlmostEqual(est2[0]["fcf"], 120.0 * (0.11 + 0.07) / 2)    # Jahre: über die Umsatzmarge, nicht den Gewinn
+        self.assertEqual(est2[0]["fcf_basis"], "margin")
 
 
 class TestDividendForecast(unittest.TestCase):

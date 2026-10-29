@@ -330,3 +330,7 @@ DEPOT_EXACT.update({
 })
 DEPOT_WILD += [("{*}: Umsatz aus Vorjahresquartal und Jahresprognose abgeleitet, {*1}.", "{*}: revenue derived from the prior-year quarter and the annual forecast, {*1}."),
                ("Aus Vorjahresquartal und Jahresprognose abgeleitet · Reinertrag aus dem {*}-Konsens", "Derived from the prior-year quarter and the annual forecast · net income from the {*} consensus")]
+DEPOT_EXACT.update({
+    "Free Cashflow abgeleitet: erwarteter Umsatz mal übliche Free-Cashflow-Marge (halb Median der letzten Perioden, halb jüngste Periode).":
+        "Free cash flow derived: expected revenue times the usual free cash flow margin (half median of recent periods, half latest period).",
+})

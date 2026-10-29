@@ -4274,7 +4274,8 @@ function incHead(p, D, unit) {
 function incEstNote(E) {
   // eigene Spans je Satzteil, damit die englische Übersetzung greift
   return `<span>e = erwartet.</span>${estSources(E)}` + coupledNote(E) +
-    (E.some(p => p.fcf_derived) ? ` <span>Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
+    (E.some(p => p.fcf_basis === "margin") ? ` <span>Free Cashflow abgeleitet: erwarteter Umsatz mal übliche Free-Cashflow-Marge (halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
+    (E.some(p => p.fcf_basis === "conv") ? ` <span>Free Cashflow abgeleitet: erwarteter Reinertrag mal übliche Cash-Umwandlung (Free Cashflow je Euro Gewinn, halb Median der letzten Perioden, halb jüngste Periode).</span>` : "") +
     (E.some(p => p.adj_jump) ? ` <span>Hinweis: Analysten schätzen den bereinigten Gewinn (ohne Sondereffekte wie Abschreibungen, Rechtsfälle oder Umbaukosten). Ein starker Anstieg gegenüber dem berichteten Reinertrag des Vorjahres kann daher teils aus Sonderbelastungen im Vorjahr stammen.</span>` : "") +
     (E.some(p => p.op_derived) ? ` <span>Operatives Ergebnis abgeleitet: erwartete Nettomarge plus die übliche Differenz zur operativen Marge (Median der letzten Perioden).</span>` : "");
 }
