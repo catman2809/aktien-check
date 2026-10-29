@@ -1089,12 +1089,12 @@ class TestSecStatements(unittest.TestCase):
 
     def build(self):
         import unittest.mock as um
-        a.SEC_CACHE.pop(("st", 1), None)
+        a.SEC_CACHE.pop(("st2", 1), None)
         with um.patch.object(a, "_sec_facts", return_value=self.facts()),                 um.patch.object(a, "datetime", wraps=a.datetime) as dt:
             dt.now.return_value = a.datetime(2026, 3, 1)
             dt.fromisoformat = a.datetime.fromisoformat
             st = a.sec_statements(1)
-        a.SEC_CACHE.pop(("st", 1), None)
+        a.SEC_CACHE.pop(("st2", 1), None)
         return st
 
     def test_ytd_cashflow_quarters(self):
@@ -1103,6 +1103,26 @@ class TestSecStatements(unittest.TestCase):
         self.assertEqual(q, {"2025-03-31": 20, "2025-06-30": 25, "2025-09-30": 25, "2025-12-31": 30})
         shares = {"units": {"shares": [self.dur("2025-01-01", "2025-12-31", 100), self.dur("2025-01-01", "2025-09-30", 90)]}}
         self.assertEqual(a._sec_periods(shares, "shares", derive=False)[1], {})  # Durchschnittszahlen nie ableiten
+
+    def test_net_income_tagged_in_millions(self):
+        # Arista/Medtronic/FedEx: NetIncomeLoss im Jahr in Millionen getaggt, Ersatzkennzahl korrekt -> Ersatz, Q4 neu
+        import unittest.mock as um
+        f = self.facts()
+        good = f["NetIncomeLoss"]["units"]["USD"]
+        f["NetIncomeLossAvailableToCommonStockholdersBasic"] = {"units": {"USD": [dict(r_) for r_ in good if r_["start"][5:] == "01-01" and r_["end"][5:] == "12-31"]}}
+        f["NetIncomeLoss"] = {"units": {"USD": [dict(r_, val=r_["val"] / 1e6) if r_["end"][5:] == "12-31" and r_["start"][5:] == "01-01" else r_ for r_ in good]}}
+        f["Revenues"]["units"]["USD"] = [dict(r_, val=r_["val"] * 1e6) for r_ in f["Revenues"]["units"]["USD"]]
+        f["NetIncomeLoss"]["units"]["USD"] = [dict(r_, val=r_["val"] * 1e6) for r_ in f["NetIncomeLoss"]["units"]["USD"]]
+        f["NetIncomeLossAvailableToCommonStockholdersBasic"]["units"]["USD"] = [dict(r_, val=r_["val"] * 1e6) for r_ in f["NetIncomeLossAvailableToCommonStockholdersBasic"]["units"]["USD"]]
+        a.SEC_CACHE.pop(("st2", 1), None)
+        with um.patch.object(a, "_sec_facts", return_value=f), um.patch.object(a, "datetime", wraps=a.datetime) as dt:
+            dt.now.return_value = a.datetime(2026, 3, 1)
+            dt.fromisoformat = a.datetime.fromisoformat
+            st = a.sec_statements(1)
+        a.SEC_CACHE.pop(("st2", 1), None)
+        inc, qinc = st["income"]
+        self.assertEqual(a.row(inc, "Net Income")[:2], [40e6, 36e6])           # Jahr: Ersatzkennzahl
+        self.assertEqual(a.row(qinc, "Net Income")[0], 11e6)                   # Q4 = korrigiertes Jahr − Q1–Q3
 
     def test_statements_yahoo_layout(self):
         st = self.build()
@@ -1120,10 +1140,10 @@ class TestSecStatements(unittest.TestCase):
     def test_foreign_filer_not_primary(self):
         import unittest.mock as um
         f = dict(self.facts(), _annual_form="20-F")  # z. B. Alibaba: USD-Werte nur als Umrechnungshilfe
-        a.SEC_CACHE.pop(("st", 1), None)
+        a.SEC_CACHE.pop(("st2", 1), None)
         with um.patch.object(a, "_sec_facts", return_value=f):
             self.assertIsNone(a.sec_statements(1))
-        a.SEC_CACHE.pop(("st", 1), None)
+        a.SEC_CACHE.pop(("st2", 1), None)
         st = self.build()
         yq = pd.DataFrame({pd.Timestamp("2026-03-31"): [28.8, 25.5e9]}, index=["Diluted EPS", "Net Income"])  # Yahoo in CNY
         t = type("T", (), {"quarterly_income_stmt": yq})()

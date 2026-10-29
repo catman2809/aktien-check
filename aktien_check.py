@@ -4384,7 +4384,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v25")  # v22: Quartals-Free-Cashflow mit Saisonalität
+    key = (symbol, freq, "v28")  # v22: Quartals-Free-Cashflow mit Saisonalität
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4458,6 +4458,19 @@ def income_data(symbol, freq):
     if not shares_last and sh_row is not None:  # letzte Spalte oft noch ohne Aktienzahl (Sika) -> jüngste vorhandene
         prev_sh = sorted(((c, num(v)) for c, v in sh_row.items() if num(v)), key=lambda cv: str(cv[0]))
         shares_last = prev_sh[-1][1] if prev_sh else None
+    # Aktiensplit nach dem letzten Abschluss (Booking 2026: 25:1): Gewinn je Aktie und Aktienzahl auf die heutige Basis
+    # bringen, sonst passen sie nicht zu den Prognosen. Nur wenn die heutige Aktienzahl das bestätigt (Yahoo bereinigt
+    # teils schon selbst).
+    spl = safe(lambda: t.splits)
+    if spl is not None and len(spl) and eps_last and periods[-1]["net_income"] > 0:
+        f_ = 1.0
+        for d_, r_ in spl.items():
+            if str(d_)[:10] > periods[-1]["end"] and r_ and float(r_) > 0:
+                f_ *= float(r_)
+        now_sh = num(safe(lambda: t.fast_info.shares))
+        if f_ != 1.0 and now_sh and 0.7 < (periods[-1]["net_income"] / eps_last * f_) / now_sh < 1.4:
+            eps_last /= f_
+            shares_last = shares_last * f_ if shares_last else None
     if freq == "annual":
         us_sym = safe(lambda: us_listing(symbol))
         has_yahoo_est = bool(yq(lambda: len(t.earnings_estimate.index)))
@@ -6164,13 +6177,13 @@ def sec_financials(cik):
 def sec_statements(cik):
     """GuV, Bilanz und Cashflow (5 Geschäftsjahre, 8 Quartale) aus den 10-K/10-Q-Meldungen – als DataFrames mit den
     Zeilennamen von yfinance, damit alle Kennzahlen unverändert darauf rechnen. None bei Firmen ohne aktuelle USD-Abschlüsse."""
-    hit = SEC_CACHE.get(("st", cik))
+    hit = SEC_CACHE.get(("st2", cik))
     if hit and time.time() - hit[0] < 86400:
         return hit[1]
     import pandas as pd
     facts = _sec_facts(cik)
     if facts.get("_annual_form") != "10-K":
-        SEC_CACHE[("st", cik)] = (time.time(), None)
+        SEC_CACHE[("st2", cik)] = (time.time(), None)
         return None
 
     def flows(concepts, unit="USD", pick=None, derive=True):
@@ -6194,10 +6207,35 @@ def sec_statements(cik):
     F.update({n: flows(cs, "shares", derive=False) for n, cs in SEC_SHARE_ROWS.items()})
     I = {n: instants(cs) for n, cs in SEC_INSTANT_ROWS.items()}
     I.update({n: instants(cs, "shares") for n, cs in SEC_INSTANT_SHARES.items()})
+    # Manche Firmen taggen den Reinertrag in Millionen statt Dollar (Arista, Medtronic, FedEx: 2.087 statt 2,087 Mrd.).
+    # Um Größenordnungen zu kleine Werte durch eine gleichwertige Kennzahl ersetzen bzw. hochrechnen.
+    bad_y = False
+    for k_ in (0, 1):
+        rev_, ni_ = F["Total Revenue"][k_], F["Net Income"][k_]
+        alt_ = {}
+        for c in SEC_FLOW_ROWS["Net Income"][1:]:
+            for e, v in _sec_periods(facts.get(c) or {}, "USD", True)[k_].items():
+                alt_.setdefault(e, v)
+        bad = any(v and rev_.get(e) and abs(v) * 1e5 < abs(rev_[e]) for e, v in ni_.items()) or (k_ == 1 and bad_y)
+        if k_ == 0:
+            bad_y = bad  # falsche Jahreswerte verderben auch die abgeleiteten vierten Quartale
+        for e, v in list(ni_.items()):
+            r_, al = rev_.get(e), alt_.get(e)
+            if bad and al and r_ and abs(al) * 1e5 >= abs(r_) and abs(v - al) > 0.05 * abs(al):
+                ni_[e] = al  # auch abgeleitete Quartale (Jahr minus drei Quartale) aus dem falschen Jahreswert ersetzen
+            elif v and r_ and abs(v) * 1e5 < abs(r_) and abs(v) * 1e6 <= abs(r_) * 2:
+                ni_[e] = v * 1e6
+        if k_ == 1 and bad:  # viertes Quartal neu: korrigiertes Jahr minus die drei Quartale davor
+            for ye, yv in F["Net Income"][0].items():
+                dy = datetime.fromisoformat(ye)
+                q4 = next((e for e in ni_ if abs((datetime.fromisoformat(e) - dy).days) <= 20), None)
+                prev3 = [v for e, v in ni_.items() if 20 < (dy - datetime.fromisoformat(e)).days < 345]
+                if q4 and len(prev3) == 3:
+                    ni_[q4] = yv - sum(prev3)
     ni_y, ni_q = F["Net Income"]
     a_ends = sorted(e for e in ni_y if e in F["Total Revenue"][0] or not F["Total Revenue"][0])[-5:]
     if not a_ends or (datetime.now() - datetime.fromisoformat(a_ends[-1])).days > 550:
-        SEC_CACHE[("st", cik)] = (time.time(), None)
+        SEC_CACHE[("st2", cik)] = (time.time(), None)
         return None
     q_ends = sorted(e for e in ni_q if e >= a_ends[0])[-8:]
 
@@ -6280,7 +6318,7 @@ def sec_statements(cik):
     ai, ab, ac = frames(a_ends, 0)
     qi, qb, qc = frames(q_ends, 1)
     st = {"income": (ai, qi), "balance": (ab, qb), "cashflow": (ac, qc), "end": a_ends[-1], "cik": cik}
-    SEC_CACHE[("st", cik)] = (time.time(), st)
+    SEC_CACHE[("st2", cik)] = (time.time(), st)
     return st
 
 
