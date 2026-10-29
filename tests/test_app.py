@@ -387,7 +387,8 @@ class TestHTTP(Isolated):
         self.assertEqual(self.login(op, "admin", "test-admin-pass"), 303)
         st, _, b = self.call(op, "/api/me")
         self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True, "unread": 0,
-                                         "maintenance": {"on": False, "text": ""}})
+                                         "maintenance": {"on": False, "text": ""},
+                                         "prefs": {"lang": "de", "theme": "auto", "mv_uni": "dax", "mv_per": "day"}})
 
     def test_lock_maintenance_backup_restore(self):
         adm, anna = self.client(), self.client()
@@ -452,6 +453,16 @@ class TestHTTP(Isolated):
         dash = json.loads(self.call(adm, "/api/admin/dashboard")[2])
         self.assertEqual(dash["subs"]["active"], 1)
         self.assertEqual(next(u_ for u_ in dash["users"] if u_["name"] == "anna")["sub"]["state"], "aktiv")
+        # Mein Bereich: Einstellungen im Konto, Übersicht
+        self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"]["theme"], "auto")
+        self.assertEqual(self.call(anna, "/api/prefs", {"theme": "pink"})[0], 400)
+        self.assertEqual(self.call(anna, "/api/prefs", {"mv_uni": "nirgends"})[0], 400)
+        self.call(anna, "/api/prefs", {"theme": "dark", "mv_uni": "sp500", "mv_per": "year"})
+        self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"],
+                         {"lang": "de", "theme": "dark", "mv_uni": "sp500", "mv_per": "year"})
+        summ = json.loads(self.call(anna, "/api/me/summary")[2])
+        self.assertEqual((summ["user"], summ["watchlist"], summ["depot"], summ["sub"]["state"]), ("anna", [], None, "aktiv"))
+        self.assertEqual(self.call(self.client(), "/api/me/summary")[0], 401)
         # Nachrichten: Benutzer -> Admin -> Benutzer, mit Ungelesen-Zähler
         self.assertEqual(self.call(anna, "/api/messages", {"text": "  "})[0], 400)        # leere Nachricht abgelehnt
         self.call(anna, "/api/messages", {"text": "Hallo Admin, wie bezahle ich?"})

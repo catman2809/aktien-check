@@ -280,3 +280,35 @@ DEPOT_EXACT.update({
     "Hinweis: Analysten schätzen den bereinigten Gewinn (ohne Sondereffekte wie Abschreibungen, Rechtsfälle oder Umbaukosten). Ein starker Anstieg gegenüber dem berichteten Reinertrag des Vorjahres kann daher teils aus Sonderbelastungen im Vorjahr stammen.":
         "Note: analysts estimate adjusted earnings (excluding one-offs such as write-downs, legal cases or restructuring costs). A sharp rise versus the prior year's reported net income may therefore partly reflect one-off charges in the prior year.",
 })
+# Mein Bereich
+DEPOT_EXACT.update({
+    "Mein Bereich": "My area", "Hallo": "Hello", "Guten Morgen": "Good morning", "Guten Abend": "Good evening",
+    "Übersicht": "Overview", "Einstellungen": "Settings", "Konto": "Account", "Watchlist heute": "Watchlist today",
+    "Öffnen": "Open", "Hochladen": "Upload", "Verwalten": "Manage", "Details": "Details", "Depot": "Portfolio",
+    "Nächste Termine": "Upcoming events", "Alarme": "Alerts", "Abo": "Subscription", "Schnellzugriff": "Quick access",
+    "☆ Watchlist": "☆ Watchlist", "Trefferquote & Verlauf": "Hit rate & history", "Glossar": "Glossary",
+    "Lade deine Übersicht …": "Loading your overview …", "Übersicht nicht verfügbar": "Overview not available",
+    "Noch leer. Öffne eine Aktie und tippe auf ☆, um sie zu beobachten.": "Still empty. Open a stock and tap ☆ to watch it.",
+    "Noch kein Depot gespeichert. Lade die Depotübersicht oder Umsatzliste deiner Bank als CSV hoch.":
+        "No portfolio saved yet. Upload your bank's portfolio overview or transaction list as CSV.",
+    "Gewinn/Verlust (offen)": "Gain/loss (unrealised)", "Rendite 12 Monate": "12-month return",
+    "Öffne das Depot, um Wert und Rendite neu zu berechnen.": "Open the portfolio to recalculate value and return.",
+    "Keine Termine der Watchlist in den nächsten 60 Tagen bekannt. Termine erscheinen, sobald du die Aktien einmal analysiert hast.":
+        "No watchlist events known for the next 60 days. Events appear once you have analysed the stocks.",
+    "Alarm aktiv": "alert active", "Alarme aktiv": "alerts active", "Zuletzt wurde kein Alarm ausgelöst.": "No alert has fired recently.",
+    "Darstellung": "Appearance", "Sprache": "Language", "Design": "Theme", "Automatisch (wie Gerät)": "Automatic (like device)",
+    "Hell": "Light", "Dunkel": "Dark", "Startseite": "Start page", "Top & Flop für": "Top & flop for", "Zeitraum": "Period",
+    "Seit Monatsbeginn": "Month to date", "Seit Jahresbeginn": "Year to date", "Push-Benachrichtigungen": "Push notifications",
+    "Dein persönliches ntfy-Thema. In der ntfy-App abonnieren, dann kommen Alarme aufs Handy.":
+        "Your personal ntfy topic. Subscribe to it in the ntfy app to get alerts on your phone.",
+    "Änderungen werden sofort in deinem Konto gespeichert und gelten auf allen Geräten.":
+        "Changes are saved to your account right away and apply on all your devices.",
+    "Gespeichert – gilt auf allen deinen Geräten.": "Saved – applies on all your devices.",
+    "Kontodaten werden geladen …": "Loading account data …",
+})
+DEPOT_WILD += [
+    ("{0} Aktie · {1} im Plus · {2} im Minus", "{0} stock · {1} up · {2} down"),
+    ("{0} Aktien · {1} im Plus · {2} im Minus", "{0} stocks · {1} up · {2} down"),
+    ("{0} Positionen", "{0} positions"), ("Stand der Auswertung: {*}", "Analysed: {*}"),
+    ("Positionen gespeichert · {*}", "positions saved · {*}"), ("{0} € pro Monat", "€{0} per month"),
+]

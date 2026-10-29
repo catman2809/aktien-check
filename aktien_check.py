@@ -9980,6 +9980,88 @@ def send_due_reports():
         safe(STORE.save)
 
 
+PREF_CHOICES = {"theme": ("auto", "light", "dark"), "mv_per": ("day", "month", "year")}
+
+
+def user_prefs(sp):
+    """Persönliche Einstellungen eines Kontos (auf allen Geräten gleich)."""
+    pr = dict(sp.get("prefs") or {})
+    return {"lang": sp.get("lang") or "de", "theme": pr.get("theme") or "auto", "mv_uni": pr.get("mv_uni") or "dax",
+            "mv_per": pr.get("mv_per") or "day"}
+
+
+def set_prefs(sp, body):
+    """Einstellungen aus einer Anfrage übernehmen; Unbekanntes wird ignoriert, ungültige Werte abgelehnt."""
+    if "lang" in body:
+        sp["lang"] = "en" if body.get("lang") == "en" else "de"
+    pr = sp.setdefault("prefs", {})
+    for k, allowed in PREF_CHOICES.items():
+        if k in body:
+            if body[k] not in allowed:
+                raise ValueError("Ungültige Einstellung")
+            pr[k] = body[k]
+    if "mv_uni" in body:
+        if body["mv_uni"] not in SCREENER_UNIVERSES:
+            raise ValueError("Unbekannter Index")
+        pr["mv_uni"] = body["mv_uni"]
+    return user_prefs(sp)
+
+
+WL_QUOTE_CACHE = {}  # Symbole -> (Zeit, {Symbol: Tagesveränderung})
+
+
+def watchlist_quotes(symbols):
+    """Kurs und Veränderung zum Vortag für die Watchlist (ein gebündelter Abruf, 10 Minuten zwischengespeichert)."""
+    import pandas as pd
+    syms = sorted(set(symbols))[:60]
+    if not syms:
+        return {}
+    key = tuple(syms)
+    hit = WL_QUOTE_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    df = yf.download(syms, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True)["Close"]
+    if isinstance(df, pd.Series):
+        df = df.to_frame(syms[0])
+    out = {}
+    for s_ in syms:
+        c = df[s_].dropna() if s_ in df else None
+        if c is not None and len(c) >= 2 and float(c.iloc[-2]) > 0:
+            out[s_] = {"price": float(c.iloc[-1]), "change": float(c.iloc[-1]) / float(c.iloc[-2]) - 1,
+                       "date": c.index[-1].date().isoformat()}
+    WL_QUOTE_CACHE[key] = (time.time(), out)
+    if len(WL_QUOTE_CACHE) > 200:
+        WL_QUOTE_CACHE.pop(next(iter(WL_QUOTE_CACHE)))
+    return out
+
+
+def me_summary(user, admin=False):
+    """Daten für „Mein Bereich“: Watchlist mit Tagesveränderung, Depot-Eckdaten, Alarme, Abo und Einstellungen.
+    Teure Auswertungen (Depotanalyse) werden nicht angestoßen, nur vorhandene Ergebnisse gezeigt."""
+    sp = user_space(user)
+    wl = [x for x in sp.get("watchlist") or [] if isinstance(x, dict) and x.get("symbol")]
+    quotes = safe(lambda: watchlist_quotes([x["symbol"] for x in wl]), {}) or {}
+    dep, depot = sp.get("depot"), None
+    if dep:
+        depot = {"saved": dep.get("saved"), "file": dep.get("file") or "", "n": len(dep.get("positions") or [])}
+        hit = DEPOT_CACHE.get(user)
+        if hit and hit[1].get("saved") == dep.get("saved"):
+            sm, rk = hit[1].get("summary") or {}, hit[1].get("risk") or {}
+            depot.update(total=sm.get("total"), gain=sm.get("gain"), gain_pct=sm.get("gain_pct"), twr=rk.get("twr"),
+                         analysed=hit[0])
+    fired = []
+    for sym, a_ in (sp.get("alerts") or {}).items():
+        for ent in ((a_.get("state") or {}).get("log") or [])[:5]:
+            fired.append({"symbol": sym, "name": a_.get("name") or sym, "t": ent.get("t"), "title": ent.get("title")})
+    fired.sort(key=lambda x: -(x["t"] or 0))
+    return {"user": user, "admin": admin, "prefs": user_prefs(sp),
+            "watchlist": [{"symbol": x["symbol"], "name": x.get("name") or x["symbol"], "currency": x.get("currency") or "",
+                           "group": x.get("group"), "label": x.get("label"), **(quotes.get(x["symbol"]) or {})} for x in wl],
+            "depot": depot, "alerts": {"n": len(sp.get("alerts") or {}), "fired": fired[:5]},
+            "sub": None if admin or not app_password() else sub_status(sp),
+            "topic": sp.get("topic"), "since": (users().get(user) or {}).get("created")}
+
+
 def alerts_payload(user, host_url=""):
     data = STORE.load()
     sp = user_space(user)
@@ -10299,11 +10381,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
             try:
                 if u.path == "/api/prefs":
-                    lang = "en" if body.get("lang") == "en" else "de"
                     with STORE.lock:
-                        user_space(user)["lang"] = lang
+                        prefs_ = set_prefs(user_space(user), body)
                         STORE.dirty = True
-                    return self.send_json({"ok": True, "lang": lang})
+                    return self.send_json({"ok": True, **prefs_})
                 if u.path == "/api/depot":
                     if body.get("action") == "delete":
                         with STORE.lock:
@@ -10658,7 +10739,10 @@ class Handler(BaseHTTPRequestHandler):
             adm_ = self.is_admin()
             unread_ = sum(t_["unread"] for t_ in admin_threads()) if adm_ else unread_for_user(user)
             return self.send_json({"user": user, "admin": adm_, "multi": bool(app_password()), "unread": unread_,
-                                   "maintenance": maintenance()})
+                                   "maintenance": maintenance(), "prefs": user_prefs(sp_)})
+        if u.path == "/api/me/summary":
+            return self.send(200, json.dumps(json_safe(me_summary(user, self.is_admin())), ensure_ascii=False),
+                             "application/json; charset=utf-8")
         if u.path == "/api/messages":
             return self.send_json({"messages": thread_payload(user, False)})
         if u.path == "/api/admin/messages":

@@ -861,6 +861,37 @@ table.inc-tbl{min-width:520px}
 .hist-empty{color:var(--text-2);font-size:14px;line-height:1.6}
 .hist-empty b{color:var(--text)}
 
+/* ---------- Mein Bereich ---------- */
+.mine-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:8px 0 18px}
+.mine-hello{display:flex;align-items:center;gap:12px}
+.mine-hello h1{font-size:26px;letter-spacing:-.02em;margin:2px 0 0}
+.mine-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px;align-items:start}
+.mine-grid > *{min-width:0}
+.mine-card h2{font-size:16px;margin:0}
+.mine-card-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+.mine-more{font-size:13.5px;font-weight:600;white-space:nowrap}
+.mine-list{list-style:none;margin:8px 0 0;padding:0}
+.mine-list li{border-top:1px solid var(--border)}
+.mine-list a{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;color:inherit;text-decoration:none}
+.mine-list a:hover b{color:var(--accent)}
+.mine-list span:first-child{min-width:0}
+.mine-list b{display:block;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mine-list small{display:block;color:var(--text-3);font-size:12.5px}
+.mine-list .num{text-align:right;white-space:nowrap;font-size:13.5px}
+.mine-list .num b{display:inline;margin-left:6px}
+.mine-soon{color:var(--accent);font-weight:600}
+.mine-kpi{display:flex;align-items:baseline;gap:10px;margin:4px 0 8px}
+.mine-kpi b{font-size:24px;letter-spacing:-.01em}
+.mine-kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);font-size:14px}
+.mine-btns{display:flex;flex-wrap:wrap;gap:8px}
+.mine-set{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--border)}
+.mine-set label{font-size:14.5px}
+.mine-set select{height:38px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
+  padding:0 10px;font:inherit;font-size:15px;max-width:60%}
+.mine-acct{max-width:640px}
+.mine-acct > .eyebrow:first-child{margin-top:0}
+@media (max-width:640px){.mine-hello h1{font-size:22px} #mine-tabs{width:100%} #mine-tabs button{flex:1}}
+
 /* ---------- Konto & Benutzerverwaltung ---------- */
 .acct-name{font-size:12px;font-weight:600;color:var(--text-2);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.acct-name{display:none}}
@@ -1303,6 +1334,7 @@ $("#theme").onclick = () => {
   const nxt = cur === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = nxt;
   try { localStorage.setItem("ac-theme", nxt); } catch (e) {}
+  if (typeof ME !== "undefined" && ME?.multi) api("/api/prefs", {theme: nxt}).catch(() => {});
 };
 
 /* Search & suggestions */
@@ -1362,6 +1394,13 @@ async function initAccount() {
   if (ME.maintenance?.on && !ME.admin) { showMaintenance(ME.maintenance.text); return; }
   if (ME.maintenance?.on && ME.admin) maintBanner(true);
   WL_KEY = "ac-watchlist:" + ME.user;
+  if (ME.prefs && ME.multi) {  // Einstellungen des Kontos haben Vorrang vor dem, was dieses Gerät gespeichert hat
+    const old_ = [mvUni, mvPer];
+    applyPrefs(ME.prefs);
+    if ((old_[0] !== mvUni || old_[1] !== mvPer) && document.querySelector("#mv")) moversLoad();
+    if (ME.prefs.lang && ME.prefs.lang !== I18N.lang) setLang(ME.prefs.lang, false);
+  }
+  if (location.search.includes("view=mein") && mineTab === "account") renderMine();
   if (ME.admin && document.querySelector(".welcome") && !document.querySelector("#admopen")) welcome();  // Admin-Kachel nachreichen
   setUnread(ME.unread || 0);
   if (ME.multi) setInterval(async () => { try { const me_ = await api("/api/me"); setUnread(me_.unread || 0); } catch (e) {} }, 60000);
@@ -1379,7 +1418,7 @@ async function initAccount() {
   if (ME.multi) {
     $("#acctbtn").style.display = "";
     $("#acctname").textContent = ME.user;
-    $("#acctbtn").onclick = openAccount;
+    $("#acctbtn").onclick = () => showMine("start");
   }
   if (wlView) renderWl(); else if (!new URLSearchParams(location.search).get("q") && $(".welcome")) welcome();
 }
@@ -1772,12 +1811,9 @@ function renderPush() {
 
 /* Konto & Benutzerverwaltung */
 function fmtAgo(ts) { return ts ? ago(new Date(ts * 1000).toISOString()) : "nie"; }
-async function openAccount() {
+async function openAccount(target) {
   closeModal();
-  const bg = document.createElement("div");
-  bg.className = "modal-bg";
-  bg.innerHTML = `<div class="card pad modal wide" role="dialog" aria-modal="true" aria-labelledby="acct-t">
-    <div class="eyebrow">Konto</div><h3 id="acct-t">Angemeldet als ${esc(ME.user)}${ME.admin ? `<span class="role">Admin</span>` : ""}</h3>
+  const inner = `<div class="eyebrow">Konto</div><h3 id="acct-t">Angemeldet als ${esc(ME.user)}${ME.admin ? `<span class="role">Admin</span>` : ""}</h3>
     <div class="sec"><h4>Passwort ändern</h4>
       <div class="field"><label for="pw-old">Aktuelles Passwort</label><input id="pw-old" type="password" autocomplete="current-password"></div>
       <div class="field"><label for="pw-new">Neues Passwort (mind. 8 Zeichen)</label><input id="pw-new" type="password" autocomplete="new-password"></div>
@@ -1799,11 +1835,16 @@ async function openAccount() {
       <label class="check"><input type="checkbox" id="nu-admin"><span>Admin-Rechte (darf Benutzer verwalten)</span></label>
       <div class="modal-actions" style="justify-content:flex-start;margin-top:12px"><button class="btn primary" id="nu-save">Benutzer anlegen</button></div>
       <div class="form-msg" id="nu-msg"></div></div>` : ""}
-    <div class="modal-actions"><a class="btn danger" href="/logout">Abmelden</a><button class="btn" id="acct-close">Schließen</button></div>
-  </div>`;
-  document.body.appendChild(bg);
-  bg.onclick = e => { if (e.target === bg) closeModal(); };
-  $("#acct-close").onclick = closeModal;
+    <div class="modal-actions"><a class="btn danger" href="/logout">Abmelden</a>${target ? "" : `<button class="btn" id="acct-close">Schließen</button>`}</div>`;
+  if (target) target.innerHTML = inner;
+  else {
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.innerHTML = `<div class="card pad modal wide" role="dialog" aria-modal="true" aria-labelledby="acct-t">${inner}</div>`;
+    document.body.appendChild(bg);
+    bg.onclick = e => { if (e.target === bg) closeModal(); };
+    $("#acct-close").onclick = closeModal;
+  }
   const ao_ = $("#adm-open"); if (ao_) ao_.onclick = () => { closeModal(); showAdmin(); };
   if ($("#sub-box")) loadSub();
   if ($("#msg-thread")) loadThread();
@@ -1845,6 +1886,158 @@ async function openAccount() {
       msg("#nu-msg", `Benutzer „${$("#nu-name").value.trim().toLowerCase()}“ angelegt. Gib Benutzername und Startpasswort an die Person weiter.`, true);
       $("#nu-name").value = $("#nu-pw").value = ""; $("#nu-admin").checked = false;
     } catch (e) { if (e.message !== "login") msg("#nu-msg", e.message); }
+  };
+}
+
+/* Mein Bereich: Übersicht, Einstellungen (im Konto gespeichert, auf allen Geräten gleich) und Konto */
+let MINE = null, mineTab = "start";
+async function showMine(tab) {
+  runId++; wlView = false; depotView = false;
+  closeModal();
+  mineTab = ["start", "settings", "account"].includes(tab) ? tab : mineTab;
+  $("#subnav").style.display = "none";
+  navTo("?view=mein" + (mineTab === "start" ? "" : "&tab=" + mineTab));
+  window.scrollTo({top: 0});
+  const my = runId;
+  renderMine();
+  try { MINE = await api("/api/me/summary"); } catch (e) { if (e.message === "login") return; MINE = {error: e.message}; }
+  if (my === runId) renderMine();
+}
+function mineGreeting() {
+  const h = new Date().getHours();
+  return h < 11 ? "Guten Morgen" : h < 18 ? "Hallo" : "Guten Abend";
+}
+function renderMine() {
+  if (!location.search.includes("view=mein")) return;
+  const M = MINE, name = ME?.user && ME.user !== "admin" ? ME.user : "";
+  const tabs = [["start", "Übersicht"], ["settings", "Einstellungen"], ["account", "Konto"]];
+  $("#out").innerHTML = `<div class="mine">
+    <div class="mine-head">
+      <div class="mine-hello">${kerziSVG("buy", 46)}<div><div class="eyebrow">Mein Bereich</div>
+        <h1><span>${mineGreeting()}</span>${name ? `<span class="mine-name">, ${esc(name)}</span>` : ""}</h1></div></div>
+      <div class="seg" id="mine-tabs" role="tablist">${tabs.map(([k, l]) =>
+        `<button type="button" role="tab" data-t="${k}" class="${mineTab === k ? "on" : ""}" aria-selected="${mineTab === k}">${l}</button>`).join("")}</div>
+    </div>
+    <div id="mine-body">${mineTab === "start" ? mineStart(M) : mineTab === "settings" ? mineSettings(M) : `<div class="card pad mine-acct" id="mine-acct"></div>`}</div>
+  </div>`;
+  document.querySelectorAll("#mine-tabs button").forEach(b => b.onclick = () => { mineTab = b.dataset.t; navTo("?view=mein" + (mineTab === "start" ? "" : "&tab=" + mineTab)); renderMine(); });
+  if (mineTab === "account") { if (ME) openAccount($("#mine-acct")); else $("#mine-acct").innerHTML = `<p class="stamp">Kontodaten werden geladen …</p>`; }
+  if (mineTab === "settings") bindMineSettings();
+  document.querySelectorAll("#out [data-go]").forEach(b => b.onclick = e => {
+    e.preventDefault();
+    const g = b.dataset.go;
+    if (g === "watchlist") showWatchlist(); else if (g === "depot") showDepot(); else if (g === "track") showTrack();
+    else if (g === "glossar") showGlossary(); else if (g === "settings" || g === "account") showMine(g);
+    else if (g.startsWith("q:")) { $("#q").value = g.slice(2); run(g.slice(2)); }
+  });
+}
+function mineStart(M) {
+  if (!M) return `<div class="loading">${KERZI_MINI}<b>Lade deine Übersicht …</b></div>`;
+  if (M.error) return `<div class="card error"><b>Übersicht nicht verfügbar</b><span class="stamp">${esc(M.error)}</span></div>`;
+  const sgn = v => v == null ? "–" : pc(v, 1, true), col = v => v == null ? "" : `style="color:var(${v >= 0 ? "--pos" : "--neg"})"`;
+  // Watchlist: größte Bewegungen heute
+  const wl = (M.watchlist || []).filter(x => x.change != null).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  const up = (M.watchlist || []).filter(x => (x.change ?? 0) > 0).length, dn = (M.watchlist || []).filter(x => (x.change ?? 0) < 0).length;
+  const wlCard = `<section class="card pad mine-card"><div class="mine-card-h"><h2>Watchlist heute</h2>
+      <a href="?view=watchlist" data-go="watchlist" class="mine-more">Öffnen</a></div>
+    ${(M.watchlist || []).length ? `<p class="stamp">${M.watchlist.length} ${M.watchlist.length === 1 ? "Aktie" : "Aktien"} · ${up} im Plus · ${dn} im Minus</p>
+      <ul class="mine-list">${wl.slice(0, 5).map(x => `<li><a href="?q=${encodeURIComponent(x.symbol)}" data-go="q:${esc(x.symbol)}">
+        <span><b>${esc(x.name)}</b><small>${esc(x.symbol)}</small></span>
+        <span class="num">${nf(x.price)} ${esc(x.currency)} <b ${col(x.change)}>${sgn(x.change)}</b></span></a></li>`).join("")}</ul>`
+      : `<p class="stamp">Noch leer. Öffne eine Aktie und tippe auf ☆, um sie zu beobachten.</p>`}</section>`;
+  // Depot: nur vorhandene Auswertung zeigen, keine neue anstoßen
+  const D = M.depot;
+  const depCard = `<section class="card pad mine-card"><div class="mine-card-h"><h2>Depot</h2>
+      <a href="?view=depot" data-go="depot" class="mine-more">${D ? "Öffnen" : "Hochladen"}</a></div>
+    ${!D ? `<p class="stamp">Noch kein Depot gespeichert. Lade die Depotübersicht oder Umsatzliste deiner Bank als CSV hoch.</p>`
+      : D.total != null ? `<div class="mine-kpi"><b class="num">${nf(D.total, 0)} €</b><span class="stamp">${D.n} Positionen</span></div>
+        <div class="mine-kv"><span>Gewinn/Verlust (offen)</span><b class="num" ${col(D.gain)}>${D.gain == null ? "–" : nf(D.gain, 0) + " € · " + sgn(D.gain_pct)}</b></div>
+        ${D.twr != null ? `<div class="mine-kv"><span>Rendite 12 Monate</span><b class="num" ${col(D.twr)}>${sgn(D.twr)}</b></div>` : ""}
+        <p class="stamp">Stand der Auswertung: ${fmtAgo(D.analysed)}</p>`
+      : `<div class="mine-kpi"><b class="num">${D.n}</b><span class="stamp">Positionen gespeichert${D.file ? " · " + esc(D.file) : ""}</span></div>
+        <p class="stamp">Öffne das Depot, um Wert und Rendite neu zu berechnen.</p>`}</section>`;
+  // Termine der Watchlist (aus den gespeicherten Analysen)
+  const today = new Date().setHours(12, 0, 0, 0);
+  const evs = wlLoad().filter(x => x.next_event?.date).map(x => ({...x.next_event, name: x.name || x.symbol, symbol: x.symbol,
+    days: Math.round((new Date(x.next_event.date + "T12:00:00") - today) / 86400000)})).filter(e => e.days >= 0 && e.days <= 60)
+    .sort((a, b) => a.days - b.days);
+  const evCard = `<section class="card pad mine-card"><div class="mine-card-h"><h2>Nächste Termine</h2></div>
+    ${evs.length ? `<ul class="mine-list">${evs.slice(0, 5).map(e => `<li><a href="?q=${encodeURIComponent(e.symbol)}" data-go="q:${esc(e.symbol)}">
+        <span><b>${esc(e.name)}</b><small>${esc(e.label)}${e.estimated ? " (geschätzt)" : ""}</small></span>
+        <span class="num ${e.days <= 7 ? "mine-soon" : ""}">${evWhen(e.days)}</span></a></li>`).join("")}</ul>`
+      : `<p class="stamp">Keine Termine der Watchlist in den nächsten 60 Tagen bekannt. Termine erscheinen, sobald du die Aktien einmal analysiert hast.</p>`}</section>`;
+  // Alarme
+  const A = M.alerts || {n: 0, fired: []};
+  const alCard = `<section class="card pad mine-card"><div class="mine-card-h"><h2>Alarme</h2>
+      <a href="?view=watchlist" data-go="watchlist" class="mine-more">Verwalten</a></div>
+    <div class="mine-kpi"><b class="num">${A.n}</b><span class="stamp">${A.n === 1 ? "Alarm aktiv" : "Alarme aktiv"}</span></div>
+    ${A.fired.length ? `<ul class="mine-list">${A.fired.map(f => `<li><a href="?q=${encodeURIComponent(f.symbol)}" data-go="q:${esc(f.symbol)}">
+        <span><b>${esc(f.name)}</b><small>${esc(f.title || "")}</small></span><span class="stamp">${fmtAgo(f.t)}</span></a></li>`).join("")}</ul>`
+      : `<p class="stamp">Zuletzt wurde kein Alarm ausgelöst.</p>`}</section>`;
+  const sub = M.sub ? `<section class="card pad mine-card"><div class="mine-card-h"><h2>Abo</h2>
+      <a href="?view=mein&tab=account" data-go="account" class="mine-more">Details</a></div>
+    <div class="mine-kpi"><b>${esc(M.sub.state[0].toUpperCase() + M.sub.state.slice(1))}</b>
+      <span class="stamp">${M.sub.paid_until ? "bis " + new Date(M.sub.paid_until * 1000).toLocaleDateString("de-DE") : nf(M.sub.price, 0) + " € pro Monat"}</span></div></section>` : "";
+  const links = `<section class="card pad mine-card mine-links"><div class="mine-card-h"><h2>Schnellzugriff</h2></div>
+    <div class="mine-btns"><button class="btn" data-go="watchlist">☆ Watchlist</button><button class="btn" data-go="depot">Depot</button>
+      <button class="btn" data-go="track">Trefferquote &amp; Verlauf</button><button class="btn" data-go="glossar">Glossar</button>
+      <button class="btn" data-go="settings">Einstellungen</button></div></section>`;
+  return `<div class="mine-grid">${wlCard}${depCard}${evCard}${alCard}${sub}${links}</div>`;
+}
+function mineSettings(M) {
+  const P = M?.prefs || ME?.prefs || {};
+  const theme = P.theme || "auto", lang = P.lang || I18N.lang || "de";
+  const opt = (v, cur, l) => `<option value="${v}" ${v === cur ? "selected" : ""}>${l}</option>`;
+  return `<div class="mine-grid">
+    <section class="card pad mine-card"><div class="mine-card-h"><h2>Darstellung</h2></div>
+      <div class="mine-set"><label for="set-lang">Sprache</label><select id="set-lang">${opt("de", lang, "Deutsch")}${opt("en", lang, "English")}</select></div>
+      <div class="mine-set"><label for="set-theme">Design</label><select id="set-theme">${opt("auto", theme, "Automatisch (wie Gerät)")}${opt("light", theme, "Hell")}${opt("dark", theme, "Dunkel")}</select></div>
+    </section>
+    <section class="card pad mine-card"><div class="mine-card-h"><h2>Startseite</h2></div>
+      <div class="mine-set"><label for="set-uni">Top &amp; Flop für</label><select id="set-uni">${MV_UNIS.map(([k, l]) => opt(k, P.mv_uni || mvUni, l)).join("")}</select></div>
+      <div class="mine-set"><label for="set-per">Zeitraum</label><select id="set-per">${opt("day", P.mv_per || mvPer, "Heute")}${opt("month", P.mv_per || mvPer, "Seit Monatsbeginn")}${opt("year", P.mv_per || mvPer, "Seit Jahresbeginn")}</select></div>
+    </section>
+    <section class="card pad mine-card"><div class="mine-card-h"><h2>Push-Benachrichtigungen</h2></div>
+      <p class="stamp">Dein persönliches ntfy-Thema. In der ntfy-App abonnieren, dann kommen Alarme aufs Handy.</p>
+      <div class="code"><input readonly value="${esc(M?.topic || ALERTS?.topic || "wird geladen …")}" onclick="this.select()" aria-label="Dein ntfy-Thema">
+        <button class="btn" id="set-copy">Kopieren</button></div>
+      <div class="mine-btns" style="margin-top:10px"><button class="btn" id="set-test">Test-Benachrichtigung senden</button></div>
+    </section>
+  </div>
+  <p class="stamp" id="set-msg" style="margin-top:12px">Änderungen werden sofort in deinem Konto gespeichert und gelten auf allen Geräten.</p>`;
+}
+async function savePrefs(patch) {
+  if (ME) ME.prefs = {...(ME.prefs || {}), ...patch};
+  if (MINE?.prefs) MINE.prefs = {...MINE.prefs, ...patch};
+  applyPrefs(patch);
+  try {
+    await api("/api/prefs", patch);
+    const m = $("#set-msg"); if (m) { m.textContent = "Gespeichert – gilt auf allen deinen Geräten."; m.className = "stamp form-msg ok"; }
+  } catch (e) { if (e.message !== "login") toast("Speichern fehlgeschlagen: " + e.message); }
+}
+function applyPrefs(P) {
+  if (P.theme) {
+    if (P.theme === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = P.theme;
+    try { if (P.theme === "auto") localStorage.removeItem("ac-theme"); else localStorage.setItem("ac-theme", P.theme); } catch (e) {}
+  }
+  if (P.mv_uni) { mvUni = P.mv_uni; try { localStorage.setItem("mvUni", mvUni); } catch (e) {} }
+  if (P.mv_per) { mvPer = P.mv_per; try { localStorage.setItem("mvPer", mvPer); } catch (e) {} }
+}
+function bindMineSettings() {
+  const on = (id, fn) => { const el = $(id); if (el) el.onchange = () => fn(el.value); };
+  on("#set-theme", v => savePrefs({theme: v}));
+  on("#set-uni", v => savePrefs({mv_uni: v}));
+  on("#set-per", v => savePrefs({mv_per: v}));
+  on("#set-lang", v => { if (ME) ME.prefs = {...(ME.prefs || {}), lang: v}; setLang(v); });
+  const cp = $("#set-copy"), ts = $("#set-test");
+  if (cp) cp.onclick = async () => {
+    const i = cp.previousElementSibling;
+    try { await navigator.clipboard.writeText(i.value); } catch (e) { i.select(); document.execCommand("copy"); }
+    toast("Thema kopiert – jetzt in ntfy einfügen");
+  };
+  if (ts) ts.onclick = async () => {
+    try { await api("/api/alerts/test", {}); toast("Test gesendet – erscheint gleich in der ntfy-App"); }
+    catch (e) { if (e.message !== "login") toast("Senden fehlgeschlagen: " + e.message); }
   };
 }
 
@@ -3555,6 +3748,7 @@ function route() {
   else if (ps.get("view") === "depot") showDepot();
   else if (ps.get("view") === "screener") showScreener();
   else if (ps.get("view") === "admin") showAdmin();
+  else if (ps.get("view") === "mein") showMine(ps.get("tab") || "start");
   else if (pre) { $("#q").value = pre; run(pre); }
   else { runId++; $("#q").value = ""; welcome(); }
 }
