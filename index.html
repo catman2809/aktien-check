@@ -4320,8 +4320,8 @@ function incTable(D) {
 }
 // Quelle je Prognosejahr: Umsatz (Yahoo / fortgeschrieben) und Reinertrag (Yahoo / Nasdaq / fortgeschrieben)
 function estSources(E) {
-  const revS = e => e.rev_coupled ? "Umsatz aus dem Gewinnkonsens abgeleitet" : (e.rev_trend || e.est === "trend") ? "Umsatz fortgeschrieben" : "Umsatz aus dem Analystenkonsens (Yahoo Finance)";
-  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus === "Nasdaq" ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
+  const revS = e => e.rev_q_derived ? "Umsatz aus Vorjahresquartal und Jahresprognose abgeleitet" : e.rev_coupled ? "Umsatz aus dem Gewinnkonsens abgeleitet" : (e.rev_trend || e.est === "trend") ? "Umsatz fortgeschrieben" : "Umsatz aus dem Analystenkonsens (Yahoo Finance)";
+  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus === "Jahresprognose" ? "Reinertrag aus Vorjahresquartal und Jahresprognose abgeleitet" : e.ni_consensus === "Nasdaq" ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
     : e.ni_consensus ? `Reinertrag aus dem Konsens für den Gewinn je Aktie (${e.ni_consensus})`
     : e.est === "trend" ? "Reinertrag fortgeschrieben" : "Reinertrag aus dem Analystenkonsens (Yahoo Finance)";
   const groups = [];
@@ -4435,7 +4435,7 @@ function drawIncome() {
     cols.forEach(c => c.classList.toggle("on", +c.dataset.i === i));
     const rngTxt = (lo, hi) => lo != null && hi != null && hi > lo ? ` <span style="color:var(--text-3)">(${big(lo).join(" ")} – ${big(hi).join(" ")})</span>` : "";
     tip.innerHTML = `<b>${esc(p.label)}</b>
-      ${p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">Umsatz ${p.rev_coupled ? "aus dem Gewinn abgeleitet" : "fortgeschrieben"} · Reinertrag aus dem ${p.ni_consensus}-Konsens${p.n_eps ? ` (${p.n_eps} Analysten)` : ""}</span>`
+      ${p.est === "consensus" && p.rev_trend ? `<span style="display:block;color:var(--text-3)">${p.rev_q_derived ? "Aus Vorjahresquartal und Jahresprognose abgeleitet" : `Umsatz ${p.rev_coupled ? "aus dem Gewinn abgeleitet" : "fortgeschrieben"}`}${p.ni_consensus && p.ni_consensus !== "Jahresprognose" ? ` · Reinertrag aus dem ${p.ni_consensus}-Konsens` : ""}${p.n_eps ? ` (${p.n_eps} Analysten)` : ""}</span>`
         : p.est === "consensus" ? `<span style="display:block;color:var(--text-3)">Prognose · Konsens von ${p.n_rev} Analysten${p.n_eps ? ` (Gewinn: ${p.n_eps})` : ""}</span>`
         : p.est === "trend" ? `<span style="display:block;color:var(--text-3)">${p.ni_consensus ? `Umsatz fortgeschrieben · Reinertrag aus dem ${p.ni_consensus}-Konsens${p.n_eps ? ` (${p.n_eps} Analysten)` : ""}` : "Fortschreibung des Trends, keine Analystenschätzung"}</span>` : ""}
       <span style="display:block">Umsatz: ${big(p.revenue).join(" ")} ${esc(D.currency)}${rngTxt(p.rev_low, p.rev_high)}</span>

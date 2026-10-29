@@ -323,3 +323,10 @@ DEPOT_EXACT.update({
 })
 DEPOT_WILD += [("Umsatz aus dem Gewinn abgeleitet · Reinertrag aus dem {*}-Konsens", "Revenue derived from earnings · net income from the {*} consensus"),
                ("{*}: Umsatz aus dem Gewinnkonsens abgeleitet, {*1}.", "{*}: revenue derived from the earnings consensus, {*1}.")]
+DEPOT_EXACT.update({
+    "Aus Vorjahresquartal und Jahresprognose abgeleitet": "Derived from the prior-year quarter and the annual forecast",
+    "Umsatz aus Vorjahresquartal und Jahresprognose abgeleitet": "revenue derived from the prior-year quarter and the annual forecast",
+    "Reinertrag aus Vorjahresquartal und Jahresprognose abgeleitet": "net income derived from the prior-year quarter and the annual forecast",
+})
+DEPOT_WILD += [("{*}: Umsatz aus Vorjahresquartal und Jahresprognose abgeleitet, {*1}.", "{*}: revenue derived from the prior-year quarter and the annual forecast, {*1}."),
+               ("Aus Vorjahresquartal und Jahresprognose abgeleitet · Reinertrag aus dem {*}-Konsens", "Derived from the prior-year quarter and the annual forecast · net income from the {*} consensus")]

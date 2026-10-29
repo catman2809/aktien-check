@@ -1024,6 +1024,49 @@ def check_revenue_estimates(m):
             e["growth"] = None
 
 
+def est_eps_fallback(m, symbol):
+    """Gewinnschätzungen je Aktie, wenn Yahoo keine liefert (auf dem Server gesperrt): US-Werte aus dem Nasdaq-Konsens
+    (Zacks), sonst und ersatzweise aus dem onvista-Konsens. Gleiches Format wie die Yahoo-Schätzungen ("0y" = laufendes,
+    "+1y" = nächstes Geschäftsjahr), damit KGV-Prognose, Wachstum und Forward-KGV wieder funktionieren. Bei ADRs wird
+    Nasdaq nicht genutzt (Gewinn je ADR ≠ Gewinn je Aktie)."""
+    if ((m.get("est_eps") or {}).get("0y") or {}).get("avg") or not m.get("fy_end"):
+        return
+    y0 = int(m["fy_end"][:4]) + 1  # Jahr des Endes des laufenden Geschäftsjahres
+    src, out = None, {}
+    nq = safe(lambda: nasdaq_eps_forecast(symbol)) if "." not in symbol else None
+    if nq and nq.get(y0) and nq.get(y0 + 1):
+        ago0 = m.get("eps_fy_last")
+        for i, per in enumerate(("0y", "+1y")):
+            e = nq[y0 + i]
+            ago = ago0 if i == 0 else nq[y0]["avg"]
+            out[per] = {"avg": e["avg"], "low": e.get("low"), "high": e.get("high"), "n": e.get("n"), "ago": ago,
+                        "growth": e["avg"] / ago - 1 if ago and ago > 0 and e["avg"] else None, "cur": "USD", "src": "Nasdaq"}
+        src = "Nasdaq"
+    if not out:
+        ov = safe(lambda: onvista_data(symbol)) or {}
+        eps = ov.get("eps") or {}
+        if (eps.get(y0) or {}).get("est") and (eps.get(y0 + 1) or {}).get("est") and eps[y0]["avg"] and eps[y0 + 1]["avg"]:
+            for i, per in enumerate(("0y", "+1y")):
+                v, ago = eps[y0 + i]["avg"], (eps.get(y0 + i - 1) or {}).get("avg")
+                out[per] = {"avg": v, "low": None, "high": None, "n": None, "ago": ago,
+                            "growth": v / ago - 1 if ago and ago > 0 else None, "cur": ov.get("currency") or m["currency"],
+                            "src": "onvista"}
+            src = "onvista"
+    if not out:
+        return
+    m["est_eps"] = out
+    m["est_eps_src"] = src
+    # Forward-KGV (Yahoo: Kurs / Gewinn der nächsten 12 Monate) aus den Schätzungen nachbilden, falls es fehlt
+    if not m.get("fpe") and m.get("price"):
+        k = est_fx(m, out["0y"])
+        p_ = fy_progress(m)
+        e12 = ((1 - p_) * out["0y"]["avg"] + p_ * out["+1y"]["avg"]) * (k or 0)
+        if e12 > 0:
+            m["fpe"] = m["price"] / e12
+    LOG.info("[Prognose] %s: Gewinn je Aktie aus %s (%s: %.2f, %s: %.2f %s)", symbol, src, y0, out["0y"]["avg"], y0 + 1,
+             out["+1y"]["avg"], out["0y"]["cur"])
+
+
 def expectations(m, t):
     """Gewinnrevisionen, Gewinnüberraschungen und Insidergeschäfte (Yahoo; Finnhub als Ersatz in finnhub_enrich)."""
     m["eps_rev"] = m["rev_breadth"] = m["surprises"] = m["insider"] = m["eps_quarters"] = None
@@ -1636,6 +1679,7 @@ def gather(symbol, t, info):
     m["target_low"], m["target_high"] = num(g("targetLowPrice")), num(g("targetHighPrice"))
     m["target_median"] = num(g("targetMedianPrice"))
     expectations(m, t)
+    safe(lambda: est_eps_fallback(m, symbol))
     m["crp"] = safe(lambda: country_risk(m))
     safe(lambda: chart_extras(m, t, inc, bs, divs))
     return m
@@ -1848,15 +1892,19 @@ def onvista_dps_forecast(D, ov):
     same_cur = all((e.get("cur") or D.get("currency")) == D.get("currency") for e in ov["dps"].values())
     best = None
     for off in (0, 1):
-        ratios = sorted(paid[y + off] / e["dps"] for y, e in past.items() if paid.get(y + off))
+        pairs = sorted((y, paid[y + off] / e["dps"]) for y, e in past.items() if paid.get(y + off))
+        if not same_cur:  # Umrechnung zum damaligen Kurs -> nur die jüngsten Jahre, mit dem jüngsten Verhältnis skalieren
+            pairs = pairs[-3:]
+        ratios = sorted(r_ for _, r_ in pairs)
         if not ratios:
             continue
-        mid = ratios[len(ratios) // 2]
+        mid = ratios[len(ratios) // 2] if same_cur else sum(r_ for _, r_ in pairs[-2:]) / len(pairs[-2:])
         devs = sorted(abs(r_ / mid - 1) for r_ in ratios)
         spread = devs[len(devs) // 2]  # typische Abweichung; einzelne Sonderjahre (Corona, Sonderdividende) stören nicht
         if same_cur and abs(mid - 1) > 0.1:
             continue  # gleiche Währung, aber andere Höhe -> anderes Wertpapier oder andere Zählweise
-        key = (spread, -len(ratios))
+        # ein einzelnes Vergleichsjahr passt immer zu sich selbst -> mehr Vergleichsjahre zuerst
+        key = (spread if len(ratios) >= 2 else 1.0, -len(ratios))
         if best is None or key < best[0]:
             best = (key, off, mid, len(ratios))
     if not best:
@@ -4093,6 +4141,75 @@ def income_estimates_q(t, periods, currency, eps_last):
     return out
 
 
+NASDAQ_Q_CACHE = {}  # US-Symbol -> (Zeit, {(Jahr, Monat): Quartalsprognose Gewinn je Aktie})
+
+
+def nasdaq_eps_quarterly(us_sym):
+    """Quartalsprognosen für den Gewinn je Aktie von Nasdaq (Zacks): {(Jahr, Monat des Quartalsendes): {"avg", "n"}}."""
+    hit = NASDAQ_Q_CACHE.get(us_sym)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+           "Accept": "application/json"}
+    d = json.loads(_fetch(f"https://api.nasdaq.com/api/analyst/{urllib.parse.quote(us_sym.replace('-', '.'))}/earnings-forecast",
+                          headers=hdr, timeout=15))
+    out = {}
+    for r_ in (((d or {}).get("data") or {}).get("quarterlyForecast") or {}).get("rows") or []:
+        m_ = re.match(r"([A-Za-z]{3}) (\d{4})", str(r_.get("fiscalEnd") or ""))
+        avg = num(r_.get("consensusEPSForecast"))
+        if m_ and avg is not None and MONTHS_EN.get(m_.group(1)):
+            out[(int(m_.group(2)), MONTHS_EN[m_.group(1)])] = {"avg": avg, "n": int(num(r_.get("noOfEstimates")) or 0)}
+    NASDAQ_Q_CACHE[us_sym] = (time.time(), out)
+    return out
+
+
+def income_estimates_q_fallback(symbol, periods, eps_last):
+    """Quartalsprognosen, wenn Yahoo keine liefert (auf dem Server gesperrt): Umsatz = gemeldetes Vorjahresquartal ×
+    erwartetes Umsatzwachstum des Geschäftsjahres (so bleibt die Saisonalität erhalten); Reinertrag bei US-Werten aus
+    dem Nasdaq-Quartalskonsens für den Gewinn je Aktie, sonst Vorjahresquartal × erwartetes Gewinnwachstum des Jahres.
+    Klar als abgeleitet gekennzeichnet."""
+    import calendar
+    if not periods:
+        return []
+    ann = safe(lambda: income_data(symbol, "annual")) or {}
+    A, AE = ann.get("periods") or [], ann.get("estimates") or []
+    if not A or not AE:
+        return []
+    chain = [(datetime.fromisoformat(p_["end"]), p_) for p_ in A[-1:]] + [(datetime.fromisoformat(e["end"]), e) for e in AE]
+    last = periods[-1]
+    end = datetime.fromisoformat(last["end"])
+    by_end = {datetime.fromisoformat(p_["end"]): p_ for p_ in periods}
+    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    nq = safe(lambda: nasdaq_eps_quarterly(symbol)) if "." not in symbol else None
+    out = []
+    for i in (1, 2):
+        y, mo = divmod(end.month - 1 + 3 * i, 12)
+        d = datetime(end.year + y, mo + 1, calendar.monthrange(end.year + y, mo + 1)[1])
+        ago = next((p_ for e_, p_ in by_end.items() if abs((d - timedelta(days=365) - e_).days) <= 20), None)
+        # Geschäftsjahr, in das das Quartal fällt, und das Jahr davor
+        j = next((k for k in range(1, len(chain)) if chain[k][0] >= d - timedelta(days=20)), None)
+        if not ago or j is None or (chain[j][0] - d).days > 380:
+            break
+        cur_y, prev_y = chain[j][1], chain[j - 1][1]
+        if not cur_y.get("revenue") or not prev_y.get("revenue"):
+            break
+        g_rev = cur_y["revenue"] / prev_y["revenue"] - 1
+        rev = ago["revenue"] * (1 + g_rev)
+        ni, src = None, None
+        q = (nq or {}).get((d.year, d.month)) or (nq or {}).get(((d + timedelta(days=20)).year, (d + timedelta(days=20)).month))
+        if q and shares:
+            ni, src = shares * q["avg"], "Nasdaq"
+        elif cur_y.get("net_income") and prev_y.get("net_income") and prev_y["net_income"] > 0 and ago["net_income"] > 0:
+            ni, src = ago["net_income"] * cur_y["net_income"] / prev_y["net_income"], "Jahresprognose"
+        if ni is not None and ago["net_income"] > 0 and not 0.25 <= ni / ago["net_income"] <= 4:
+            ni, src = None, None
+        out.append({"label": f"{MONTHS_DE_SHORT[d.month - 1]} {str(d.year)[2:]}e", "end": d.date().isoformat(),
+                    "revenue": rev, "net_income": ni, "margin": ni / rev if ni is not None else None,
+                    "op_income": None, "op_margin": None, "est": "consensus", "n_rev": 0, "n_eps": q["n"] if src == "Nasdaq" else 0,
+                    "rev_trend": True, "rev_q_derived": True, "ni_consensus": src})
+    return out
+
+
 def add_op_estimates(periods, estimates, n):
     """Operatives Ergebnis für die Prognosen ableiten (Analysten-Konsens gibt es dafür bei Yahoo nicht):
     operative Marge = prognostizierte Nettomarge + übliche Differenz zwischen operativer und Nettomarge
@@ -4179,7 +4296,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v17")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
+    key = (symbol, freq, "v18")  # v17: Umsatz an den Gewinnkonsens gekoppelt (drei Viertel)
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]
@@ -4301,6 +4418,8 @@ def income_data(symbol, freq):
                  "ja" if nasdaq else "nein", ", ".join(e_["label"] for e_ in out["estimates"]) or "keine Prognosen")
     else:
         out["estimates"] = safe(lambda: income_estimates_q(t, periods, out["currency"], eps_last), []) or []
+        if not out["estimates"]:  # Yahoo gesperrt -> aus Vorjahresquartal und Jahresprognose ableiten
+            out["estimates"] = safe(lambda: income_estimates_q_fallback(symbol, periods, eps_last), []) or []
     if freq == "annual":
         safe(lambda: couple_revenue(periods, out["estimates"]))
     safe(lambda: add_op_estimates(periods, out["estimates"], 3 if freq == "annual" else 4))
