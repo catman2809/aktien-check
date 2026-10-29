@@ -4217,7 +4217,7 @@ def nasdaq_eps_quarterly(us_sym):
 def income_estimates_q_fallback(symbol, periods, eps_last, t=None, shares_out=None):
     """Quartalsprognosen, wenn Yahoo keine liefert (auf dem Server gesperrt): Umsatz = gemeldetes Vorjahresquartal ×
     erwartetes Umsatzwachstum des Geschäftsjahres (so bleibt die Saisonalität erhalten); Reinertrag bei US-Werten aus
-    dem Nasdaq-Quartalskonsens für den Gewinn je Aktie, sonst Vorjahresquartal × erwartetes Gewinnwachstum des Jahres.
+    dem Nasdaq-Quartalskonsens für den Gewinn je Aktie, sonst Quartalsumsatz × erwartete Nettomarge des Jahres.
     Klar als abgeleitet gekennzeichnet."""
     import calendar
     if not periods:
@@ -4252,13 +4252,11 @@ def income_estimates_q_fallback(symbol, periods, eps_last, t=None, shares_out=No
         q = (nq or {}).get((d.year, d.month)) or (nq or {}).get(((d + timedelta(days=20)).year, (d + timedelta(days=20)).month))
         if q and shares:
             ni, src = shares * q["avg"], "Nasdaq"
-        elif cur_y.get("net_income") and prev_y.get("net_income") and prev_y["net_income"] > 0 and ago["net_income"] > 0:
-            # Jahreskonsens bereinigt, Vorjahr berichtet -> Wachstum erst auf gleiche Basis bringen (Pfizer)
-            g_ni = cur_y["net_income"] / prev_y["net_income"]
-            if cur_y.get("ni_consensus") == "Nasdaq" and not prev_y.get("est"):
-                g_ni /= gap
-            ni, src = ago["net_income"] * g_ni, "Jahresprognose"
-        if ni is not None and ago["net_income"] > 0 and not 0.25 <= ni / ago["net_income"] <= 4:
+        elif cur_y.get("net_income") and cur_y.get("revenue"):
+            # Quartalsumsatz × erwartete Nettomarge des Geschäftsjahres – frei von Sondereffekten einzelner Vorjahresquartale
+            # (im Abgleich mit Yahoos Quartalskonsens: Median-Abweichung 16 statt 25 % mit Vorjahresquartal × Wachstum)
+            ni, src = rev * cur_y["net_income"] / cur_y["revenue"], "Jahresprognose"
+        if ni is not None and src == "Nasdaq" and ago["net_income"] > 0 and not 0.25 <= ni / ago["net_income"] <= 4:
             ni, src = None, None
         out.append({"label": f"{MONTHS_DE_SHORT[d.month - 1]} {str(d.year)[2:]}e", "end": d.date().isoformat(),
                     "revenue": rev, "net_income": ni, "margin": ni / rev if ni is not None else None,
@@ -4386,7 +4384,7 @@ def income_data(symbol, freq):
     symbol = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
-    key = (symbol, freq, "v24")  # v22: Quartals-Free-Cashflow mit Saisonalität
+    key = (symbol, freq, "v25")  # v22: Quartals-Free-Cashflow mit Saisonalität
     hit = INCOME_CACHE.get(key)
     if hit and time.time() - hit[0] < 12 * 3600:
         return hit[1]

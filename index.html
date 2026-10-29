@@ -4323,7 +4323,7 @@ function incTable(D) {
 // Quelle je Prognosejahr: Umsatz (Yahoo / fortgeschrieben) und Reinertrag (Yahoo / Nasdaq / fortgeschrieben)
 function estSources(E) {
   const revS = e => e.rev_q_derived ? "Umsatz aus Vorjahresquartal und Jahresprognose abgeleitet" : e.rev_coupled ? "Umsatz aus dem Gewinnkonsens abgeleitet" : (e.rev_trend || e.est === "trend") ? "Umsatz fortgeschrieben" : "Umsatz aus dem Analystenkonsens (Yahoo Finance)";
-  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus === "Jahresprognose" ? "Reinertrag aus Vorjahresquartal und Jahresprognose abgeleitet" : e.ni_consensus === "Nasdaq" ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
+  const niS = e => e.net_income == null ? "kein Reinertrag (Margen zu schwankend)" : e.ni_consensus === "Jahresprognose" ? "Reinertrag aus Quartalsumsatz und erwarteter Jahresmarge abgeleitet" : e.ni_consensus === "Nasdaq" ? "Reinertrag aus dem Konsens für den Gewinn je Aktie (Nasdaq, Daten von Zacks)"
     : e.ni_consensus ? `Reinertrag aus dem Konsens für den Gewinn je Aktie (${e.ni_consensus})`
     : e.est === "trend" ? "Reinertrag fortgeschrieben" : "Reinertrag aus dem Analystenkonsens (Yahoo Finance)";
   const groups = [];
