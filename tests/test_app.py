@@ -463,7 +463,8 @@ class TestHTTP(Isolated):
         summ = json.loads(self.call(anna, "/api/me/summary")[2])
         self.assertEqual((summ["user"], summ["watchlist"], summ["depot"], summ["sub"]["state"]), ("anna", [], None, "aktiv"))
         self.assertEqual(self.call(self.client(), "/api/me/summary")[0], 401)
-        self.assertEqual(json.loads(self.call(anna, "/api/depot/outlook")[2]), {"wait": True})   # ohne Depot
+        self.assertEqual(self.call(anna, "/api/depot/outlook")[0], 403)                            # nur Admin (Finnhub)
+        self.assertEqual(json.loads(self.call(adm, "/api/depot/outlook")[2]), {"wait": True})     # Admin ohne Depot
         self.call(anna, "/api/prefs", {"tax_fb": "2000"})
         self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"]["tax_fb"], "2000")
         self.call(anna, "/api/prefs", {"tax_fb": "1000"})

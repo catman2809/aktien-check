@@ -11332,6 +11332,8 @@ class Handler(BaseHTTPRequestHandler):
                 return res
             return self.send_json({"pending": depot_job_start(user, work)["id"]})
         if u.path == "/api/depot/outlook":
+            if not self.is_admin():  # jede Position läuft durch die volle Analyse (Finnhub-Kontingent) -> nur Admin
+                return self.send_json({"error": "Nur für Administratoren", "admin_only": True}, 403)
             dep = user_space(user).get("depot")
             hit = DEPOT_CACHE.get(user)
             if not dep or not hit or hit[1].get("saved") != dep.get("saved"):

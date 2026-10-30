@@ -2495,7 +2495,8 @@ document.addEventListener("click", e => {
 function renderDepot() {
   if (!depotView || !location.search.includes("view=depot")) return;
   const D = DEPOT, S = D?.summary, Rk = D?.risk || {};
-  if (D && S && outlookFor !== (D.saved || D.generated)) {
+  const showOutlook = !!ME?.admin;  // Ausblick braucht Finnhub-Anfragen (volle Analyse je Position) -> nur für den Admin
+  if (D && S && showOutlook && outlookFor !== (D.saved || D.generated)) {
     outlookFor = D.saved || D.generated; OUTLOOK = {pending: true, done: 0, total: 0};
     setTimeout(() => loadOutlook(outlookFor), 50);
   }
@@ -2540,7 +2541,7 @@ function renderDepot() {
       ${dpKpi("Größte Position", pc(S.largest, 1), S.largest_name)}
       ${dpKpi("Top 5 / Top 10", `${pc(S.top5, 0)} / ${pc(S.top10, 0)}`, "Anteil am Depot")}
     </div>
-    ${dpOutlook(D)}
+    ${showOutlook ? dpOutlook(D) : ""}
     <h2 class="section">Aufteilung</h2>
     <div class="dp-grid">
       ${dpDonut("Einzelpositionen", A.positions)}
@@ -2556,19 +2557,19 @@ function renderDepot() {
         ${Rk.pairs.map(p => `<div class="adm-row"><span>${esc(p.a)} ↔ ${esc(p.b)}</span><b class="num">${nf(p.corr, 2)}</b></div>`).join("")}</div>` : ""}
       ${Rk.avg_corr != null ? `<div class="stamp" style="margin-top:8px">Durchschnittliche Korrelation der größeren Positionen: ${nf(Rk.avg_corr, 2)} (unter 0,5 = gute Streuung).</div>` : ""}</div>
     ${dpLine(D.chart)}
-    ${dpDividends(D)}
+    ${showOutlook ? dpDividends(D) : ""}
     ${dpTaxes(D)}
-    ${dpCosts(D)}
+    ${showOutlook ? dpCosts(D) : ""}
     <h2 class="section">Positionen</h2>
     <div class="card pad">
       <div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
-        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th><th class="num">Score</th><th class="num">Potenzial</th><th>Branche</th><th>Land</th></tr></thead>
+        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th>${showOutlook ? `<th class="num">Score</th><th class="num">Potenzial</th>` : ""}<th>Branche</th><th>Land</th></tr></thead>
       <tbody>${P.map(p => `<tr><td><span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
         <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
         <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
         <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
         <td class="num ${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</td>
-        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td>${dpScoreCells(p)}<td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>
+        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td>${showOutlook ? dpScoreCells(p) : ""}<td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>
       <div class="stamp" style="margin-top:8px"><span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
         ${D.file ? `<span>Datei:</span> <span translate="no">${esc(D.file)}</span>` : ""}${D.saved ? ` <span>· gespeichert am ${esc(D.saved)}</span>` : ""}
         <span>Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.</span></div></div>`;
