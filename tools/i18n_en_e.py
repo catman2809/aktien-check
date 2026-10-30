@@ -343,3 +343,37 @@ DEPOT_EXACT.update({
     "KGV: gemeldete Jahre = Kurs am Geschäftsjahresende ÷ Gewinn je Aktie; Prognosejahre = heutiger Kurs ÷ erwarteter Gewinn je Aktie (Forward-KGV).":
         "P/E: reported years = price at fiscal year end ÷ earnings per share; forecast years = today's price ÷ expected earnings per share (forward P/E).",
 })
+# Depot: Bewertung, Dividenden-Ausblick, Steuern, Kosten
+DEPOT_EXACT.update({
+    "Bewertung der Positionen": "Rating of holdings", "Depot-Score": "Portfolio score", "KGV (gewichtet)": "P/E (weighted)",
+    "Forward-KGV (gewichtet)": "Forward P/E (weighted)", "Erwartetes Gewinnwachstum": "Expected earnings growth",
+    "auf den erwarteten Gewinn": "on expected earnings", "nächstes Geschäftsjahr, gewichtet": "next fiscal year, weighted",
+    "keine Aktien mit Gewinn": "no profitable stocks", "Score": "Score", "Potenzial": "Upside",
+    "zum Kursziel der Analysten": "to the analysts' price target", "zum fairen Wert": "to fair value",
+    "Dividenden-Ausblick": "Dividend outlook", "Erwartet in den nächsten 12 Monaten": "Expected in the next 12 months",
+    "Ex-Tag": "Ex-date", "Wertpapier": "Security", "Betrag": "Amount", "geschätzt": "estimated", "bestätigt": "confirmed",
+    "Keine Dividendenzahlungen in den nächsten 12 Monaten erwartet.": "No dividend payments expected in the next 12 months.",
+    "Vor Steuern. Geschätzt aus den Zahlungen der letzten 12 Monate, hochgerechnet mit Stockys Dividendenprognose; bestätigte Ex-Tage ersetzen die Schätzung. Ausschüttende ETFs eingeschlossen, thesaurierende zahlen nichts aus.":
+        "Before tax. Estimated from the payments of the last 12 months, scaled with Stocky's dividend forecast; confirmed ex-dates replace the estimate. Distributing ETFs included, accumulating ones pay nothing.",
+    "Sparerpauschbetrag": "Saver's allowance", "1.000 € (einzeln)": "€1,000 (single)", "2.000 € (gemeinsam veranlagt)": "€2,000 (joint)",
+    "Noch frei": "Still available", "Aktienverlusttopf (nur mit Aktiengewinnen verrechenbar)": "Stock loss pot (offsettable against stock gains only)",
+    "Steuer, wenn du heute alles verkaufst (offene Gewinne, nach Freibetrag)": "Tax if you sold everything today (unrealised gains, after allowance)",
+    "Positionen im Minus": "Holdings at a loss", "Aktie": "Stock",
+    "– ein Verkauf würde den Verlust steuerlich nutzbar machen (Aktienverluste nur gegen Aktiengewinne)": "– selling would make the loss usable for tax (stock losses only against stock gains)",
+    "Für den Verbrauch des Freibetrags im laufenden Jahr bitte eine Umsatzliste (Käufe, Verkäufe, Dividenden) hochladen.":
+        "To see how much of the allowance is used this year, please upload a transaction list (buys, sells, dividends).",
+    "Kosten": "Costs", "Laufende Fondskosten": "Ongoing fund costs", "Ordergebühren": "Order fees", "laut Umsatzliste, seit Beginn": "per transaction list, since start",
+    "Wert": "Value", "TER": "TER", "Kosten / Jahr": "Cost / year",
+    "teuer – breite Index-ETFs gibt es oft für 0,1–0,2 %": "expensive – broad index ETFs are often available for 0.1–0.2 %",
+    "TER = jährliche Gesamtkostenquote, wird automatisch aus dem Fondsvermögen entnommen (steckt also schon in der Wertentwicklung).":
+        "TER = total expense ratio per year, deducted automatically from fund assets (already included in performance).",
+})
+DEPOT_WILD += [
+    ("Steuern {0}", "Taxes {0}"), ("{*} € im Monatsschnitt", "{*} € per month on average"),
+    ("{0} bis 100 · gewichtet nach Wert{*}", "{0} to 100 · weighted by value{*}"),
+    ("Aktien mit Gewinn, {*} des Depots", "profitable stocks, {*} of portfolio"),
+    ("Ø TER {*} der ETFs", "avg. TER {*} of ETFs"), ("{*} € / Jahr", "{*} € / year"),
+    ("Noch frei", "Still available"),
+    ("{*} wird berechnet – jede Position wird mit Stockys Aktienanalyse bewertet{*1}. Das dauert beim ersten Mal 1–2 Minuten.",
+     "{*} is being calculated – every holding is rated with Stocky's stock analysis{*1}. The first time takes 1–2 minutes."),
+]

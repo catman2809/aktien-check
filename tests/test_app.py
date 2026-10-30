@@ -388,7 +388,7 @@ class TestHTTP(Isolated):
         st, _, b = self.call(op, "/api/me")
         self.assertEqual(json.loads(b), {"user": "admin", "admin": True, "multi": True, "unread": 0,
                                          "maintenance": {"on": False, "text": ""},
-                                         "prefs": {"lang": "de", "theme": "auto", "mv_uni": "dax", "mv_per": "day"}})
+                                         "prefs": {"lang": "de", "theme": "auto", "mv_uni": "dax", "mv_per": "day", "tax_fb": "1000"}})
 
     def test_lock_maintenance_backup_restore(self):
         adm, anna = self.client(), self.client()
@@ -459,10 +459,14 @@ class TestHTTP(Isolated):
         self.assertEqual(self.call(anna, "/api/prefs", {"mv_uni": "nirgends"})[0], 400)
         self.call(anna, "/api/prefs", {"theme": "dark", "mv_uni": "sp500", "mv_per": "year"})
         self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"],
-                         {"lang": "de", "theme": "dark", "mv_uni": "sp500", "mv_per": "year"})
+                         {"lang": "de", "theme": "dark", "mv_uni": "sp500", "mv_per": "year", "tax_fb": "1000"})
         summ = json.loads(self.call(anna, "/api/me/summary")[2])
         self.assertEqual((summ["user"], summ["watchlist"], summ["depot"], summ["sub"]["state"]), ("anna", [], None, "aktiv"))
         self.assertEqual(self.call(self.client(), "/api/me/summary")[0], 401)
+        self.assertEqual(json.loads(self.call(anna, "/api/depot/outlook")[2]), {"wait": True})   # ohne Depot
+        self.call(anna, "/api/prefs", {"tax_fb": "2000"})
+        self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"]["tax_fb"], "2000")
+        self.call(anna, "/api/prefs", {"tax_fb": "1000"})
         # Nachrichten: Benutzer -> Admin -> Benutzer, mit Ungelesen-Zähler
         self.assertEqual(self.call(anna, "/api/messages", {"text": "  "})[0], 400)        # leere Nachricht abgelehnt
         self.call(anna, "/api/messages", {"text": "Hallo Admin, wie bezahle ich?"})
@@ -1987,3 +1991,27 @@ class TestOptions(unittest.TestCase):
         self.assertAlmostEqual(d["iv_atm"], 0.315)
         self.assertAlmostEqual(d["near_pc_oi"], 1 / 3)
         self.assertEqual((d["expiries"], d["asof"]), (1, "2026-10-27"))
+
+
+class TestDepotTax(unittest.TestCase):
+    def test_tax_classes(self):
+        self.assertEqual(a.tax_class("Aktie", "Siemens AG"), ("stock", 0.0))
+        self.assertEqual(a.tax_class("ETF", "iShares Core MSCI World UCITS ETF"), ("fund", 0.3))
+        self.assertEqual(a.tax_class("Anleihen-ETF", "iShares Euro Govt Bond"), ("fund", 0.0))
+        self.assertEqual(a.tax_class("Krypto", "Bitcoin")[0], "crypto")
+
+    def test_depot_tax_year_split(self):
+        y = str(a.datetime.now().year)
+        rows = [{"name": "Siemens", "symbol": "SIE.DE", "isin": "DE0007236101", "kind": "Aktie", "gain": 500.0},
+                {"name": "iShares MSCI World UCITS ETF", "symbol": "EUNL.DE", "isin": "IE00B4L5Y983", "kind": "ETF", "gain": 1000.0},
+                {"name": "Bitcoin", "symbol": "BTC-EUR", "isin": None, "kind": "Krypto", "gain": 300.0}]
+        hist = {"keys": [{"isin": "DE0007236101", "name": "Siemens", "realized_years": {y: 200.0, "2020": 999.0}},
+                         {"isin": "IE00B4L5Y983", "name": "iShares MSCI World UCITS ETF", "realized_years": {y: 100.0}},
+                         {"isin": "US0000000001", "name": "Verkaufte Aktie", "realized_years": {y: -50.0}}],
+                "dividends": [[f"{y}-03-01", "x", 40.0], ["2020-03-01", "x", 99.0]]}
+        T = a.depot_tax(rows, hist)
+        self.assertAlmostEqual(T["realized_stock"], 150.0)          # Aktien inkl. verkaufter Aktie, nur laufendes Jahr
+        self.assertAlmostEqual(T["realized_other"], 70.0)           # ETF mit 30 % Teilfreistellung
+        self.assertAlmostEqual(T["div_ytd"], 40.0)
+        self.assertEqual([p["symbol"] for p in T["positions"]], ["SIE.DE", "EUNL.DE"])   # Krypto ausgenommen
+        self.assertAlmostEqual(T["positions"][1]["taxable"], 700.0)

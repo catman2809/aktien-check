@@ -7942,6 +7942,7 @@ def _depot_from_transactions(recs, split_fn=None):
     for key, L in ledger.items():
         fac = factors.get(key) or [1.0] * len(L["trades"])
         qty, cost, cost_ok, realized, real_ok, trades = 0.0, 0.0, True, 0.0, True, []
+        by_year = {}
         for t, f in zip(L["trades"], fac):
             q = t["q"] * f
             if t["kind"] == "buy":
@@ -7956,6 +7957,8 @@ def _depot_from_transactions(recs, split_fn=None):
                     real_ok = False
                 else:
                     realized += t["proceeds"] - removed                       # Gewinn/Verlust des Verkaufs (Ø-Einstand)
+                    y_ = str(t["date"] or "")[:4]
+                    by_year[y_] = by_year.get(y_, 0.0) + t["proceeds"] - removed
                 cost -= removed
                 qty -= q
                 trades.append([t["date"], -q, -(t["proceeds"] or 0.0)])     # Geld aus dem Depot (Verkauf)
@@ -7968,7 +7971,7 @@ def _depot_from_transactions(recs, split_fn=None):
         if qty > -1e-6:  # Positionen mit mehr Verkäufen als Käufen (Export unvollständig) bleiben außen vor
             hist_keys.append({"key": key, "isin": m_["isin"], "wkn": m_["wkn"], "symbol": m_["symbol"], "name": m_["name"],
                               "cur": m_["cur"], "open": qty > 1e-6, "trades": trades,
-                              "realized": realized if real_ok else None})
+                              "realized": realized if real_ok else None, "realized_years": by_year if real_ok else {}})
         if any(abs(f - 1) > 1e-9 for f in fac):
             adjusted.append(m_["name"] or m_["isin"] or m_["symbol"])
         if qty > 1e-6:
@@ -8331,6 +8334,167 @@ def depot_twr(V, F, D):
     return level - 1, out
 
 
+DEPOT_OUTLOOK = {}          # Benutzer -> {"sig", "running", "done", "total", "res", "t"}
+DEPOT_POS_CACHE = {}        # Symbol -> (Zeit, Kurzfassung der Analyse)
+
+
+def depot_position_info(sym):
+    """Kurzfassung der Stocky-Analyse einer Depotposition (6 Stunden zwischengespeichert)."""
+    hit = DEPOT_POS_CACHE.get(sym)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    res = analyze(sym)
+    f, fair, r = res.get("facts") or {}, res.get("fair") or {}, res.get("rating") or {}
+    this_year = datetime.now().year
+    fc = (res.get("divhist") or {}).get("forecast") or []
+    nxt = next((x for x in fc if x["year"] == this_year + 1), None)
+    eps = ((res.get("forecast") or {}).get("eps") or {}).get("+1y") or {}
+    info = {"score": r.get("score"), "label": r.get("label"), "group": r.get("group"), "upside": f.get("upside"),
+            "fair_up": fair.get("upside"), "pe": f.get("pe"), "fpe": f.get("fpe"), "eps_g": eps.get("growth"),
+            "ter": f.get("ter"), "div_g": nxt.get("growth") if nxt else None, "price": res.get("price"),
+            "events": [e for e in res.get("events") or [] if e.get("type") in ("exdiv", "pay")], "etf": bool(res.get("etf"))}
+    DEPOT_POS_CACHE[sym] = (time.time(), info)
+    if len(DEPOT_POS_CACHE) > 600:
+        DEPOT_POS_CACHE.pop(next(iter(DEPOT_POS_CACHE)))
+    return info
+
+
+def depot_dividend_plan(row, info):
+    """Erwartete Dividendenzahlungen der nächsten 12 Monate einer Position (Euro): Zahlungen des letzten Jahres um ein Jahr
+    verschoben, mit der erwarteten Dividendenentwicklung hochgerechnet; bestätigte Ex-Tage ersetzen die Schätzung."""
+    sym, qty = row.get("symbol"), row.get("qty")
+    if not sym or not qty or not row.get("price") or not (info or {}).get("price"):
+        return []
+    k = row["price"] / info["price"]  # Kurswährung (auch Pence) -> Euro
+    d = safe(lambda: yf.Ticker(sym).dividends)
+    if d is None or not len(d):
+        return []
+    today = datetime.now().date()
+    g = info.get("div_g") if info.get("div_g") is not None else 0.0
+    out = []
+    for ts, amt in d.items():
+        dd = ts.date()
+        if not today - timedelta(days=365) < dd <= today:
+            continue
+        nd = dd.replace(year=dd.year + 1) if not (dd.month == 2 and dd.day == 29) else dd.replace(year=dd.year + 1, day=28)
+        out.append({"date": nd.isoformat(), "name": row["name"], "symbol": sym, "eur": float(amt) * k * qty * (1 + g),
+                    "est": True})
+    confirmed = sorted(e["date"] for e in info.get("events") or [] if e.get("type") == "exdiv" and not e.get("estimated"))
+    for c in confirmed:  # bestätigter Ex-Tag: nächstgelegene Schätzung darauf setzen
+        if out:
+            j = min(range(len(out)), key=lambda i: abs((datetime.fromisoformat(out[i]["date"]) - datetime.fromisoformat(c)).days))
+            if abs((datetime.fromisoformat(out[j]["date"]) - datetime.fromisoformat(c)).days) < 75:
+                out[j].update(date=c, est=False)
+    return out
+
+
+def depot_outlook(rows, progress=None):
+    """Bewertung je Position (Score, Empfehlung, Potenzial, KGV), Depot-Score und gewichtete Kennzahlen, Dividenden-Ausblick
+    für 12 Monate mit Kalender und laufende Kosten der Fonds. Nur Positionen mit Symbol, die 25 größten."""
+    cand = [r_ for r_ in rows if r_.get("symbol") and r_["kind"] in ("Aktie", "ETF", "Anleihen-ETF")][:25]
+    infos = {}
+
+    def one(r_):
+        info = safe(lambda: depot_position_info(r_["symbol"]))
+        if progress:
+            progress()
+        return r_["symbol"], info
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for sym, info in ex.map(one, cand):
+            if info:
+                infos[sym] = info
+    total = sum(r_["value"] for r_ in rows) or 1.0
+    scored = [(r_, infos[r_["symbol"]]) for r_ in cand if r_["symbol"] in infos and infos[r_["symbol"]].get("score") is not None]
+    w_sc = sum(r_["value"] for r_, _ in scored)
+    groups = {}
+    for r_, i_ in scored:
+        groups[i_.get("group") or "–"] = groups.get(i_.get("group") or "–", 0.0) + r_["value"] / total
+
+    def harmonic(key):  # gewichtetes KGV über die Gewinnrendite (wie bei Indizes), nur Aktien mit Gewinn
+        xs = [(r_["value"], i_[key]) for r_, i_ in scored if r_["kind"] == "Aktie" and i_.get(key) and i_[key] > 0]
+        w = sum(v for v, _ in xs)
+        return (w / sum(v / x for v, x in xs), w / total) if xs and w else (None, 0.0)
+    pe, pe_cov = harmonic("pe")
+    fpe, fpe_cov = harmonic("fpe")
+    eg = [(r_["value"], i_["eps_g"]) for r_, i_ in scored if r_["kind"] == "Aktie" and i_.get("eps_g") is not None]
+    plan = []
+    for r_ in cand:
+        plan += safe(lambda: depot_dividend_plan(r_, infos.get(r_["symbol"]))) or []
+    plan.sort(key=lambda x: x["date"])
+    months = {}
+    for x in plan:
+        months[x["date"][:7]] = months.get(x["date"][:7], 0.0) + x["eur"]
+    funds = []
+    for r_ in rows:
+        ter = (infos.get(r_.get("symbol")) or {}).get("ter")
+        if r_["kind"] in ("ETF", "Anleihen-ETF") and ter is not None:
+            funds.append({"name": r_["name"], "symbol": r_.get("symbol"), "value": r_["value"], "ter": ter, "eur": r_["value"] * ter})
+    f_val = sum(x["value"] for x in funds)
+    return {"positions": {s_: {k: v for k, v in i_.items() if k != "events"} for s_, i_ in infos.items()},
+            "depot": {"score": sum(r_["value"] * i_["score"] for r_, i_ in scored) / w_sc if w_sc else None,
+                      "score_cov": w_sc / total, "groups": groups, "pe": pe, "pe_cov": pe_cov, "fpe": fpe, "fpe_cov": fpe_cov,
+                      "eps_g": sum(v * g for v, g in eg) / sum(v for v, _ in eg) if eg else None},
+            "dividends": {"total": sum(x["eur"] for x in plan), "months": sorted(months.items()), "calendar": plan[:40]},
+            "costs": {"funds": sorted(funds, key=lambda x: -x["eur"]), "ter_eur": sum(x["eur"] for x in funds),
+                      "ter_avg": sum(x["eur"] for x in funds) / f_val if f_val else None},
+            "n": len(cand), "generated": datetime.now().strftime("%d.%m.%Y %H:%M")}
+
+
+TAX_RATE = 0.26375          # Abgeltungsteuer 25 % + Solidaritätszuschlag 5,5 % darauf (ohne Kirchensteuer)
+ETF_NAME_HINT = re.compile(r"\b(ETF|UCITS|iShares|Xtrackers|Vanguard|Amundi|Lyxor|SPDR|Invesco|WisdomTree|Fonds|Fund)\b", re.I)
+BOND_NAME_HINT = re.compile(r"\b(Bond|Anleihe|Treasury|Govt|Government|Corporate|Aggregate|Renten|Money Market|Geldmarkt)\b", re.I)
+
+
+def tax_class(kind, name=""):
+    """Steuerliche Einordnung (Deutschland): Aktie (eigener Verlusttopf), Fonds mit Teilfreistellung (Aktien-ETF 30 %,
+    Mischfonds 15 %, Anleihen-ETF 0 %) oder Krypto (private Veräußerung, nach einem Jahr steuerfrei – hier ausgenommen)."""
+    if kind == "Krypto":
+        return "crypto", 0.0
+    if kind == "Aktie":
+        return "stock", 0.0
+    if kind == "Anleihen-ETF" or BOND_NAME_HINT.search(name or ""):
+        return "fund", 0.0
+    if kind == "ETF" or ETF_NAME_HINT.search(name or ""):
+        return "fund", 0.3
+    return "other", 0.0
+
+
+def depot_tax(rows, history):
+    """Grundlagen für die Steuerschätzung: im laufenden Jahr erhaltene Dividenden und realisierte Gewinne (getrennt nach
+    Aktien und Sonstigem, Fonds nach Teilfreistellung) sowie je Position der steuerpflichtige Teil des offenen Gewinns."""
+    year = str(datetime.now().year)
+    kind_by = {}
+    for r_ in rows:
+        for k_ in (r_.get("isin"), r_.get("symbol"), r_.get("name")):
+            if k_:
+                kind_by[k_] = r_["kind"]
+    real_stock = real_other = 0.0
+    if history:
+        for k in history.get("keys") or []:
+            v = (k.get("realized_years") or {}).get(year)
+            if not v:
+                continue
+            kind = next((kind_by[x] for x in (k.get("isin"), k.get("symbol"), k.get("name")) if x and x in kind_by), None)
+            cls, tf = tax_class(kind or ("Aktie" if not ETF_NAME_HINT.search(k.get("name") or "") else "ETF"), k.get("name"))
+            if cls == "crypto":
+                continue
+            if cls == "stock":
+                real_stock += v
+            else:
+                real_other += v * (1 - tf)
+    div_ytd = sum(d[2] for d in (history or {}).get("dividends") or [] if str(d[0] or "")[:4] == year) if history else None
+    pos = []
+    for r_ in rows:
+        cls, tf = tax_class(r_["kind"], r_["name"])
+        if r_.get("gain") is None or cls == "crypto":
+            continue
+        pos.append({"name": r_["name"], "symbol": r_.get("symbol"), "cls": cls, "tf": tf, "gain": r_["gain"],
+                    "taxable": r_["gain"] * (1 - tf)})
+    return {"year": int(year), "rate": TAX_RATE, "has_history": bool(history), "div_ytd": div_ytd,
+            "realized_stock": real_stock if history else None, "realized_other": real_other if history else None,
+            "positions": pos}
+
+
 def analyze_depot(positions, history=None):
     """Struktur, Konzentration, Rendite, Risiko, Dividenden und Prüfpunkte eines Depots (Werte in Euro). Mit Buchungsverlauf
     (Umsatzliste) zusätzlich die tatsächliche zeitgewichtete Rendite der letzten 12 Monate, realisierte Gewinne und
@@ -8570,6 +8734,7 @@ def analyze_depot(positions, history=None):
         divs_all = history.get("dividends") or []
         div_received = sum(d[2] for d in divs_all)
         div_12m = sum(d[2] for d in divs_all if d[0] and d[0] >= win_start)
+    tax = safe(lambda: depot_tax(rows, history))
     alloc = {"positions": _depot_share((r_["name"], r_["value"]) for r_ in rows),
              "sectors": _depot_share(sec_items), "countries": _depot_share((r_["country"], r_["value"]) for r_ in rows),
              "currencies": _depot_share((r_["currency"], r_["value"]) for r_ in rows),
@@ -8590,7 +8755,7 @@ def analyze_depot(positions, history=None):
                  "twr_missing": perf.get("missing") or [], "twr_since": perf.get("since")})
     for r_ in rows:
         r_.pop("etf_sectors", None)
-    return {"summary": summary, "positions": rows, "alloc": alloc, "risk": risk, "chart": chart,
+    return {"summary": summary, "positions": rows, "alloc": alloc, "risk": risk, "chart": chart, "tax": tax,
             "checks": depot_checks(summary, alloc, risk, rows), "unresolved": unresolved,
             "generated": datetime.now().strftime("%d.%m.%Y %H:%M")}
 
@@ -10343,14 +10508,14 @@ def send_due_reports():
         safe(STORE.save)
 
 
-PREF_CHOICES = {"theme": ("auto", "light", "dark"), "mv_per": ("day", "month", "year")}
+PREF_CHOICES = {"theme": ("auto", "light", "dark"), "mv_per": ("day", "month", "year"), "tax_fb": ("1000", "2000")}
 
 
 def user_prefs(sp):
     """Persönliche Einstellungen eines Kontos (auf allen Geräten gleich)."""
     pr = dict(sp.get("prefs") or {})
     return {"lang": sp.get("lang") or "de", "theme": pr.get("theme") or "auto", "mv_uni": pr.get("mv_uni") or "dax",
-            "mv_per": pr.get("mv_per") or "day"}
+            "mv_per": pr.get("mv_per") or "day", "tax_fb": pr.get("tax_fb") or "1000"}
 
 
 def set_prefs(sp, body):
@@ -11166,6 +11331,30 @@ class Handler(BaseHTTPRequestHandler):
                 DEPOT_CACHE[user] = (time.time(), res)
                 return res
             return self.send_json({"pending": depot_job_start(user, work)["id"]})
+        if u.path == "/api/depot/outlook":
+            dep = user_space(user).get("depot")
+            hit = DEPOT_CACHE.get(user)
+            if not dep or not hit or hit[1].get("saved") != dep.get("saved"):
+                return self.send_json({"wait": True})  # erst die Depotanalyse
+            st_ = DEPOT_OUTLOOK.get(user)
+            if st_ and st_["sig"] == dep.get("saved") and (st_["running"] or time.time() - st_["t"] < 6 * 3600):
+                if st_["running"]:
+                    return self.send_json({"pending": True, "done": st_["done"], "total": st_["total"]})
+                return self.send(200, json.dumps(json_safe(st_["res"]), ensure_ascii=False), "application/json; charset=utf-8")
+            rows_ = hit[1]["positions"]
+            st_ = DEPOT_OUTLOOK[user] = {"sig": dep.get("saved"), "running": True, "done": 0, "t": time.time(), "res": None,
+                                         "total": len([r_ for r_ in rows_ if r_.get("symbol") and r_["kind"] in ("Aktie", "ETF", "Anleihen-ETF")][:25])}
+
+            def work_(st_=st_, rows_=rows_):
+                try:
+                    st_["res"] = depot_outlook(rows_, progress=lambda: st_.__setitem__("done", st_["done"] + 1))
+                except Exception as e:
+                    LOG.warning("[Depot] Ausblick fehlgeschlagen: %s", e)
+                    st_["res"] = {"error": "Der Ausblick konnte nicht berechnet werden."}
+                finally:
+                    st_["running"], st_["t"] = False, time.time()
+            threading.Thread(target=work_, daemon=True).start()
+            return self.send_json({"pending": True, "done": 0, "total": st_["total"]})
         if u.path == "/api/screener":
             if not self.is_admin():
                 return self.send_json({"error": "Der Screener ist nur für Administratoren verfügbar."}, 403)
