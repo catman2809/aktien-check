@@ -2016,3 +2016,36 @@ class TestDepotTax(unittest.TestCase):
         self.assertAlmostEqual(T["div_ytd"], 40.0)
         self.assertEqual([p["symbol"] for p in T["positions"]], ["SIE.DE", "EUNL.DE"])   # Krypto ausgenommen
         self.assertAlmostEqual(T["positions"][1]["taxable"], 700.0)
+
+
+class TestFinnhubThrottle(unittest.TestCase):
+    def setUp(self):
+        a.FINNHUB_STATS.update(calls=[], day="", minutes={})
+
+    def test_counts_and_brakes(self):
+        import unittest.mock as mock
+        now = [1000.0]
+        with mock.patch.object(a.time, "time", side_effect=lambda: now[0]), \
+                mock.patch.object(a.time, "sleep", side_effect=lambda s: now.__setitem__(0, now[0] + s)):
+            self.assertTrue(a.finnhub_slot())                 # erste Anfrage bei t = 1000
+            now[0] = 1045.0
+            for _ in range(a.FINNHUB_SAFE - 1):
+                self.assertTrue(a.finnhub_slot())
+            self.assertTrue(a.finnhub_slot())                 # voll -> wartet ~15 s, bis die erste aus dem Fenster fällt
+            self.assertGreater(now[0], 1060.0)
+            st = a.finnhub_status()
+        self.assertEqual(st["today"], a.FINNHUB_SAFE + 1)
+        self.assertEqual(st["waited"], 1)
+
+    def test_skips_when_wait_too_long(self):
+        import unittest.mock as mock
+        old = a.FINNHUB_MAX_WAIT
+        a.FINNHUB_MAX_WAIT = 5
+        try:
+            with mock.patch.object(a.time, "sleep"):
+                for _ in range(a.FINNHUB_SAFE):
+                    a.finnhub_slot()
+                self.assertFalse(a.finnhub_slot())            # Fenster voll, Wartezeit > 5 s -> auslassen
+            self.assertEqual(a.finnhub_status()["skipped"], 1)
+        finally:
+            a.FINNHUB_MAX_WAIT = old

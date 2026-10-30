@@ -23,6 +23,7 @@ import secrets
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -3136,8 +3137,71 @@ def finnhub_key():
     return (os.environ.get("FINNHUB_API_KEY") or "").strip()
 
 
+FINNHUB_LIMIT = 60          # kostenloser Tarif: 60 Anfragen pro Minute
+FINNHUB_SAFE = 55           # Bremse greift etwas darunter (Puffer für gleichzeitige Anfragen)
+FINNHUB_MAX_WAIT = 20       # länger nicht warten – dann diese Anfrage auslassen
+FINNHUB_STATS = {"calls": [], "day": "", "today": 0, "waited": 0, "wait_s": 0.0, "skipped": 0, "rejected": 0,
+                 "minutes": {}, "last_reject": None}
+FINNHUB_LOCK = threading.Lock()
+
+
+def _fh_day():
+    d = datetime.now().strftime("%Y-%m-%d")
+    if FINNHUB_STATS["day"] != d:
+        FINNHUB_STATS.update(day=d, today=0, waited=0, wait_s=0.0, skipped=0, rejected=0)
+
+
+def finnhub_slot():
+    """Platz im Minutenfenster reservieren: unter FINNHUB_SAFE Anfragen in den letzten 60 Sekunden sofort, sonst kurz
+    warten, bis eine Anfrage aus dem Fenster fällt. Bei zu langer Wartezeit False (Anfrage wird ausgelassen)."""
+    waited = 0.0
+    while True:
+        with FINNHUB_LOCK:
+            now = time.time()
+            calls = FINNHUB_STATS["calls"]
+            while calls and now - calls[0] > 60:
+                calls.pop(0)
+            _fh_day()
+            if len(calls) < FINNHUB_SAFE:
+                calls.append(now)
+                FINNHUB_STATS["today"] += 1
+                mk = datetime.now().strftime("%H:%M")
+                mins = FINNHUB_STATS["minutes"]
+                mins[mk] = mins.get(mk, 0) + 1
+                while len(mins) > 60:
+                    mins.pop(next(iter(mins)))
+                if waited:
+                    FINNHUB_STATS["waited"] += 1
+                    FINNHUB_STATS["wait_s"] += waited
+                return True
+            pause = 60 - (now - calls[0]) + 0.05
+        if waited + pause > FINNHUB_MAX_WAIT:
+            with FINNHUB_LOCK:
+                _fh_day()
+                FINNHUB_STATS["skipped"] += 1
+            return False
+        time.sleep(pause)
+        waited += pause
+
+
+def finnhub_status():
+    """Zähler fürs Admin-Dashboard: Anfragen der letzten 60 Sekunden, heute, Verlauf je Minute (letzte Stunde)."""
+    with FINNHUB_LOCK:
+        now = time.time()
+        _fh_day()
+        last = sum(1 for c in FINNHUB_STATS["calls"] if now - c <= 60)
+        mins = dict(FINNHUB_STATS["minutes"])
+        st = {k: FINNHUB_STATS[k] for k in ("today", "waited", "skipped", "rejected", "last_reject")}
+    keys = [(datetime.now() - timedelta(minutes=i)).strftime("%H:%M") for i in range(59, -1, -1)]
+    series = [mins.get(k, 0) for k in keys]
+    return {"active": bool(finnhub_key()), "limit": FINNHUB_LIMIT, "safe": FINNHUB_SAFE, "last_min": last,
+            "series": series, "first": keys[0], "peak_hour": max(series) if series else 0,
+            "wait_s": round(FINNHUB_STATS["wait_s"], 1), **st}
+
+
 def finnhub(path, **params):
-    """GET auf die Finnhub-API. Liefert JSON oder None (kein Schlüssel, kein Zugriff, Limit erreicht)."""
+    """GET auf die Finnhub-API. Liefert JSON oder None (kein Schlüssel, kein Zugriff, Limit erreicht). Gezählt und gebremst,
+    damit das Minutenlimit des kostenlosen Tarifs (60/min) nicht überschritten wird."""
     key = finnhub_key()
     if not key:
         return None
@@ -3145,10 +3209,20 @@ def finnhub(path, **params):
     hit = FINNHUB_CACHE.get(url)
     if hit and time.time() - hit[0] < 3600:
         return hit[1]
+    if not finnhub_slot():
+        return None
     req = urllib.request.Request(url, headers={**UA, "X-Finnhub-Token": key})  # Schlüssel im Header, nicht in der URL
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:  # Limit trotzdem erreicht (z. B. Anfragen von anderswo mit demselben Schlüssel)
+            with FINNHUB_LOCK:
+                _fh_day()
+                FINNHUB_STATS["rejected"] += 1
+                FINNHUB_STATS["last_reject"] = int(time.time())
+            LOG.warning("[Finnhub] Minutenlimit erreicht (429) bei %s", path)
+        return None
     except Exception:
         return None
     if isinstance(data, dict) and data.get("error"):
@@ -9692,7 +9766,7 @@ def admin_dashboard():
                      "rated": len(scr["rows"]), "total": scr["total"], "fresh": scr["fresh"],
                      "universes": scr["universes"],
                      "failed": sorted(k for k, v in screener_store().items() if v.get("failed") and not v.get("label"))[:30]},
-        "caches": caches, "warnings": warn, "recent": recent,
+        "caches": caches, "warnings": warn, "recent": recent, "finnhub": finnhub_status(),
         "system": {"python": sys.version.split()[0], "yfinance": getattr(yf, "__version__", "?"),
                    "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal",
                    "hosted": "RENDER" in os.environ, "storage": STORE.backend, "encrypted": STORE.encrypted,

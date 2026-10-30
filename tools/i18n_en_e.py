@@ -377,3 +377,15 @@ DEPOT_WILD += [
     ("{*} wird berechnet – jede Position wird mit Stockys Aktienanalyse bewertet{*1}. Das dauert beim ersten Mal 1–2 Minuten.",
      "{*} is being calculated – every holding is rated with Stocky's stock analysis{*1}. The first time takes 1–2 minutes."),
 ]
+# Admin: Finnhub-Kontingent
+DEPOT_EXACT.update({
+    "Finnhub-Kontingent": "Finnhub quota", "Kein Finnhub-Schlüssel hinterlegt.": "No Finnhub key configured.",
+    "Anfragen heute": "Requests today", "Höchstwert je Minute (letzte Stunde)": "Peak per minute (last hour)",
+    "Gebremst (kurz gewartet)": "Throttled (short wait)", "Ausgelassen (zu lange Wartezeit)": "Skipped (wait too long)",
+    "Von Finnhub abgelehnt (429)": "Rejected by Finnhub (429)", "jetzt": "now",
+})
+DEPOT_WILD += [
+    ("Limit {0} pro Minute", "Limit {0} per minute"), ("/ {0} in den letzten 60 Sekunden", "/ {0} in the last 60 seconds"),
+    ("Gezählt werden nur echte Anfragen (Zwischenspeicher-Treffer nicht). Ab {0} Anfragen pro Minute bremst Stocky und wartet, bis wieder Platz ist – so geht keine Antwort durch das Limit verloren. Zähler „heute“ setzt um Mitternacht zurück und beginnt bei einem Neustart des Servers neu.",
+     "Only real requests are counted (not cache hits). From {0} requests per minute Stocky throttles and waits until there is room again – so no answer is lost to the limit. The “today” counter resets at midnight and restarts when the server restarts."),
+]

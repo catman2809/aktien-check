@@ -907,6 +907,15 @@ table.inc-tbl{min-width:520px}
 .mine-set select{height:38px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
   padding:0 10px;font:inherit;font-size:15px;max-width:60%}
 .mine-acct{max-width:640px}
+.fh-now{display:flex;align-items:baseline;gap:8px;margin:2px 0 8px} .fh-now b{font-size:28px}
+.fh-now b.pos{color:var(--pos)} .fh-now b.neu{color:var(--neu)} .fh-now b.neg{color:var(--neg)}
+.fh-bar{position:relative;height:10px;border-radius:5px;background:var(--surface-2);overflow:visible;margin-bottom:12px}
+.fh-bar i{display:block;height:100%;border-radius:5px} .fh-bar i.pos{background:var(--pos)} .fh-bar i.neu{background:var(--neu)} .fh-bar i.neg{background:var(--neg)}
+.fh-bar span{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text-3)}
+.fh-spark{position:relative;display:flex;align-items:flex-end;gap:1px;height:56px;border-bottom:1px solid var(--border)}
+.fh-spark i{flex:1;min-height:1px;background:var(--accent);border-radius:1px 1px 0 0} .fh-spark i.hot{background:var(--neg)}
+.fh-lim{position:absolute;left:0;right:0;border-top:1px dashed var(--neg);opacity:.7}
+.fh-axis{display:flex;justify-content:space-between;font-size:11px;margin:2px 0 8px}
 .inc-pe th small{display:block;font-weight:400;color:var(--text-3);font-size:11px}
 .inc-pe td,.inc-pe th{border-top:1px solid var(--border-strong)}
 .mine-acct > .eyebrow:first-child{margin-top:0}
@@ -3509,6 +3518,23 @@ async function loadAdmin() {
   renderAdmin(D);
   admTimer = setTimeout(loadAdmin, 30000);
 }
+function admFinnhub(F) {
+  if (!F) return "";
+  if (!F.active) return `<div class="card pad"><h3>Finnhub-Kontingent</h3><div class="stamp">Kein Finnhub-Schlüssel hinterlegt.</div></div>`;
+  const pct = Math.min(100, F.last_min / F.limit * 100), tone = F.last_min >= F.safe ? "neg" : F.last_min >= F.limit * 0.6 ? "neu" : "pos";
+  const mx = Math.max(F.limit, ...F.series);
+  const bars = F.series.map((v, i) => `<i style="height:${(v / mx * 100).toFixed(1)}%" class="${v >= F.safe ? "hot" : ""}" title="${v} Anfragen"></i>`).join("");
+  return `<div class="card pad"><h3>Finnhub-Kontingent <span class="stamp">Limit ${F.limit} pro Minute</span></h3>
+    <div class="fh-now"><b class="num ${tone}">${F.last_min}</b><span class="stamp">/ ${F.limit} in den letzten 60 Sekunden</span></div>
+    <div class="fh-bar"><i class="${tone}" style="width:${pct.toFixed(1)}%"></i><span style="left:${(F.safe / F.limit * 100).toFixed(1)}%" title="Bremse bei ${F.safe}"></span></div>
+    <div class="fh-spark" aria-label="Anfragen je Minute, letzte Stunde">${bars}<span class="fh-lim" style="bottom:${(F.limit / mx * 100).toFixed(1)}%"></span></div>
+    <div class="stamp fh-axis"><span>${esc(F.first)}</span><span>jetzt</span></div>
+    ${[["Anfragen heute", F.today], ["Höchstwert je Minute (letzte Stunde)", F.peak_hour],
+       ["Gebremst (kurz gewartet)", F.waited ? `${F.waited}× · ${nf(F.wait_s, 0)} s` : "0"],
+       ["Ausgelassen (zu lange Wartezeit)", F.skipped], ["Von Finnhub abgelehnt (429)", F.rejected + (F.last_reject ? ` · zuletzt ${fmtAgo(F.last_reject)}` : "")]]
+      .map(([k, v]) => `<div class="adm-row"><span>${k}</span><b class="num">${esc(String(v))}</b></div>`).join("")}
+    <p class="stamp" style="margin:8px 0 0">Gezählt werden nur echte Anfragen (Zwischenspeicher-Treffer nicht). Ab ${F.safe} Anfragen pro Minute bremst Stocky und wartet, bis wieder Platz ist – so geht keine Antwort durch das Limit verloren. Zähler „heute“ setzt um Mitternacht zurück und beginnt bei einem Neustart des Servers neu.</p></div>`;
+}
 function renderAdmin(D) {
   const K = D.kpi, S = D.system, Sc = D.screener;
   const dur = s_ => { const d = Math.floor(s_ / 86400), h = Math.floor(s_ % 86400 / 3600), m_ = Math.floor(s_ % 3600 / 60); return d ? `${d} T. ${h} Std.` : h ? `${h} Std. ${m_} Min.` : `${m_} Min.`; };
@@ -3638,6 +3664,8 @@ function renderAdmin(D) {
       <div class="card pad"><h3>Datenquellen</h3>
         <div id="adm-diag">${admDiag ? admDiag : `<div class="stamp">Prüft, ob Yahoo, Google News, Finnhub, CoinGecko, Wikidata und ntfy erreichbar sind (dauert etwa 10–20 Sekunden).</div>`}</div>
         <div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" id="admdiag">Jetzt prüfen</button></div></div>
+
+      ${admFinnhub(D.finnhub)}
 
       <div class="card pad"><h3>System</h3>
         ${[["Version (Commit)", S.commit], ["Python / yfinance", `${S.python} / ${S.yfinance}`],
