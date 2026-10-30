@@ -2429,7 +2429,7 @@ function dpDividends(D) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const cal = (V.calendar || []).filter(x => x.date >= today);
   return head + `<div class="card pad">
-    <div class="dp-divhead"><div><div class="eyebrow">Erwartet in den nächsten 12 Monaten</div><b class="dp-big">${nf(V.total || 0, 0)} €</b>
+    <div class="dp-divhead"><div><div class="eyebrow">Erwartet in den nächsten 12 Monaten (Prognose)</div><b class="dp-big">${nf(V.total || 0, 0)} €</b>
       <span class="stamp">${nf((V.total || 0) / 12, 0)} € im Monatsschnitt</span></div></div>
     <div class="dp-months">${months.map(m => `<div class="dp-mon" title="${mn(m)}: ${nf(M[m] || 0, 0)} €"><span class="dp-mbar" style="height:${((M[m] || 0) / mx * 100).toFixed(1)}%"></span><small>${mn(m)}</small></div>`).join("")}</div>
     ${cal.length ? `<div class="peer-scroll"><table class="trk dp-cal"><thead><tr><th>Ex-Tag</th><th>Wertpapier</th><th class="num">Betrag</th><th></th></tr></thead><tbody>
@@ -2460,7 +2460,7 @@ function dpTaxes(D) {
       <div class="dp-taxrow"><label for="dp-fb">Sparerpauschbetrag</label>
         <select id="dp-fb"><option value="1000" ${fb === 1000 ? "selected" : ""}>1.000 € (einzeln)</option><option value="2000" ${fb === 2000 ? "selected" : ""}>2.000 € (gemeinsam veranlagt)</option></select></div>
       ${ytd ? `<div class="dp-fbbar" title="verbraucht ${eur(used)} von ${eur(fb)}"><i style="width:${Math.min(100, used / fb * 100).toFixed(1)}%"></i></div>
-        <div class="dp-kv"><span>Verbraucht ${T.year} (Dividenden ${eur(T.div_ytd || 0)}, Kursgewinne ${eur((T.realized_stock || 0) + (T.realized_other || 0))})</span><b>${eur(used)} von ${eur(fb)}</b></div>
+        <div class="dp-kv"><span>Verbraucht ${T.year} (Dividenden ${eur(T.div_ytd || 0)} steuerpflichtig, Kursgewinne ${eur((T.realized_stock || 0) + (T.realized_other || 0))})</span><b>${eur(used)} von ${eur(fb)}</b></div>
         <div class="dp-kv"><span>Noch frei</span><b class="${left > 0 ? "pos" : ""}">${eur(left)}</b></div>
         ${ytd.stockLoss > 0 ? `<div class="dp-kv"><span>Aktienverlusttopf (nur mit Aktiengewinnen verrechenbar)</span><b>${eur(ytd.stockLoss)}</b></div>` : ""}
         ${winnersTaxable > 0 ? `<div class="dp-kv"><span>Steuerpflichtig über dem Freibetrag (geschätzt ${pc(rate, 3)})</span><b>${eur(winnersTaxable)} → ${eur(winnersTaxable * rate)} Steuer</b></div>` : ""}`
@@ -2542,9 +2542,9 @@ function renderDepot() {
       ${Rk.twr != null
         ? dpKpi("Rendite 12 Monate", pc(Rk.twr, 1, true), `<span>zeitgewichtet</span> · <span>${sgn(Rk.twr_pnl)}${eur(Rk.twr_pnl)}</span>` + (Rk.bench_perf != null ? ` · <span>MSCI World ${pc(Rk.bench_perf, 1, true)}</span>` : ""), tone(Rk.twr))
         : dpKpi("Rendite 12 Monate", Rk.perf_1y != null ? pc(Rk.perf_1y, 1, true) : "–", "<span>heutige Zusammensetzung</span>" + (Rk.bench_perf != null ? ` · <span>MSCI World ${pc(Rk.bench_perf, 1, true)}</span>` : ""), tone(Rk.perf_1y))}
-      ${dpKpi("Dividenden pro Jahr", eur(S.div), `Rendite ${pc(S.div_yield, 2)}${S.div_yoc != null ? " · auf Einstand " + pc(S.div_yoc, 2) : ""}`)}
-      ${dpKpi("Schwankung (Volatilität)", Rk.vol != null ? pc(Rk.vol, 1) : "–", Rk.bench_vol != null ? `MSCI World ${pc(Rk.bench_vol, 1)}` : "pro Jahr")}
-      ${dpKpi("Größter Rückgang", Rk.max_dd != null ? pc(Rk.max_dd, 1) : "–", "vom Hoch, letzte 12 Monate", Rk.max_dd != null ? "neg" : "")}
+      ${dpKpi("Dividenden pro Jahr", eur(S.div), `letzte 12 Monate, heutiger Bestand · Rendite ${pc(S.div_yield, 2)}${S.div_yoc != null ? " · auf Einstand " + pc(S.div_yoc, 2) : ""}`)}
+      ${dpKpi("Schwankung (Volatilität)", Rk.vol != null ? pc(Rk.vol, 1) : "–", (Rk.bench_vol != null ? `MSCI World ${pc(Rk.bench_vol, 1)}` : "pro Jahr") + " · heutiger Bestand")}
+      ${dpKpi("Größter Rückgang", Rk.max_dd != null ? pc(Rk.max_dd, 1) : "–", "vom Hoch, 12 Monate, heutiger Bestand", Rk.max_dd != null ? "neg" : "")}
       ${dpKpi("Beta zum MSCI World", Rk.beta != null ? nf(Rk.beta, 2) : "–", Rk.beta != null ? (Rk.beta > 1.1 ? "schwankt stärker als der Markt" : Rk.beta < 0.9 ? "schwankt weniger als der Markt" : "etwa wie der Markt") : "")}
       ${dpKpi("Sharpe-Ratio", Rk.sharpe != null ? nf(Rk.sharpe, 2) : "–", "Rendite je Risikoeinheit (über 1 = gut)")}
       ${dpKpi("Größte Position", pc(S.largest, 1), S.largest_name)}

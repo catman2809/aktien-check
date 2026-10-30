@@ -5262,6 +5262,24 @@ def etf_price_metrics(m, hist):
     m["max_dd_5y"] = float((y5 / y5.cummax() - 1).min())
 
 
+ONVISTA_TER = {}  # ISIN -> (Zeit, laufende Kosten als Anteil oder None)
+
+
+def onvista_fund_ter(isin):
+    """Laufende Kosten (TER / „ongoing charges“) eines Fonds von onvista – Ersatz, wenn Yahoo keine liefert
+    (auf dem Server gesperrt, bei manchen ETFs auch lokal leer). 7 Tage zwischengespeichert."""
+    if not isin:
+        return None
+    hit = ONVISTA_TER.get(isin)
+    if hit and time.time() - hit[0] < 7 * 86400:
+        return hit[1]
+    raw = _fetch(f"https://api.onvista.de/api/v1/funds/ISIN:{isin}/snapshot", headers=ONVISTA_UA, timeout=20).decode("utf-8", "replace")
+    m_ = re.search(r'"ongoingCharges"\s*:\s*([0-9.]+)', raw)
+    ter = float(m_.group(1)) / 100 if m_ and 0 < float(m_.group(1)) < 5 else None
+    ONVISTA_TER[isin] = (time.time(), ter)
+    return ter
+
+
 def etf_data(m, t, info):
     """Fondsdaten: Kosten, Volumen, Zusammensetzung, Bewertung der Bestände (Yahoo; auf Servern teils gesperrt)."""
     fd = yq(lambda: t.funds_data)
@@ -5270,6 +5288,9 @@ def etf_data(m, t, info):
     m["ter"] = ter / 100 if ter is not None else None
     if m["ter"] is None and ops is not None and m["symbol"] in ops:
         m["ter"] = num(ops[m["symbol"]].get("Annual Report Expense Ratio"))
+    if m["ter"] is None:  # Yahoo gesperrt oder leer -> onvista über die ISIN
+        isin_ = safe(lambda: etf_isin(m["symbol"], "", info.get("longName") or info.get("shortName") or ""))
+        m["ter"] = safe(lambda: onvista_fund_ter(isin_))
     m["aum"] = num(info.get("totalAssets"))
     m["family"] = info.get("fundFamily") or (safe(lambda: fd.fund_overview.get("family")) if fd is not None else None) or ""
     m["category"] = info.get("category") or (safe(lambda: fd.fund_overview.get("categoryName")) if fd is not None else None) or ""
@@ -8451,6 +8472,8 @@ def depot_dividend_plan(row, info):
         if not today - timedelta(days=365) < dd <= today:
             continue
         nd = dd.replace(year=dd.year + 1) if not (dd.month == 2 and dd.day == 29) else dd.replace(year=dd.year + 1, day=28)
+        if nd <= today:
+            continue  # Vorjahrestermin schon verstrichen (diesjährige Zahlung ist bereits erfolgt) -> nicht in den nächsten 12 Monaten
         out.append({"date": nd.isoformat(), "name": row["name"], "symbol": sym, "eur": float(amt) * k * qty * (1 + g),
                     "est": True})
     confirmed = sorted(e["date"] for e in info.get("events") or [] if e.get("type") == "exdiv" and not e.get("estimated"))
@@ -8501,6 +8524,8 @@ def depot_outlook(rows, progress=None):
     funds = []
     for r_ in rows:
         ter = (infos.get(r_.get("symbol")) or {}).get("ter")
+        if ter is None and r_["kind"] in ("ETF", "Anleihen-ETF"):
+            ter = safe(lambda: onvista_fund_ter(r_.get("isin")))
         if r_["kind"] in ("ETF", "Anleihen-ETF") and ter is not None:
             funds.append({"name": r_["name"], "symbol": r_.get("symbol"), "value": r_["value"], "ter": ter, "eur": r_["value"] * ter})
     f_val = sum(x["value"] for x in funds)
@@ -8556,7 +8581,16 @@ def depot_tax(rows, history):
                 real_stock += v
             else:
                 real_other += v * (1 - tf)
-    div_ytd = sum(d[2] for d in (history or {}).get("dividends") or [] if str(d[0] or "")[:4] == year) if history else None
+    names = {k.get("key"): k.get("name") for k in (history or {}).get("keys") or [] if k.get("key")}
+    div_ytd = None
+    if history:
+        div_ytd = 0.0
+        for d in history.get("dividends") or []:
+            if str(d[0] or "")[:4] != year:
+                continue
+            kind = kind_by.get(d[1]) or kind_by.get(names.get(d[1]) or "")
+            cls, tf = tax_class(kind or ("ETF" if ETF_NAME_HINT.search(names.get(d[1]) or "") else "Aktie"), names.get(d[1]))
+            div_ytd += d[2] * (1 - tf)  # Ausschüttungen von Aktien-ETFs: 30 % Teilfreistellung
     pos = []
     for r_ in rows:
         cls, tf = tax_class(r_["kind"], r_["name"])
@@ -10187,7 +10221,7 @@ def cache_rules():
             ("OpenFIGI", FIGI_CACHE, 7 * 86400, 3000),
             ("Depot-Hauptnotierung", DEPOT_META_CACHE, 7 * 86400, 1000), ("Derivate", DERIV_CACHE, 1800, 200),
             ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
-            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300),
+            ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300), ("Fondskosten (onvista)", ONVISTA_TER, 7 * 86400, 500),
             ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
             ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 

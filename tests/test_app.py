@@ -2017,6 +2017,26 @@ class TestDepotTax(unittest.TestCase):
         self.assertEqual([p["symbol"] for p in T["positions"]], ["SIE.DE", "EUNL.DE"])   # Krypto ausgenommen
         self.assertAlmostEqual(T["positions"][1]["taxable"], 700.0)
 
+    def test_etf_distribution_partial_exemption(self):
+        y = str(a.datetime.now().year)
+        rows = [{"name": "Vanguard FTSE All-World UCITS ETF (Dist)", "symbol": "VGWL.DE", "isin": "IE00B3RBWM25", "kind": "ETF", "gain": None}]
+        hist = {"keys": [{"key": "IE00B3RBWM25", "isin": "IE00B3RBWM25", "name": "Vanguard FTSE All-World", "realized_years": {}},
+                         {"key": "DE0007236101", "isin": "DE0007236101", "name": "Siemens", "realized_years": {}}],
+                "dividends": [[f"{y}-03-01", "IE00B3RBWM25", 100.0], [f"{y}-02-15", "DE0007236101", 50.0]]}
+        self.assertAlmostEqual(a.depot_tax(rows, hist)["div_ytd"], 100.0 * 0.7 + 50.0)   # ETF-Ausschüttung zu 70 % steuerpflichtig
+
+    def test_dividend_plan_only_future_dates(self):
+        import unittest.mock as mock, pandas as pd
+        today = a.datetime.now()
+        past_ex = pd.Timestamp(today - a.timedelta(days=375))      # Vorjahrestermin schon verstrichen
+        next_ex = pd.Timestamp(today - a.timedelta(days=300))      # Vorjahrestermin liegt noch vor uns
+        divs = pd.Series([1.0, 2.0], index=[past_ex, next_ex])
+        fake = mock.MagicMock(); fake.dividends = divs
+        with mock.patch.object(a.yf, "Ticker", return_value=fake):
+            plan = a.depot_dividend_plan({"symbol": "X", "qty": 10, "price": 50.0, "name": "X"}, {"price": 50.0, "div_g": 0.1})
+        self.assertEqual(len(plan), 1)
+        self.assertAlmostEqual(plan[0]["eur"], 2.0 * 10 * 1.1)
+
 
 class TestFinnhubThrottle(unittest.TestCase):
     def setUp(self):
@@ -2049,3 +2069,14 @@ class TestFinnhubThrottle(unittest.TestCase):
             self.assertEqual(a.finnhub_status()["skipped"], 1)
         finally:
             a.FINNHUB_MAX_WAIT = old
+
+
+class TestOnvistaTer(unittest.TestCase):
+    def test_parse_ongoing_charges(self):
+        import unittest.mock as mock
+        a.ONVISTA_TER.clear()
+        with mock.patch.object(a, "_fetch", return_value=b'{"x":{"ongoingCharges": 0.2,"managementFee":0}}'):
+            self.assertAlmostEqual(a.onvista_fund_ter("IE00B4L5Y983"), 0.002)
+        with mock.patch.object(a, "_fetch", return_value=b'{"x":{}}'):
+            self.assertIsNone(a.onvista_fund_ter("XX0000000000"))
+        a.ONVISTA_TER.clear()

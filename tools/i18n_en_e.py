@@ -389,3 +389,8 @@ DEPOT_WILD += [
     ("Gezählt werden nur echte Anfragen (Zwischenspeicher-Treffer nicht). Ab {0} Anfragen pro Minute bremst Stocky und wartet, bis wieder Platz ist – so geht keine Antwort durch das Limit verloren. Zähler „heute“ setzt um Mitternacht zurück und beginnt bei einem Neustart des Servers neu.",
      "Only real requests are counted (not cache hits). From {0} requests per minute Stocky throttles and waits until there is room again – so no answer is lost to the limit. The “today” counter resets at midnight and restarts when the server restarts."),
 ]
+DEPOT_EXACT.update({"Erwartet in den nächsten 12 Monaten (Prognose)": "Expected in the next 12 months (forecast)"})
+DEPOT_WILD += [("letzte 12 Monate, heutiger Bestand · Rendite {*}", "last 12 months, current holdings · yield {*}"),
+               ("Verbraucht {0} (Dividenden {*} steuerpflichtig, Kursgewinne {*1})", "Used {0} (dividends {*} taxable, capital gains {*1})")]
+DEPOT_EXACT.update({"vom Hoch, 12 Monate, heutiger Bestand": "from peak, 12 months, current holdings"})
+DEPOT_WILD += [("{*} · heutiger Bestand", "{*} · current holdings")]
