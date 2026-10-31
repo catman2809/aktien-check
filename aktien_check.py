@@ -4786,34 +4786,46 @@ CRYPTO_WEIGHTS = {"valuation": .20, "quality": .20, "growth": .15, "risk": .15,
 CG_CACHE = {}
 
 
+CG_LOCKS = {}
+
+
 def coingecko(path, ttl=600):
-    """CoinGecko-API (kostenlos; optional COINGECKO_API_KEY als Demo-Schlüssel), gecacht."""
+    """CoinGecko-API (kostenlos; optional COINGECKO_API_KEY als Demo-Schlüssel), gecacht. Ohne Schlüssel drosselt CoinGecko
+    Cloud-Server stark (geteilte IP-Adressen, HTTP 429) – dann bis zu zweimal mit Wartezeit erneut versuchen und gleiche
+    Abfragen nicht parallel stellen."""
     hit = CG_CACHE.get(path)
     if hit and time.time() - hit[0] < ttl:
         return hit[1]
-    headers = dict(UA)
-    if os.environ.get("COINGECKO_API_KEY"):
-        headers["x-cg-demo-api-key"] = os.environ["COINGECKO_API_KEY"].strip()
-    data = None
-    for attempt in range(2):
-        try:
-            req = urllib.request.Request("https://api.coingecko.com/api/v3/" + path, headers=headers)
-            with urllib.request.urlopen(req, timeout=12) as r:
-                data = json.loads(r.read())
-            break
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt == 0:
-                time.sleep(2.5)  # gedrosselt -> kurz warten, einmal erneut
-                continue
-            break
-        except Exception:
-            break
-    if data is None:
-        LOG.warning("[CoinGecko] keine Antwort für %s – %s", path.split("?")[0],
-                    "nutze Zwischenspeicher" if hit else "ohne Daten")
-        return hit[1] if hit else None  # bei Limit/Fehler: letzter bekannter Stand
-    CG_CACHE[path] = (time.time(), data)
-    return data
+    with CG_LOCKS.setdefault(path, threading.Lock()):  # gleiche Abfrage läuft schon -> deren Ergebnis abwarten
+        hit = CG_CACHE.get(path)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        headers = dict(UA)
+        if os.environ.get("COINGECKO_API_KEY"):
+            headers["x-cg-demo-api-key"] = os.environ["COINGECKO_API_KEY"].strip()
+        data, reason = None, ""
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request("https://api.coingecko.com/api/v3/" + path, headers=headers)
+                with urllib.request.urlopen(req, timeout=12) as r:
+                    data = json.loads(r.read())
+                break
+            except urllib.error.HTTPError as e:
+                reason = f"HTTP {e.code}" + (" (Abfragelimit)" if e.code == 429 else "")
+                if e.code == 429 and attempt < 2:
+                    wait = num(e.headers.get("Retry-After")) if e.headers else None
+                    time.sleep(min(10.0, wait if wait and wait > 0 else 3.0 * (attempt + 1)))  # gedrosselt -> warten, erneut
+                    continue
+                break
+            except Exception as e:
+                reason = type(e).__name__
+                break
+        if data is None:
+            LOG.warning("[CoinGecko] keine Antwort für %s (%s) – %s", path.split("?")[0], reason or "Fehler",
+                        "nutze Zwischenspeicher" if hit else "ohne Daten")
+            return hit[1] if hit else None  # bei Limit/Fehler: letzter bekannter Stand
+        CG_CACHE[path] = (time.time(), data)
+        return data
 
 
 def cg_markets(vs="eur"):
