@@ -916,6 +916,27 @@ table.inc-tbl{min-width:520px}
 .c0{background:var(--accent)} .c1{background:var(--pos)} .c2{background:var(--neu)} .c3{background:#8a6fb0} .c4{background:var(--neg)}
 .adm-ubar{display:block;height:3px;background:var(--surface-2);border-radius:2px;margin-top:3px}
 .adm-ubar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+.err-g{border-top:1px solid var(--border);padding:6px 0}
+.err-g summary{display:flex;justify-content:space-between;gap:12px;cursor:pointer;font-size:13.5px;list-style:none}
+.err-g summary::-webkit-details-marker{display:none}
+.err-g code{font-size:12px;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+.err-meta{display:flex;flex-direction:column;align-items:flex-end;flex:none}
+.err-tb{white-space:pre-wrap;word-break:break-word;font-size:11.5px;line-height:1.45;background:var(--surface-2);padding:8px 10px;border-radius:8px;max-height:280px;overflow:auto;margin:0}
+td.num.neg{color:var(--neg)} td.num.neu{color:var(--neu)} td.num.pos{color:var(--pos)}
+.up-bar{position:relative;height:16px;background:var(--surface-2);border-radius:5px;overflow:hidden;margin:10px 0 2px}
+.up-bar i{position:absolute;top:0;bottom:0;background:var(--pos);opacity:.85}
+.up-bar span{position:absolute;top:0;bottom:0;width:1px;background:var(--border)}
+.cs-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.cs-form input{height:36px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;min-width:0;flex:0 1 240px}
+.q-row{display:grid;grid-template-columns:minmax(150px,1.2fr) repeat(2,minmax(0,1fr));gap:12px;padding:8px 0;border-top:1px solid var(--border);align-items:center}
+.q-row>div:first-child{display:flex;flex-direction:column}
+.q-cell{display:flex;flex-direction:column;gap:4px;min-width:0}
+.q-bar{display:block;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden}
+.q-bar i{display:block;height:100%} .q-bar i.pos{background:var(--pos)} .q-bar i.neu{background:var(--neu)} .q-bar i.neg{background:var(--neg)}
+@media (max-width:640px){.q-row{grid-template-columns:1fr}}
+.dq-row .sub-pill{margin:3px 4px 0 0;display:inline-block}
+.dq-note{display:block;margin-top:2px}
+.adm-nt{display:flex;margin:4px 0}
 .fh-now{display:flex;align-items:baseline;gap:8px;margin:2px 0 8px} .fh-now b{font-size:28px}
 .fh-now b.pos{color:var(--pos)} .fh-now b.neu{color:var(--neu)} .fh-now b.neg{color:var(--neg)}
 .fh-bar{position:relative;height:10px;border-radius:5px;background:var(--surface-2);overflow:visible;margin-bottom:12px}
@@ -3576,6 +3597,86 @@ function admUsage(N, rel) {
         ${N.per_user.slice(0, 12).map(x => `<div class="adm-row"><span><b>${esc(x.user)}</b> <small class="stamp">${x.top.map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</small></span><b class="num">${x.total}</b></div>`).join("") || `<div class="stamp">–</div>`}
         ${N.inactive.length ? `<div class="stamp" style="margin:10px 0 4px">Seit über 30 Tagen inaktiv</div>${N.inactive.map(x => `<div class="adm-row"><span>${esc(x.user)}</span><span class="stamp">${x.last ? rel(x.last) : "nie angemeldet"}</span></div>`).join("")}` : ""}</div></div></div>`;
 }
+const fmtBytes = b => !b ? "–" : b < 1024 ? "< 1 KB" : b < 1e6 ? nf(b / 1024, 0) + " KB" : nf(b / 1e6, 1) + " MB";
+const msTxt = v => v == null ? "–" : v < 1 ? nf(v * 1000, 0) + " ms" : nf(v, 1) + " s";
+const pc0 = v => v == null ? "–" : nf(v * 100, 0) + " %";
+function admErrors(E, dt, rel) {
+  if (!E) return "";
+  const rows = E.groups.map(g => `<details class="err-g"><summary><span><b>${esc(g.type)}</b> <code>${esc(g.where)}</code>
+      <small class="stamp">${esc((g.msg || "").slice(0, 140))}</small></span>
+      <span class="err-meta"><b class="num">${g.n}×</b><small class="stamp">zuletzt ${rel(g.last)}</small></span></summary>
+      <div class="stamp" style="margin:6px 0">Erstmals ${dt(g.first)} · zuletzt ${dt(g.last)}${g.req ? ` · ${esc(g.req)}` : ""}${g.symbols && g.symbols.length ? ` · Aktien: ${g.symbols.map(x => `<a href="?q=${encodeURIComponent(x)}" class="adm-sym" data-q="${esc(x)}">${esc(x)}</a>`).join(", ")}` : ""}</div>
+      <pre class="err-tb">${esc(g.tb || "")}</pre></details>`).join("");
+  return `<div class="card pad adm-wide"><h3>Fehlerprotokoll <span class="stamp">${E.groups.length} Fehlerart(en) · ${E.total} Vorkommen · ${E.d1} in den letzten 24 Std.</span></h3>
+    ${rows || `<div class="stamp">Keine Ausnahmen protokolliert. ✓</div>`}
+    <div class="modal-actions" style="justify-content:space-between;align-items:center"><p class="stamp" style="margin:0">Gruppiert nach Fehlerart und Codestelle; bleibt über Neustarts erhalten. Schlüssel und Passwörter in Meldungen werden ausgeblendet.</p>
+      ${E.groups.length ? `<button class="btn xs" data-act="clear_errors">Protokoll leeren</button>` : ""}</div></div>`;
+}
+function admTiming(T) {
+  if (!T) return "";
+  const tone = v => v == null ? "" : v > 20 ? "neg" : v > 8 ? "neu" : "";
+  const rows = T.map(x => `<tr><td>${esc(x.name)}</td><td class="num">${x.n1}</td><td class="num">${x.n7}</td><td class="num">${msTxt(x.avg)}</td>
+      <td class="num">${msTxt(x.median)}</td><td class="num ${tone(x.p95)}"><b>${msTxt(x.p95)}</b></td><td class="num">${msTxt(x.max)}</td>
+      <td class="num ${x.errors ? "neg" : ""}">${x.errors}</td>
+      <td class="num ${x.trend > 0.5 ? "neg" : x.trend < -0.3 ? "pos" : ""}">${x.trend == null ? "–" : (x.trend > 0 ? "+" : "") + nf(x.trend * 100, 0) + " %"}</td></tr>`).join("");
+  return `<div class="card pad adm-wide"><h3>Antwortzeiten je Funktion <span class="stamp">letzte 7 Tage · nach 95-%-Wert sortiert</span></h3>
+    ${rows ? `<div class="peer-scroll"><table class="trk adm-src"><thead><tr><th>Funktion</th><th class="num">24 Std.</th><th class="num">7 Tage</th><th class="num">Ø</th><th class="num">Median</th><th class="num">95 %</th><th class="num">Max</th><th class="num">Fehler</th><th class="num">Trend 95 %</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="stamp">Noch keine Anfragen gemessen.</div>`}
+    <p class="stamp" style="margin:8px 0 0">95 % = so lange dauerten 95 von 100 Anfragen höchstens. Trend: 95-%-Wert der letzten 24 Std. gegenüber den Tagen davor. Fehler = Serverfehler (HTTP 5xx). Warten auf Hintergrundaufträge zählt nicht, deren Gesamtdauer steht als „(Hintergrund)“.</p></div>`;
+}
+function admUptime(U, dt, dur) {
+  if (!U) return "";
+  const span = Date.now() / 1000 - U.from;
+  const segs = U.sessions.map(([a_, b_]) => `<i style="left:${((a_ - U.from) / span * 100).toFixed(2)}%;width:${Math.max(0.3, (b_ - a_) / span * 100).toFixed(2)}%" title="${dt(a_)} – ${dt(b_)}"></i>`).join("");
+  const days = Array.from({length: U.days + 1}, (_, i) => `<span style="left:${(i / U.days * 100).toFixed(2)}%"></span>`).join("");
+  const V = U.version;
+  return `<div class="card pad"><h3>Laufzeit & Version <span class="stamp">letzte ${U.days} Tage</span></h3>
+    <div class="perf-k"><div><small>Online-Anteil</small><b class="num">${pc0(U.share)}</b></div><div><small>Online</small><b class="num">${dur(U.online_s)}</b></div>
+      <div><small>Längste Laufzeit</small><b class="num">${dur(U.longest_s)}</b></div></div>
+    <div class="up-bar" aria-label="Online-Zeiten">${days}${segs}</div><div class="stamp fh-axis"><span>${dt(U.from)}</span><span>jetzt</span></div>
+    <div class="adm-row"><span>Version</span><b>${V.url ? `<a href="${esc(V.url)}" target="_blank" rel="noopener">${esc(V.commit)}</a>` : esc(V.commit)}${V.deployed ? ` <small class="stamp">seit ${dt(V.deployed)}</small>` : ""}</b></div>
+    <div class="adm-row"><span>Neustarts 30 Tage</span><b>${Object.entries(U.reasons_30d).map(([k, v]) => `${esc(k)} ${v}`).join(" · ") || "–"}</b></div>
+    <p class="stamp" style="margin:8px 0 0">Grün = Server lief. Lücken entstehen v. a. durch Einschlafen im kostenlosen Render-Tarif (nach 15 Min. ohne Aufrufe); Ende einer Laufzeit = letztes Lebenszeichen (alle 5 Min.).</p></div>`;
+}
+function admCaches(C) {
+  if (!C) return "";
+  const tot = C.reduce((a_, c) => a_ + (c.bytes || 0), 0);
+  const rows = C.map(c => `<tr><td>${esc(c.name)}</td><td class="num">${c.entries}/${c.max}</td>
+      <td class="num ${c.rate != null && c.rate < 0.3 && c.hits + c.misses >= 20 ? "neu" : ""}">${pc0(c.rate)} <small class="stamp">${c.hits + c.misses ? `(${c.hits}/${c.hits + c.misses})` : ""}</small></td>
+      <td class="num">${fmtBytes(c.bytes)}</td><td class="num stamp">${c.ttl >= 86400 ? nf(c.ttl / 86400, 0) + " T." : c.ttl >= 3600 ? nf(c.ttl / 3600, 0) + " Std." : nf(c.ttl / 60, 0) + " Min."}</td></tr>`).join("");
+  return `<div class="card pad adm-wide"><h3>Zwischenspeicher <span class="stamp">geschätzt ${fmtBytes(tot)} · Trefferquote seit dem Start</span></h3>
+    <div class="cs-form"><input id="cs-sym" placeholder="Kürzel, z. B. SIE.DE oder AAPL" maxlength="15" autocomplete="off" spellcheck="false">
+      <button class="btn" id="cs-go">Cache für diese Aktie leeren</button><span class="stamp">Hilft, wenn eine Analyse veraltete oder falsche Daten zeigt – die nächste Analyse lädt alles neu.</span></div>
+    <div class="peer-scroll"><table class="trk adm-src"><thead><tr><th>Speicher</th><th class="num">Einträge</th><th class="num">Cache-Treffer</th><th class="num">Größe ca.</th><th class="num">Gültig</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function admQuota(Q) {
+  if (!Q) return "";
+  const bar = (sh, lab) => `<span class="q-bar" title="${lab}"><i class="${sh >= 0.8 ? "neg" : sh >= 0.6 ? "neu" : "pos"}" style="width:${Math.min(100, (sh || 0) * 100).toFixed(1)}%"></i></span>`;
+  const rows = Q.sources.map(x => `<div class="q-row"><div><b>${esc(x.name)}</b><small class="stamp">${esc(x.note)}</small></div>
+      ${x.windows.map(w => `<div class="q-cell"><small class="stamp">pro ${w.label}: jetzt ${w.now} · Spitze 1 Std. ${w.peak_h} / ${w.limit}</small>${bar(w.share, "Spitze der letzten Stunde")}</div>`).join("")}
+      <div class="q-cell"><small class="stamp">${x.month_limit ? `Monat: ${x.month} / ${nf(x.month_limit, 0)} · Hochrechnung ${x.projection == null ? "–" : nf(x.projection, 0)}` : `heute ${x.today} · Monat ${x.month}${x.projection != null ? ` · Hochrechnung ${nf(x.projection, 0)}` : ""}`}</small>
+        ${x.month_limit ? bar(x.proj_share || x.month_share, "Hochrechnung bis Monatsende") : ""}</div></div>`).join("");
+  return `<div class="card pad adm-wide"><h3>Kontingente <span class="stamp">Monat ${esc(Q.month)} · Balken: höchste Auslastung der letzten Stunde bzw. Hochrechnung bis Monatsende</span></h3>
+    ${rows}<p class="stamp" style="margin:8px 0 0">Gezählt werden echte Anfragen an die Quelle (keine Zwischenspeicher-Treffer). Monatszähler wird alle 5 Minuten gesichert. Ab 80 % kommt eine Push-Nachricht, wenn unten eingeschaltet.</p></div>`;
+}
+function admDQ(Q, rel) {
+  if (!Q) return "";
+  const rows = Q.rows.slice(0, 40).map(r => `<div class="adm-row dq-row"><span><a href="?q=${encodeURIComponent(r.symbol)}" class="adm-sym" data-q="${esc(r.symbol)}">${esc(r.symbol)}</a>
+      <small class="stamp">${esc(r.name)}</small><br>${r.issues.map(i => `<span class="sub-pill abgelaufen">${esc(i)}</span>`).join(" ")}
+      ${r.notes.map(n => `<small class="stamp dq-note">↻ ${esc(n)}</small>`).join("")}</span><span class="stamp">${rel(r.t)}</span></div>`).join("");
+  return `<div class="card pad adm-wide"><h3>Datenqualität <span class="stamp">${Q.rows.length} Aktie(n) mit Lücken oder Korrekturen · letzte 30 Tage</span></h3>
+    ${Object.keys(Q.counts).length ? `<div class="stamp" style="margin-bottom:6px">${Object.entries(Q.counts).map(([k, v]) => `${esc(k)}: <b>${v}</b>`).join(" · ")}${Q.notes ? ` · Korrekturen: <b>${Q.notes}</b>` : ""}</div>` : ""}
+    ${rows || `<div class="stamp">Bei den zuletzt analysierten Aktien fehlte nichts. ✓</div>`}
+    <p class="stamp" style="margin:8px 0 0">Wird bei jeder Analyse aktualisiert; ist alles wieder da, verschwindet die Aktie aus der Liste. ↻ = Plausibilitätsregel hat Daten korrigiert (Ausreißer, Split, Größenordnung, veralteter Konsens) – zum gezielten Nachprüfen.</p></div>`;
+}
+function admNotify(N, dt) {
+  if (!N) return "";
+  return `<div class="card pad"><h3>Push an den Admin <span class="stamp">über ntfy, wie die Preisalarme</span></h3>
+    ${Object.entries(N.kinds).map(([k, lab]) => `<label class="adm-switch adm-nt"><input type="checkbox" data-k="${k}" ${N.settings[k] ? "checked" : ""}><span>${esc(lab)}</span></label>`).join("")}
+    <div class="modal-actions" style="justify-content:flex-start"><button class="btn primary" id="nt-save">Speichern</button><button class="btn" data-act="notify_test">Test senden</button></div>
+    ${N.log.length ? `<div class="stamp" style="margin:10px 0 4px">Zuletzt gesendet</div>${N.log.map(x => `<div class="adm-row"><span>${esc(x.title)} <small class="stamp">${esc(x.text)}</small></span><span class="stamp">${dt(x.t)}</span></div>`).join("")}` : ""}
+    <p class="stamp" style="margin:8px 0 0">Gleiche Meldung höchstens alle 3 Std. (Fehlversuche 1 Std., neue Fehlerart 1 Tag, Monatskontingent 1 Woche). Quelle gestört = unter 50 % Erfolg in der letzten Stunde bei mindestens 5 Anfragen.</p></div>`;
+}
 function admFinnhub(F) {
   if (!F) return "";
   if (!F.active) return `<div class="card pad"><h3>Finnhub-Kontingent</h3><div class="stamp">Kein Finnhub-Schlüssel hinterlegt.</div></div>`;
@@ -3634,6 +3735,8 @@ function renderAdmin(D) {
       ${admSources(D.sources, dt, rel)}
       ${admSecurity(D.security, dt, rel)}
       ${admUsage(D.usage, rel)}
+      ${D.monitor ? admErrors(D.monitor.errors, dt, rel) + admTiming(D.monitor.timing) + admQuota(D.monitor.quota)
+        + admDQ(D.monitor.dq, rel) + admUptime(D.monitor.uptime, dt, dur) + admNotify(D.monitor.notify, dt) : ""}
 
       <div class="card pad adm-wide"><h3>Arbeitsspeicher – letzte 7 Tage <span class="stamp">${O.mem.length ? `Höchstwert ${Math.max(...O.mem.map(x => x[1]))} MB · Messung alle 10 Min.` : "noch keine Messwerte"}</span></h3>
         <div id="mem-chart" class="mem-chart">${memChart(O.mem, S.hosted)}</div></div>
@@ -3742,8 +3845,8 @@ function renderAdmin(D) {
           <button class="btn" data-act="check_alerts">Alarme prüfen</button>
           <button class="btn danger" id="admreset">Alles leeren (inkl. Screener)</button></div></div>
 
-      <div class="card pad"><h3>Zwischenspeicher</h3>
-        ${D.caches.map(c => `<div class="adm-uni"><span>${esc(c.name)}</span><span class="adm-ub"><i style="width:${Math.min(100, c.entries / c.max * 100)}%"></i></span><span class="num stamp">${c.entries}/${c.max}</span></div>`).join("")}</div>
+      ${D.monitor ? admCaches(D.monitor.caches) : `<div class="card pad"><h3>Zwischenspeicher</h3>
+        ${D.caches.map(c => `<div class="adm-uni"><span>${esc(c.name)}</span><span class="adm-ub"><i style="width:${Math.min(100, c.entries / c.max * 100)}%"></i></span><span class="num stamp">${c.entries}/${c.max}</span></div>`).join("")}</div>`}
 
       <div class="card pad adm-wide"><h3>Warnungen & Fehler <span class="stamp">seit dem Start, neueste zuerst</span></h3>
         ${D.warnings.length ? `<div class="adm-log">${D.warnings.map(l => `<div class="adm-l ${l.level.toLowerCase()}"><span class="num">${dt(l.t)}</span><b>${l.level === "WARNING" ? "Warnung" : "Fehler"}</b><span>${esc(l.msg)}</span></div>`).join("")}</div>`
@@ -3867,7 +3970,24 @@ Watchlists, Alarme, Konten und die Trefferquote bleiben erhalten.`)) return;
     try { const r = await api("/api/admin/system", {action: "reset_all"}); toast(r.message || "Geleert"); loadAdmin(); }
     catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); e.target.disabled = false; e.target.textContent = "Alles leeren (inkl. Screener)"; }
   };
+  const csGo = $("#cs-go");
+  if (csGo) csGo.onclick = async () => {
+    const sym = $("#cs-sym").value.trim().toUpperCase();
+    if (!sym) return $("#cs-sym").focus();
+    csGo.disabled = true;
+    try { const r = await api("/api/admin/system", {action: "clear_symbol", symbol: sym}); toast(r.message || "Erledigt"); loadAdmin(); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }
+    csGo.disabled = false;
+  };
+  const ntSave = $("#nt-save");
+  if (ntSave) ntSave.onclick = async () => {
+    const settings = {};
+    document.querySelectorAll(".adm-nt input").forEach(i => settings[i.dataset.k] = i.checked);
+    try { const r = await api("/api/admin/system", {action: "notify", settings}); toast(r.message || "Gespeichert"); }
+    catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }
+  };
   document.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    if (b.dataset.act === "clear_errors" && !confirm("Fehlerprotokoll leeren?")) return;
     b.disabled = true;
     try { const r = await api("/api/admin/system", {action: b.dataset.act}); toast(r.message || "Erledigt"); loadAdmin(); }
     catch (err) { if (err.message !== "login") toast("Fehlgeschlagen: " + err.message); }

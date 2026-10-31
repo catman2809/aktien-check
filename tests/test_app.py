@@ -28,6 +28,8 @@ import aktien_check as a  # noqa: E402
 a.YQ_STATE.update(blocked=False, checked=float("inf"))  # keine echte Yahoo-Sperrprüfung im Testlauf
 
 a.LOG.setLevel("WARNING")  # Info-Protokoll in Tests ausblenden
+a.ALERT_FILE = Path(tempfile.mkdtemp()) / "alerts.json"  # nie den lokalen Datenbestand anfassen (z. B. Fehlerprotokoll)
+a.STORE.__init__()
 ENV_KEYS = ("APP_PASSWORD", "GITHUB_TOKEN", "STORE_KEY", "FINNHUB_API_KEY", "FORCE_FALLBACK", "RENDER")
 
 
@@ -2120,3 +2122,105 @@ class TestAdminMonitoring(unittest.TestCase):
     def test_ua_family(self):
         self.assertEqual(a.ua_family("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Safari/604.1"), "Safari auf iPhone")
         self.assertEqual(a.ua_family("Mozilla/5.0 (Windows NT 10.0) Chrome/130 Safari/537.36 Edg/130"), "Edge auf Windows")
+
+
+class TestAdminOps(Isolated):
+    def test_error_log_groups_and_masks(self):
+        sent = []
+        orig = a.notify_admins
+        a.notify_admins = lambda *x, **k: sent.append(x)
+        try:
+            for _ in range(2):
+                try:
+                    raise ValueError("kaputt https://x.io/?token=GEHEIM123&a=1")
+                except ValueError:
+                    a.error_record(sys.exc_info(), "[Test]")
+            g = a.error_overview()["groups"]
+            self.assertEqual(len(g), 1)
+            self.assertEqual(g[0]["n"], 2)
+            self.assertEqual(g[0]["type"], "ValueError")
+            self.assertNotIn("GEHEIM123", g[0]["msg"] + g[0]["tb"])
+            self.assertIn("token=***", g[0]["msg"])
+            time.sleep(0.2)
+            self.assertEqual(len(sent), 1)  # nur die neue Fehlerart meldet sich
+        finally:
+            a.notify_admins = orig
+
+    def test_timing_overview(self):
+        for s_ in (0.1, 0.2, 0.3, 5.0):
+            a.record_timing("Aktienanalyse", s_, 200)
+        a.record_timing("Aktienanalyse", 1.0, 500)
+        t = {x["name"]: x for x in a.timing_overview()}["Aktienanalyse"]
+        self.assertEqual(t["n7"], 5)
+        self.assertEqual(t["errors"], 1)
+        self.assertEqual(t["max"], 5.0)
+        self.assertIsNone(a.timing_feature("GET", "/api/depot", {"job": "x"}))
+        self.assertEqual(a.timing_feature("GET", "/api/movers", {}), "Top & Flop")
+
+    def test_uptime_sessions(self):
+        now = int(time.time())
+        o = a.ops()
+        o["restarts"] = [{"t": now - 7200, "reason": "Update auf neue Version", "commit": "abc", "down_s": None},
+                         {"t": now - 3600, "reason": "Server war eingeschlafen (keine Aufrufe)", "commit": "abc", "down_s": 1800}]
+        u = a.uptime_overview()
+        self.assertEqual(len(u["sessions"]), 2)
+        self.assertAlmostEqual(u["share"], 0.75, delta=0.02)  # 30 Min. Lücke in 2 Std.
+        self.assertEqual(u["reasons_30d"], {"Update": 1, "Eingeschlafen": 1})
+
+    def test_cache_hits_and_symbol_clear(self):
+        c = a.TCache(ttl=60)
+        c["SAP.DE"] = (time.time(), {"symbol": "SAP.DE"})
+        c["alt"] = (time.time() - 120, 1)
+        c.get("SAP.DE"), c.get("alt"), c.get("fehlt")
+        self.assertEqual((c.hits, c.misses), (1, 2))
+        self.assertIs(type(a.CACHE), a.TCache)
+        a.CACHE["siemens"] = (time.time(), {"symbol": "SIE.DE"})
+        a.INCOME_CACHE[("SIE.DE", "annual")] = (time.time(), {})
+        a.INCOME_CACHE[("SAP.DE", "annual")] = (time.time(), {})
+        r = a.clear_symbol_caches("sie.de")
+        self.assertEqual(r.get("Analysen"), 1)
+        self.assertEqual(r.get("Erfolgsrechnung"), 1)
+        self.assertIn(("SAP.DE", "annual"), dict(a.INCOME_CACHE))
+        a.INCOME_CACHE.clear(); a.CACHE.clear()
+        with self.assertRaises(ValueError):
+            a.clear_symbol_caches("<script>")
+
+    def test_quota_projection_and_peak(self):
+        self.assertEqual(a.peak_in_window([0, 10, 20, 70, 71], 60), 3)
+        a.SRC_STATS.clear()
+        a.QUOTA_COUNT.update(month=None, n={})
+        for _ in range(3):
+            a.src_record("CoinGecko", True, 0.1)
+        q = {x["name"]: x for x in a.quota_overview()["sources"]}["CoinGecko"]
+        self.assertEqual(q["month"], 3)
+        self.assertEqual(q["windows"][0]["now"], 3)
+        a.SRC_STATS.clear()
+
+    def test_data_quality_record_and_clear(self):
+        a.dq_note("XYZ", "Dividende: Ausreißer verworfen (2027)")
+        res = {"symbol": "XYZ", "name": "X", "targets": {"mean": None}, "forecast": {"eps": {}, "rev": {"2026": 1}},
+               "divhist": {"dps": [1.0, 1.1], "forecast": None}, "fair": {"value": 1}}
+        a.dq_record(res)
+        row = a.dq_overview()["rows"][0]
+        self.assertEqual(row["issues"], ["kein Kursziel", "keine Gewinnprognose", "keine Dividendenprognose"])
+        self.assertEqual(len(row["notes"]), 1)
+        a.DQ_NOTES.clear()
+        a.dq_record({**res, "targets": {"mean": 5}, "forecast": {"eps": {"2026": 1}, "rev": {"2026": 1}},
+                     "divhist": {"dps": [1.0], "forecast": [1]}})
+        self.assertEqual(a.dq_overview()["rows"], [])
+        a.dq_record({"symbol": "BTC-EUR"})  # Krypto: nichts zu prüfen
+        self.assertEqual(a.dq_overview()["rows"], [])
+
+    def test_admin_alert_cooldown_and_switch(self):
+        sent = []
+        orig = a.notify_admins
+        a.notify_admins = lambda *x, **k: sent.append(x)
+        try:
+            self.assertTrue(a.admin_alert("sources", "Nasdaq", "t", "x"))
+            self.assertFalse(a.admin_alert("sources", "Nasdaq", "t", "x"))
+            a.STORE.load().setdefault("settings", {})["admin_notify"] = {"logins": False}
+            self.assertFalse(a.admin_alert("logins", "fail", "t", "x"))
+            time.sleep(0.2)
+            self.assertEqual(len(sent), 1)
+        finally:
+            a.notify_admins = orig

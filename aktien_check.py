@@ -507,6 +507,7 @@ def src_record(name, ok, secs, err=None):
             st["calls"] = [c for c in st["calls"][-4000:] if now - c[0] <= 86400]
         if not ok:
             st["last_err"] = (int(now), str(err or "Fehler")[:120])
+    quota_count(name)
 
 
 _ORIG_URLOPEN = urllib.request.urlopen
@@ -1983,7 +1984,7 @@ def dcf_value(fcf, g1, r, g_term, net_debt, shares, years=10, fade_from=5, first
     return equity / shares if equity > 0 and shares else None
 
 
-def onvista_dps_forecast(D, ov):
+def onvista_dps_forecast(D, ov, dropped=None):
     """Dividendenprognosen von onvista auf Kalenderjahre der Auszahlung umlegen. onvista zählt je Geschäftsjahr; viele
     Unternehmen zahlen erst im Folgejahr aus (Siemens: Dividende für 2025/26 im Februar 2027). Der Versatz wird an den
     gezahlten Vorjahren abgeglichen. onvista rechnet ausländische Dividenden oft in Euro um (Apple, Shell, Novo): Statt
@@ -2027,6 +2028,8 @@ def onvista_dps_forecast(D, ov):
         prev = est[i - 1][1] if i else last_paid
         nxt = est[i + 1][1] if i + 1 < len(est) else None
         if prev and v > 2.5 * prev and (nxt is None or nxt < v / 2.5):
+            if dropped is not None:
+                dropped.append(y + off)
             continue  # einzelner Ausreißer
         out[y + off] = v * scale
     return out
@@ -2065,7 +2068,10 @@ def dividend_forecast(m, symbol=None):
             return None
         return clamp(v, 0.0, 0.25)
     rates = [g(g_eps[0]), g(g_eps[1]), g(g_eps[1])]
-    cons = safe(lambda: onvista_dps_forecast(D, onvista_data(symbol)), {}) if symbol else {}
+    dropped = []
+    cons = safe(lambda: onvista_dps_forecast(D, onvista_data(symbol), dropped), {}) if symbol else {}
+    if dropped:
+        dq_note(symbol, "Dividende: Ausreißer im onvista-Konsens verworfen (" + ", ".join(map(str, dropped)) + ")")
     if rates[0] is None and not cons:
         return None
     # Laufende Rate: letzte Zahlung × Zahlungen pro Jahr (Nvidia 2026: 0,01 $ -> 0,25 $ je Quartal)
@@ -3890,6 +3896,7 @@ def apply_onvista_target(m, symbol):
     m["target_src"] = f"Konsens von {tg['n']} Analysten (onvista)"
     if len(fresh) >= 5 and abs(fresh_med / m["target"] - 1) > 0.15:  # Konsens hinkt nach (z. B. nach Quartalszahlen)
         m["target"], m["target_n"] = fresh_med, len(fresh)
+        dq_note(symbol, "Kursziel: veralteter Konsens durch den Median der letzten 30 Tage ersetzt")
         m["target_src"] = (f"Median der {len(fresh)} Kursziele der letzten 30 Tage (onvista); "
                            f"der ältere Konsens von {tg['n']} Analysten liegt bei {tg['mean'] * k:.2f}")
     m["upside"] = m["target"] / m["price"] - 1
@@ -4127,7 +4134,10 @@ def add_pe_row(t, out, sh_by_end):
         f_ = split_after(end)
         if not sh or f_ == 1.0 or not ref:
             return sh * f_ if sh else 0
-        return min((sh, sh * f_), key=lambda x: abs(x / ref - 1))
+        best = min((sh, sh * f_), key=lambda x: abs(x / ref - 1))
+        dq_note(getattr(t, "ticker", None), f"KGV: Split (Faktor {f_:g}) " + ("auf die Aktienzahl angewendet" if best != sh else
+                                                                            "war in den SEC-Zahlen schon berücksichtigt"))
+        return best
     last_end = P[-1]["end"]
     ref_now = mcap / px_now if mcap else num(safe(lambda: fi.shares))
     sh_now = adj(sh_by_end.get(last_end), last_end, ref_now)
@@ -6491,8 +6501,10 @@ def sec_statements(cik):
             r_, al = rev_.get(e), alt_.get(e)
             if bad and al and r_ and abs(al) * 1e5 >= abs(r_) and abs(v - al) > 0.05 * abs(al):
                 ni_[e] = al  # auch abgeleitete Quartale (Jahr minus drei Quartale) aus dem falschen Jahreswert ersetzen
+                dq_note(f"cik:{cik}", "SEC: Reinertrag in falscher Größenordnung gemeldet – durch gleichwertige Kennzahl ersetzt")
             elif v and r_ and abs(v) * 1e5 < abs(r_) and abs(v) * 1e6 <= abs(r_) * 2:
                 ni_[e] = v * 1e6
+                dq_note(f"cik:{cik}", "SEC: Reinertrag in Millionen statt Dollar gemeldet – hochgerechnet")
         if k_ == 1 and bad:  # viertes Quartal neu: korrigiertes Jahr minus die drei Quartale davor
             for ye, yv in F["Net Income"][0].items():
                 dy = datetime.fromisoformat(ye)
@@ -8222,6 +8234,7 @@ def depot_job_start(user, fn):
     def run():
         try:
             job["res"] = fn()
+            safe(lambda: record_timing("Depotanalyse (Hintergrund)", time.time() - now))
         except ValueError as e:
             job["error"] = str(e)
         except Exception:
@@ -9704,6 +9717,7 @@ def note_startup():
         o["commit"], o["alive"] = commit, int(time.time())
         STORE.dirty = True
     LOG.info("[Start] Grund: %s", reason)
+    safe(lambda: quota_persist(load=True))
     if "RENDER" in os.environ:
         yahoo_qs_ok()  # Sperrprüfung gleich beim Start, damit schon die erste Analyse nicht auf gesperrte Abfragen wartet
 
@@ -9930,6 +9944,463 @@ def data_source_checks(sym="SAP.DE"):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Admin-Überwachung: Fehlerprotokoll, Antwortzeiten, Laufzeit, Zwischenspeicher, Kontingente, Datenqualität, Admin-Push
+# ---------------------------------------------------------------------------
+REQ_CTX = threading.local()   # laufende Anfrage (für das Fehlerprotokoll): .req = "GET /api/analyze", .sym = Aktie
+ERRORS_KEEP = 40              # Fehlerarten im Protokoll
+SECRET_RE = re.compile(r"(?i)(token|key|apikey|api_key|password|passwort|secret)=([^&\s'\"]+)")
+
+
+def mask_secrets(text):
+    return SECRET_RE.sub(lambda m_: m_.group(1) + "=***", str(text or ""))
+
+
+def error_record(exc_info, msg=""):
+    """Ausnahme mit Traceback festhalten, gruppiert nach Fehlerart und Codestelle (Typ + Funktion:Zeile)."""
+    import traceback
+    etype, ev, tb = exc_info
+    if etype is None or etype in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        return
+    frames = traceback.extract_tb(tb) if tb else []
+    own = [f for f in frames if f.filename.endswith("aktien_check.py")] or frames
+    where = f"{own[-1].name}:{own[-1].lineno}" if own else "?"
+    key = f"{etype.__name__}@{where}"
+    text = mask_secrets("".join(traceback.format_exception(etype, ev, tb)))[-1500:]
+    now, sym = int(time.time()), getattr(REQ_CTX, "sym", None)
+    o = ops()
+    with STORE.lock:
+        errs = o.setdefault("errors", {})
+        g = errs.get(key)
+        new = g is None
+        if new:
+            g = errs[key] = {"type": etype.__name__, "where": where, "first": now, "n": 0, "symbols": []}
+        g.update(last=now, msg=mask_secrets(f"{msg} – {ev}" if msg else ev)[:300], tb=text, req=getattr(REQ_CTX, "req", None))
+        g["n"] += 1
+        if sym and sym not in g["symbols"]:
+            g["symbols"] = (g["symbols"] + [sym])[-8:]
+        if len(errs) > ERRORS_KEEP:
+            for k_ in sorted(errs, key=lambda k_: errs[k_]["last"])[:len(errs) - ERRORS_KEEP]:
+                errs.pop(k_, None)
+        STORE.dirty = True
+    if new:
+        admin_alert("errors", key, f"🐞 Neuer Fehler: {etype.__name__}", f"{where}: {mask_secrets(ev)[:200]}", cooldown=86400)
+
+
+class _ErrorHandler(logging.Handler):
+    """Jede mit Traceback protokollierte Ausnahme (LOG.exception) landet zusätzlich im Fehlerprotokoll."""
+    def emit(self, record):
+        if record.exc_info and record.exc_info[0]:
+            try:
+                error_record(record.exc_info, record.getMessage())
+            except Exception:
+                pass
+
+
+LOG.addHandler(_ErrorHandler())
+_ORIG_THREAD_HOOK = threading.excepthook
+
+
+def _thread_hook(args):
+    safe(lambda: error_record((args.exc_type, args.exc_value, args.exc_traceback), f"[Thread] {getattr(args.thread, 'name', '')}"))
+    _ORIG_THREAD_HOOK(args)
+
+
+threading.excepthook = _thread_hook
+
+
+def error_overview():
+    errs = dict(ops().get("errors") or {})
+    now = time.time()
+    rows = sorted(({"key": k, **v} for k, v in errs.items()), key=lambda x: -x["last"])
+    return {"groups": rows, "total": sum(x["n"] for x in rows), "d1": sum(1 for x in rows if now - x["last"] <= 86400)}
+
+
+# Antwortzeiten je Funktion (Dauer der Anfrage im Server, ohne Polling)
+TIMING_KEEP = 1500
+TIMED_GET = {**FEATURES_GET, "/api/movers": "Top & Flop", "/api/chart": "Chart", "/api/search": "Suche",
+             "/api/alerts": "Preisalarme", "/api/watchlist": "Watchlist", "/api/admin/dashboard": "Admin-Dashboard",
+             "/api/analyze": "Aktienanalyse"}
+TIMED_POST = {**FEATURES_POST, "/login": "Anmeldung"}
+
+
+def timing_feature(method, path, qs):
+    if method == "GET":
+        if path == "/api/depot" and qs.get("job"):
+            return None  # Warten auf die Depotanalyse (deren Dauer zählt beim Hintergrundauftrag)
+        return TIMED_GET.get(path)
+    return TIMED_POST.get(path)
+
+
+def record_timing(feat, secs, code=200):
+    if not feat:
+        return
+    o = ops()
+    with STORE.lock:
+        tl = o.setdefault("timing", [])
+        tl.append([int(time.time()), feat, round(secs, 3), int(code or 0)])
+        del tl[:-TIMING_KEEP]
+        STORE.dirty = True
+
+
+def timing_overview():
+    """Je Funktion: Anzahl, Ø, Median, 95-%-Wert, Höchstwert, Serverfehler – letzte 24 Stunden und 7 Tage; Trend des 95-%-Werts."""
+    rows = list(ops().get("timing") or [])
+    now = time.time()
+
+    def q(vals, p):
+        return vals[min(len(vals) - 1, int(len(vals) * p))] if vals else None
+
+    out = {}
+    for t_, feat, secs, code in rows:
+        if now - t_ <= 7 * 86400:
+            out.setdefault(feat, []).append((t_, secs, code))
+    res = []
+    for feat, xs in out.items():
+        d1 = sorted(s for t_, s, _c in xs if now - t_ <= 86400)
+        older = sorted(s for t_, s, _c in xs if now - t_ > 86400)
+        all_ = sorted(s for _t, s, _c in xs)
+        p95, p95_old = q(d1, .95), q(older, .95)
+        res.append({"name": feat, "n7": len(xs), "n1": len(d1), "avg": sum(all_) / len(all_), "median": q(all_, .5),
+                    "p95": q(all_, .95), "p95_d1": p95, "max": all_[-1], "errors": sum(1 for _t, _s, c in xs if c >= 500),
+                    "trend": (p95 / p95_old - 1) if p95 and p95_old and len(d1) >= 5 and len(older) >= 5 else None})
+    return sorted(res, key=lambda x: -(x["p95"] or 0))
+
+
+# Laufzeit: Online-Zeiten aus den Neustarts (Start, Dauer ohne Lebenszeichen davor) und dem letzten Lebenszeichen
+def uptime_overview(days=7):
+    o = ops()
+    rs = sorted(o.get("restarts") or [], key=lambda r: r["t"])
+    now, since = time.time(), time.time() - days * 86400
+    sessions = []
+    for i, r in enumerate(rs):
+        nxt = rs[i + 1] if i + 1 < len(rs) else None
+        end = now if nxt is None else nxt["t"] - (nxt.get("down_s") or 0)
+        sessions.append([r["t"], max(r["t"], end)])
+    win = [[max(a_, since), b_] for a_, b_ in sessions if b_ > since]
+    observed_from = max(since, rs[0]["t"]) if rs else now
+    online = sum(b_ - a_ for a_, b_ in win)
+    reasons = {}
+    for r in rs:
+        if now - r["t"] <= 30 * 86400:
+            k_ = ("Update" if "Update" in r["reason"] else "Speicherüberlauf" if "Speicher" in r["reason"] else
+                  "Eingeschlafen" if "eingeschlafen" in r["reason"] else "Hoster" if "Hoster" in r["reason"] else "Sonstiges")
+            reasons[k_] = reasons.get(k_, 0) + 1
+    commit = (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal"
+    deployed = next((r["t"] for r in rs if r.get("commit") == commit), None)
+    slug = os.environ.get("RENDER_GIT_REPO_SLUG") or ""
+    return {"days": days, "share": online / (now - observed_from) if now - observed_from > 600 else None,
+            "online_s": int(online), "sessions": [[int(a_), int(b_)] for a_, b_ in win], "from": int(since),
+            "longest_s": int(max((b_ - a_ for a_, b_ in sessions), default=0)), "reasons_30d": reasons,
+            "version": {"commit": commit, "deployed": deployed,
+                        "url": f"https://github.com/{slug}/commit/{os.environ.get('RENDER_GIT_COMMIT')}" if slug and commit != "lokal" else None}}
+
+
+# Zwischenspeicher mit Trefferquote: Dict, das bei get() und „in“ zählt, ob ein noch gültiger Eintrag vorlag
+class TCache(dict):
+    def __init__(self, *a, ttl=None, **k):
+        super().__init__(*a, **k)
+        self.ttl, self.hits, self.misses = ttl, 0, 0
+
+    def _fresh(self, v):
+        if not self.ttl or not (isinstance(v, tuple) and v and isinstance(v[0], (int, float))):
+            return True
+        return time.time() - v[0] < self.ttl
+
+    def get(self, key, default=None):
+        v = super().get(key, _MISSING)
+        if v is _MISSING:
+            self.misses += 1
+            return default
+        if self._fresh(v):
+            self.hits += 1
+        else:
+            self.misses += 1
+        return v
+
+    def __contains__(self, key):
+        found = super().__contains__(key)
+        if found and self._fresh(super().__getitem__(key)):
+            self.hits += 1
+        else:
+            self.misses += 1
+        return found
+
+
+_MISSING = object()
+CACHE_SIZE_EST = {}   # Name -> (Zeit, geschätzte Bytes)
+
+
+def _track_caches():
+    """Alle Zwischenspeicher aus cache_rules() durch zählende ersetzen (gleiche Inhalte, gleicher globaler Name)."""
+    rules = {id(c): t_ for _n, c, t_, _m in cache_rules()}
+    g = globals()
+    for name, v in list(g.items()):
+        if type(v) is dict and id(v) in rules and name.isupper():
+            g[name] = TCache(v, ttl=rules[id(v)])
+
+
+def cache_size(name, c):
+    """Größe grob schätzen: durchschnittliche Größe von bis zu 6 Einträgen (pickle) × Anzahl. 10 Minuten gemerkt."""
+    hit = CACHE_SIZE_EST.get(name)
+    if hit and time.time() - hit[0] < 600 and hit[2] == len(c):
+        return hit[1]
+    import pickle
+    vals = list(c.values())
+    sample = vals[::max(1, len(vals) // 6)][:6]
+    sizes = [n for n in (safe(lambda v=v: len(pickle.dumps(v, protocol=4))) for v in sample) if n]
+    est = int(sum(sizes) / len(sizes) * len(vals)) if sizes else 0
+    CACHE_SIZE_EST[name] = (time.time(), est, len(c))
+    return est
+
+
+def cache_overview():
+    out = []
+    for n, c, ttl, mx in cache_rules():
+        h_, m_ = getattr(c, "hits", 0), getattr(c, "misses", 0)
+        out.append({"name": n, "entries": len(c), "max": mx, "ttl": ttl, "hits": h_, "misses": m_,
+                    "rate": h_ / (h_ + m_) if h_ + m_ else None, "bytes": cache_size(n, c) if len(c) else 0})
+    return out
+
+
+def clear_symbol_caches(symbol):
+    """Alle Zwischenspeicher-Einträge zu einer Aktie löschen (Schlüssel enthält das Kürzel, das Basiskürzel oder die
+    SEC-Nummer, oder die gespeicherte Analyse gehört zu diesem Kürzel). Gibt {Cache: Anzahl} zurück."""
+    sym = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
+        raise ValueError("Ungültiges Kürzel")
+    toks = {sym, sym.replace(".", "-")}
+    base = re.split(r"[.\-]", sym)[0]
+    if len(base) >= 2:
+        toks.add(base)
+    tick = dict.get(SEC_CACHE, "tickers")  # nur nachschlagen, nicht als Cache-Treffer zählen
+    cik = tick[1].get(sym.replace(".", "-")) if isinstance(tick, tuple) and isinstance(tick[1], dict) else None
+    if cik:
+        toks.add(str(cik[0]))
+    split = lambda k: set(re.split(r"[^A-Z0-9.\-^=]+", str(k).upper()))
+    out = {}
+    for n, c, _t, _m in cache_rules():
+        if n.startswith("Depot") and n != "Depot-Splits":
+            continue  # je Benutzer bzw. ganze Depots
+        drop = []
+        for k_, v in list(c.items()):
+            val = v[1] if isinstance(v, tuple) and len(v) > 1 else None
+            if (split(k_) & toks) or (isinstance(val, dict) and str(val.get("symbol") or "").upper() == sym):
+                drop.append(k_)
+        for k_ in drop:
+            c.pop(k_, None)
+        if drop:
+            out[n] = len(drop)
+    if FIN_CUR_CACHE.pop(sym, None) is not None:
+        out["Bilanzwährung"] = 1
+    return out
+
+
+# Kontingente der Datenquellen: (Name im Quellen-Monitor, [(Fenster in Sekunden, Limit, Bezeichnung)], Monatslimit, Hinweis)
+QUOTA_COUNT = {"month": None, "n": {}}   # Anfragen je Quelle im laufenden Monat (alle 5 Minuten gespeichert)
+
+
+def quota_rules():
+    cg_key = bool(os.environ.get("COINGECKO_API_KEY"))
+    return [("Finnhub", [(60, FINNHUB_LIMIT, "Minute")], None, "kostenloser Tarif; Stocky bremst ab " + str(FINNHUB_SAFE) + "/Min."),
+            ("CoinGecko", [(60, 30 if cg_key else 10, "Minute")], 10000 if cg_key else None,
+             "Demo-Schlüssel: 30/Min., 10.000/Monat" if cg_key else "ohne Schlüssel: ca. 5–15/Min., schwankt mit der Server-IP"),
+            ("SEC EDGAR", [(1, 10, "Sekunde")], None, "höchstens 10 Anfragen pro Sekunde"),
+            ("OpenFIGI", [(60, 25, "Minute")], None, "ohne Schlüssel: 25 Anfragen pro Minute"),
+            ("GitHub (Backup)", [(3600, 5000, "Stunde")], None, "mit Token: 5.000 Anfragen pro Stunde (Speichern + Backup)")]
+
+
+def quota_count(name):
+    month = datetime.now().strftime("%Y-%m")
+    with SRC_LOCK:
+        if QUOTA_COUNT["month"] != month:
+            QUOTA_COUNT.update(month=month, n={})
+        QUOTA_COUNT["n"][name] = QUOTA_COUNT["n"].get(name, 0) + 1
+
+
+def quota_persist(load=False):
+    """Monatszähler mit dem Speicher abgleichen (beim Start laden, danach regelmäßig schreiben)."""
+    o = ops()
+    month = datetime.now().strftime("%Y-%m")
+    with STORE.lock:
+        saved = o.get("quota") or {}
+        with SRC_LOCK:
+            if QUOTA_COUNT["month"] != month:
+                QUOTA_COUNT.update(month=month, n={})
+            if load and saved.get("month") == month:
+                for k_, v in (saved.get("n") or {}).items():
+                    QUOTA_COUNT["n"][k_] = QUOTA_COUNT["n"].get(k_, 0) + v
+            o["quota"] = {"month": month, "n": dict(QUOTA_COUNT["n"])}
+        STORE.dirty = True
+
+
+def peak_in_window(ts, window):
+    """Höchste Zahl von Zeitpunkten innerhalb eines gleitenden Fensters (Sekunden)."""
+    ts, best, j = sorted(ts), 0, 0
+    for i, t_ in enumerate(ts):
+        while t_ - ts[j] >= window:
+            j += 1
+        best = max(best, i - j + 1)
+    return best
+
+
+def quota_overview():
+    now = time.time()
+    d_now = datetime.now()
+    days_in = ((d_now.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)).day
+    frac = (d_now.day - 1 + (d_now.hour * 3600 + d_now.minute * 60 + d_now.second) / 86400) / days_in
+    with SRC_LOCK:
+        calls = {n: [c[0] for c in st["calls"]] for n, st in SRC_STATS.items()}
+        month = dict(QUOTA_COUNT["n"])
+    out = []
+    for name, wins, mlimit, note in quota_rules():
+        ts = calls.get(name, [])
+        last_h = [t_ for t_ in ts if now - t_ <= 3600]
+        w = []
+        for sec, lim, lab in wins:
+            cur = sum(1 for t_ in ts if now - t_ <= sec)
+            peak = peak_in_window(last_h, sec)
+            w.append({"label": lab, "limit": lim, "now": cur, "peak_h": peak, "share": peak / lim if lim else None})
+        n_m = month.get(name, 0)
+        proj = n_m / frac if frac > 0.02 else None
+        out.append({"name": name, "windows": w, "today": sum(1 for t_ in ts if datetime.fromtimestamp(t_).date() == d_now.date()),
+                    "month": n_m, "month_limit": mlimit, "projection": round(proj) if proj is not None else None,
+                    "month_share": n_m / mlimit if mlimit else None, "proj_share": proj / mlimit if mlimit and proj else None,
+                    "note": note})
+    return {"sources": out, "month": d_now.strftime("%m/%Y")}
+
+
+# Datenqualität: fehlende Kursziele, Prognosen, Dividenden und greifende Plausibilitätsregeln je Aktie
+DQ_NOTES = {}        # Kürzel oder "cik:<Nummer>" -> {Text: Zeit}
+DQ_KEEP = 120
+
+
+def dq_note(key, text):
+    if not key:
+        return
+    d = DQ_NOTES.setdefault(str(key).upper(), {})
+    d[text] = time.time()
+    if len(DQ_NOTES) > 600:
+        for k_ in sorted(DQ_NOTES, key=lambda k_: max(DQ_NOTES[k_].values()))[:100]:
+            DQ_NOTES.pop(k_, None)
+
+
+def dq_record(res):
+    """Nach einer Analyse: Lücken und Korrekturen der Aktie festhalten (behobene Werte verschwinden wieder)."""
+    if not isinstance(res, dict) or "forecast" not in res or "targets" not in res:
+        return  # Kryptowährungen und ETFs haben keine Kursziele/Prognosen
+    sym = res.get("symbol") or ""
+    issues = []
+    if not (res.get("targets") or {}).get("mean"):
+        issues.append("kein Kursziel")
+    fc = res.get("forecast") or {}
+    if not fc.get("eps"):
+        issues.append("keine Gewinnprognose")
+    if not fc.get("rev"):
+        issues.append("keine Umsatzprognose")
+    dh = res.get("divhist") or {}
+    if dh.get("dps") and any(dh["dps"][-2:]) and not dh.get("forecast"):
+        issues.append("keine Dividendenprognose")
+    if not res.get("fair"):
+        issues.append("kein fairer Wert")
+    now = time.time()
+    keys = [sym.upper()]
+    cik = (res.get("sec") or {}).get("cik")
+    if cik:
+        keys.append(f"CIK:{cik}")
+    notes = sorted({t_ for k_ in keys for t_, ts in (DQ_NOTES.get(k_) or {}).items() if now - ts <= 3 * 86400})
+    o = ops()
+    with STORE.lock:
+        dq = o.setdefault("dq", {})
+        if issues or notes:
+            dq[sym] = {"t": int(now), "name": (res.get("name") or "")[:60], "issues": issues, "notes": notes}
+        else:
+            dq.pop(sym, None)
+        for k_ in [k_ for k_, v in dq.items() if now - v["t"] > 30 * 86400]:
+            dq.pop(k_, None)
+        if len(dq) > DQ_KEEP:
+            for k_ in sorted(dq, key=lambda k_: dq[k_]["t"])[:len(dq) - DQ_KEEP]:
+                dq.pop(k_, None)
+        STORE.dirty = True
+
+
+def dq_overview():
+    dq = dict(ops().get("dq") or {})
+    rows = sorted(({"symbol": k_, **v} for k_, v in dq.items()), key=lambda x: -x["t"])
+    cnt = {}
+    for r in rows:
+        for i in r["issues"]:
+            cnt[i] = cnt.get(i, 0) + 1
+    return {"rows": rows, "counts": cnt, "notes": sum(1 for r in rows if r["notes"])}
+
+
+# Push-Benachrichtigungen an den Admin: Quellenausfall, Fehlversuche beim Login, Kontingent, neue Fehlerart
+ADMIN_NOTIFY_KINDS = {"sources": "Datenquelle gestört", "logins": "Viele Fehlversuche beim Login",
+                      "quota": "Kontingent über 80 %", "errors": "Neue Fehlerart"}
+
+
+def admin_notify_settings():
+    s = (STORE.load().get("settings") or {}).get("admin_notify") or {}
+    return {k_: s.get(k_, True) for k_ in ADMIN_NOTIFY_KINDS}
+
+
+def admin_alert(kind, key, title, text, cooldown=3 * 3600):
+    """Push an alle Admins – höchstens einmal je Ereignis innerhalb der Sperrzeit; abschaltbar je Art im Dashboard."""
+    if not admin_notify_settings().get(kind):
+        return False
+    o = ops()
+    now = int(time.time())
+    with STORE.lock:
+        sent = o.setdefault("notified", {})
+        if now - sent.get(f"{kind}:{key}", 0) < cooldown:
+            return False
+        sent[f"{kind}:{key}"] = now
+        for k_ in [k_ for k_, t_ in sent.items() if now - t_ > 8 * 86400]:
+            sent.pop(k_, None)
+        hist = o.setdefault("notify_log", [])
+        hist.append({"t": now, "kind": kind, "title": title, "text": text[:200]})
+        del hist[:-30]
+        STORE.dirty = True
+    threading.Thread(target=lambda: safe(lambda: notify_admins(title, text, tags=["warning"])), daemon=True).start()
+    return True
+
+
+def admin_watch():
+    """Alle 5 Minuten: gestörte Quellen und Kontingente prüfen."""
+    for s in (source_monitor() or {}).get("sources", []):
+        if s["status"] == "bad" and s["n_h"] >= 5 and not s["name"].startswith("ntfy"):
+            err = s["last_err"][1] if s.get("last_err") else "Fehler"
+            admin_alert("sources", s["name"], f"⚠️ {s['name']} gestört",
+                        f"Erfolg in der letzten Stunde: {round((s['rate_h'] or 0) * 100)} % ({s['n_h']} Anfragen) · zuletzt: {err}")
+    for q_ in quota_overview()["sources"]:
+        if q_["month_share"] and q_["month_share"] >= 0.8:
+            admin_alert("quota", f"{q_['name']}:{datetime.now():%Y-%m}", f"📊 {q_['name']}: {round(q_['month_share'] * 100)} % des Monats",
+                        f"{q_['month']} von {q_['month_limit']} Anfragen verbraucht, Hochrechnung {q_['projection']}", cooldown=7 * 86400)
+        for w in q_["windows"]:
+            if w["limit"] and w["now"] >= 0.8 * w["limit"] and w["label"] != "Sekunde":
+                admin_alert("quota", f"{q_['name']}:{w['label']}", f"📊 {q_['name']} am Limit",
+                            f"{w['now']} von {w['limit']} Anfragen pro {w['label']}", cooldown=6 * 3600)
+
+
+def login_watch():
+    """Nach einem Fehlversuch: ab 5 Fehlversuchen in 15 Minuten (alle IPs zusammen) den Admin benachrichtigen."""
+    sec = security_store()
+    now = time.time()
+    fails = [x for x in sec["logins"][-60:] if not x["ok"] and now - x["t"] <= 900]
+    if len(fails) >= 5:
+        ips, us = sorted({x["ip"] for x in fails}), sorted({x["user"] for x in fails if x["user"]})
+        admin_alert("logins", "fail", "🔐 Viele Fehlversuche beim Login",
+                    f"{len(fails)} in 15 Minuten · {len(ips)} IP(s) · Benutzernamen: {', '.join(us[:5]) or '–'}", cooldown=3600)
+
+
+def admin_monitor_payload():
+    o = ops()
+    return {"errors": error_overview(), "timing": timing_overview(), "uptime": uptime_overview(),
+            "caches": cache_overview(), "quota": quota_overview(), "dq": dq_overview(),
+            "notify": {"settings": admin_notify_settings(), "kinds": ADMIN_NOTIFY_KINDS,
+                       "log": list(reversed(o.get("notify_log") or []))[:12]}}
+
+
 def admin_dashboard():
     data = STORE.load()
     now = time.time()
@@ -9985,6 +10456,7 @@ def admin_dashboard():
                      "universes": scr["universes"],
                      "failed": sorted(k for k, v in screener_store().items() if v.get("failed") and not v.get("label"))[:30]},
         "caches": caches, "warnings": warn, "recent": recent, "finnhub": finnhub_status(),
+        "monitor": safe(admin_monitor_payload),
         "sources": safe(lambda: source_monitor()), "security": safe(lambda: security_overview()), "usage": safe(lambda: usage_overview()),
         "system": {"python": sys.version.split()[0], "yfinance": getattr(yf, "__version__", "?"),
                    "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal",
@@ -10491,11 +10963,14 @@ def history_flush_loop():
         safe(lambda: ops_tick(n))
         if n % 60 == 0:
             safe(backup_due)
+        if n % 5 == 0:
+            safe(quota_persist)
+            safe(admin_watch)
         if STORE.dirty:
             safe(STORE.save)
-        n = safe(prune_caches) or 0
-        if n:
-            LOG.info("[Speicher] Zwischenspeicher aufgeräumt: %d Einträge entfernt", n)
+        removed = safe(prune_caches) or 0
+        if removed:
+            LOG.info("[Speicher] Zwischenspeicher aufgeräumt: %d Einträge entfernt", removed)
 
 
 def app_base_url():
@@ -11062,6 +11537,8 @@ def log_login(user, ip, ok, ua):
         sec["logins"].append({"t": int(time.time()), "user": (user or "")[:40], "ip": ip, "ok": bool(ok), "device": dev, "new": new})
         del sec["logins"][:-300]
         STORE.dirty = True
+    if not ok:
+        safe(login_watch)
     if new and user == "admin":
         safe(lambda: ntfy_send("🔐 Neue Anmeldung", f"Admin-Konto: {dev}, IP {ip}", tags=["lock"]))
     return new
@@ -11091,7 +11568,7 @@ def audit_summary(path, body):
     if path == "/api/admin/maintenance":
         return ("Wartungsmodus an" if body.get("on") else "Wartungsmodus aus"), str(body.get("text") or "")[:80]
     if path == "/api/admin/system" and body.get("action") not in ("diag",):
-        return f"System: {body.get('action')}", ""
+        return f"System: {body.get('action')}", str(body.get("symbol") or "")[:20]
     if path == "/api/admin/messages":
         return "Nachricht an Benutzer", who
     return None
@@ -11315,7 +11792,24 @@ class Handler(BaseHTTPRequestHandler):
             raise BodyError(400, "Ungültige Anfrage (JSON-Objekt erwartet).")
         return body
 
+    def send_response(self, code, message=None):
+        self._code = code
+        super().send_response(code, message)
+
     def _guard(self, fn):
+        t0, self._code = time.time(), 0
+        u_ = urllib.parse.urlparse(self.path)
+        qs_ = {k: v[0] for k, v in urllib.parse.parse_qs(u_.query).items()}
+        REQ_CTX.req, REQ_CTX.sym = f"{self.command} {u_.path}", (qs_.get("q") or "")[:20].upper() or None
+        try:
+            self._guarded(fn)
+        finally:
+            feat = timing_feature(self.command, u_.path, qs_)
+            if feat and self._code:
+                safe(lambda: record_timing(feat, time.time() - t0, self._code))
+            REQ_CTX.req = REQ_CTX.sym = None
+
+    def _guarded(self, fn):
         try:
             if "RENDER" in os.environ and not app_password() and urllib.parse.urlparse(self.path).path != "/healthz":
                 # Online ohne Passwort wäre jeder Besucher Administrator -> gesperrt, bis APP_PASSWORD gesetzt ist
@@ -11500,6 +11994,33 @@ class Handler(BaseHTTPRequestHandler):
                     if act == "check_alerts":
                         n = len(run_alert_checks() or [])
                         return self.send_json({"ok": True, "message": f"Alarme geprüft – {n} ausgelöst"})
+                    if act == "clear_symbol":
+                        try:
+                            r_ = clear_symbol_caches(str(body.get("symbol") or ""))
+                        except ValueError as e:
+                            return self.send_json({"error": str(e)}, 400)
+                        n_ = sum(r_.values())
+                        return self.send_json({"ok": True, "message": f"{n_} Einträge gelöscht" + (
+                            " (" + ", ".join(f"{k_}: {v_}" for k_, v_ in r_.items()) + ")" if r_ else " – nichts zwischengespeichert")})
+                    if act == "clear_errors":
+                        o_ = ops()
+                        with STORE.lock:
+                            o_["errors"] = {}
+                            STORE.dirty = True
+                        return self.send_json({"ok": True, "message": "Fehlerprotokoll geleert"})
+                    if act == "notify":
+                        s_ = body.get("settings") if isinstance(body.get("settings"), dict) else {}
+                        data_ = STORE.load()
+                        with STORE.lock:
+                            cur_ = data_.setdefault("settings", {}).setdefault("admin_notify", {})
+                            for k_ in ADMIN_NOTIFY_KINDS:
+                                if k_ in s_:
+                                    cur_[k_] = bool(s_[k_])
+                            STORE.dirty = True
+                        return self.send_json({"ok": True, "message": "Benachrichtigungen gespeichert", "settings": admin_notify_settings()})
+                    if act == "notify_test":
+                        notify_admins("🔔 Stocky-Test", "So sehen Admin-Benachrichtigungen aus.", tags=["bell"])
+                        return self.send_json({"ok": True, "message": "Test-Nachricht gesendet"})
                     return self.send_json({"error": "unbekannte Aktion"}, 400)
                 if u.path == "/api/admin/users":
                     if not self.is_admin():
@@ -11792,7 +12313,9 @@ class Handler(BaseHTTPRequestHandler):
 
             def work_(st_=st_, rows_=rows_):
                 try:
+                    t0_ = time.time()
                     st_["res"] = depot_outlook(rows_, progress=lambda: st_.__setitem__("done", st_["done"] + 1))
+                    safe(lambda: record_timing("Depot-Ausblick (Hintergrund)", time.time() - t0_))
                 except Exception as e:
                     LOG.warning("[Depot] Ausblick fehlgeschlagen: %s", e)
                     st_["res"] = {"error": "Der Ausblick konnte nicht berechnet werden."}
@@ -11867,6 +12390,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {**res, "history": safe(lambda: record_history(res, user), []) or []}
                 safe(lambda: record_usage(user, res["symbol"]))
                 safe(lambda: record_analysis(q, res["symbol"], time.time() - t0, True))
+                safe(lambda: dq_record(res))
                 LOG.info("[Analyse] %s -> %s · %s (%+.1f) · %.1f s · %s", q, res["symbol"], res["rating"]["label"],
                          res["rating"]["score"], time.time() - t0, user)
                 return self.send(200, json.dumps(json_safe(res), ensure_ascii=False), "application/json; charset=utf-8")
@@ -11938,6 +12462,8 @@ def main():
     except KeyboardInterrupt:
         print("Beendet.")
 
+
+_track_caches()  # Zwischenspeicher zählen Treffer (Admin-Dashboard)
 
 if __name__ == "__main__":
     main()

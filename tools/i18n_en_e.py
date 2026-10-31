@@ -414,3 +414,57 @@ DEPOT_EXACT.update({
 DEPOT_WILD += [("{0} fehlgeschlagene Anmeldungen in 24 h{*}", "{0} failed logins in 24 h{*}"),
                ("aktive Benutzer: heute {0} · 7 Tage {1} · 30 Tage {2} von {3}", "active users: today {0} · 7 days {1} · 30 days {2} of {3}"),
                ("letzte 24 Stunden · seit dem letzten Neustart", "last 24 hours · since last restart")]
+
+# Admin: Fehlerprotokoll, Antwortzeiten, Laufzeit, Zwischenspeicher, Kontingente, Datenqualität, Push
+DEPOT_EXACT.update({
+    "Fehlerprotokoll": "Error log", "Keine Ausnahmen protokolliert. ✓": "No exceptions logged. ✓", "Protokoll leeren": "Clear log",
+    "Gruppiert nach Fehlerart und Codestelle; bleibt über Neustarts erhalten. Schlüssel und Passwörter in Meldungen werden ausgeblendet.":
+        "Grouped by error type and code location; kept across restarts. Keys and passwords in messages are masked.",
+    "Antwortzeiten je Funktion": "Response times by feature", "letzte 7 Tage · nach 95-%-Wert sortiert": "last 7 days · sorted by 95th percentile",
+    "Funktion": "Feature", "24 Std.": "24 h", "Median": "Median", "95 %": "95 %", "Max": "Max", "Fehler": "Errors", "Trend 95 %": "Trend 95 %",
+    "Noch keine Anfragen gemessen.": "No requests measured yet.",
+    "95 % = so lange dauerten 95 von 100 Anfragen höchstens. Trend: 95-%-Wert der letzten 24 Std. gegenüber den Tagen davor. Fehler = Serverfehler (HTTP 5xx). Warten auf Hintergrundaufträge zählt nicht, deren Gesamtdauer steht als „(Hintergrund)“.":
+        "95 % = 95 out of 100 requests took at most this long. Trend: 95th percentile of the last 24 h vs. the days before. Errors = server errors (HTTP 5xx). Waiting for background jobs is not counted; their total duration is listed as “(Hintergrund)”.",
+    "Top & Flop": "Top & Flop", "Chart": "Chart", "Suche": "Search", "Admin-Dashboard": "Admin dashboard",
+    "Depotanalyse (Hintergrund)": "Portfolio analysis (background)", "Depot-Ausblick (Hintergrund)": "Portfolio outlook (background)",
+    "Laufzeit & Version": "Uptime & version", "Online-Anteil": "Online share", "Online": "Online", "Längste Laufzeit": "Longest run",
+    "Version": "Version", "Neustarts 30 Tage": "Restarts 30 days", "jetzt": "now",
+    "Grün = Server lief. Lücken entstehen v. a. durch Einschlafen im kostenlosen Render-Tarif (nach 15 Min. ohne Aufrufe); Ende einer Laufzeit = letztes Lebenszeichen (alle 5 Min.).":
+        "Green = server was running. Gaps mostly come from sleeping on Render's free plan (after 15 min without requests); end of a run = last heartbeat (every 5 min).",
+    "Cache für diese Aktie leeren": "Clear cache for this stock",
+    "Hilft, wenn eine Analyse veraltete oder falsche Daten zeigt – die nächste Analyse lädt alles neu.":
+        "Helps when an analysis shows stale or wrong data – the next analysis reloads everything.",
+    "Kürzel, z. B. SIE.DE oder AAPL": "Ticker, e.g. SIE.DE or AAPL",
+    "Einträge": "Entries", "Cache-Treffer": "Cache hits", "Größe ca.": "Size approx.", "Gültig": "Valid",
+    "Kontingente": "Quotas",
+    "Gezählt werden echte Anfragen an die Quelle (keine Zwischenspeicher-Treffer). Monatszähler wird alle 5 Minuten gesichert. Ab 80 % kommt eine Push-Nachricht, wenn unten eingeschaltet.":
+        "Counts real requests to the source (no cache hits). The monthly counter is saved every 5 minutes. From 80 % you get a push notification if enabled below.",
+    "kostenloser Tarif; Stocky bremst ab 55/Min.": "free plan; Stocky throttles from 55/min",
+    "Demo-Schlüssel: 30/Min., 10.000/Monat": "Demo key: 30/min, 10,000/month",
+    "ohne Schlüssel: ca. 5–15/Min., schwankt mit der Server-IP": "without key: approx. 5–15/min, varies with the server IP",
+    "höchstens 10 Anfragen pro Sekunde": "at most 10 requests per second", "ohne Schlüssel: 25 Anfragen pro Minute": "without key: 25 requests per minute",
+    "mit Token: 5.000 Anfragen pro Stunde (Speichern + Backup)": "with token: 5,000 requests per hour (saving + backup)",
+    "Datenqualität": "Data quality", "Bei den zuletzt analysierten Aktien fehlte nichts. ✓": "Nothing was missing in recently analyzed stocks. ✓",
+    "Wird bei jeder Analyse aktualisiert; ist alles wieder da, verschwindet die Aktie aus der Liste. ↻ = Plausibilitätsregel hat Daten korrigiert (Ausreißer, Split, Größenordnung, veralteter Konsens) – zum gezielten Nachprüfen.":
+        "Updated with every analysis; once everything is back, the stock disappears from the list. ↻ = a plausibility rule corrected data (outlier, split, magnitude, stale consensus) – for targeted review.",
+    "kein Kursziel": "no price target", "keine Gewinnprognose": "no earnings forecast", "keine Umsatzprognose": "no revenue forecast",
+    "keine Dividendenprognose": "no dividend forecast", "kein fairer Wert": "no fair value",
+    "Push an den Admin": "Push to the admin", "über ntfy, wie die Preisalarme": "via ntfy, like the price alerts",
+    "Datenquelle gestört": "Data source disrupted", "Viele Fehlversuche beim Login": "Many failed login attempts",
+    "Kontingent über 80 %": "Quota above 80 %", "Neue Fehlerart": "New error type", "Test senden": "Send test", "Zuletzt gesendet": "Recently sent",
+    "Gleiche Meldung höchstens alle 3 Std. (Fehlversuche 1 Std., neue Fehlerart 1 Tag, Monatskontingent 1 Woche). Quelle gestört = unter 50 % Erfolg in der letzten Stunde bei mindestens 5 Anfragen.":
+        "Same alert at most every 3 h (failed logins 1 h, new error type 1 day, monthly quota 1 week). Source disrupted = below 50 % success in the last hour with at least 5 requests.",
+    "Fehlerprotokoll leeren?": "Clear error log?", "Benachrichtigungen gespeichert": "Notifications saved",
+    "Fehlerprotokoll geleert": "Error log cleared", "Test-Nachricht gesendet": "Test message sent", "Ungültiges Kürzel": "Invalid ticker",
+})
+DEPOT_WILD += [("{0} Fehlerart(en) · {1} Vorkommen · {2} in den letzten 24 Std.", "{0} error type(s) · {1} occurrences · {2} in the last 24 h"),
+               ("Erstmals {*}", "First {*}"), ("zuletzt {*}", "last {*}"), ("letzte {0} Tage", "last {0} days"),
+               ("geschätzt {*} · Trefferquote seit dem Start", "estimated {*} · hit rate since start"),
+               ("Monat {0} · Balken: höchste Auslastung der letzten Stunde bzw. Hochrechnung bis Monatsende",
+                "Month {0} · bars: peak usage in the last hour or projection to month end"),
+               ("pro Minute: jetzt {0} · Spitze 1 Std. {1} / {2}", "per minute: now {0} · peak 1 h {1} / {2}"),
+               ("pro Sekunde: jetzt {0} · Spitze 1 Std. {1} / {2}", "per second: now {0} · peak 1 h {1} / {2}"),
+               ("pro Stunde: jetzt {0} · Spitze 1 Std. {1} / {2}", "per hour: now {0} · peak 1 h {1} / {2}"),
+               ("heute {0} · Monat {1}{*}", "today {0} · month {1}{*}"), ("Monat: {0} / {1} · Hochrechnung {2}", "Month: {0} / {1} · projection {2}"),
+               ("{0} Aktie(n) mit Lücken oder Korrekturen · letzte 30 Tage", "{0} stock(s) with gaps or corrections · last 30 days"),
+               ("{0} Einträge gelöscht{*}", "{0} entries deleted{*}"), ("seit {*}", "since {*}")]
