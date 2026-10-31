@@ -10827,6 +10827,22 @@ def market_movers(uni="dax", n=5, period="day"):
     return res
 
 
+def screener_clear():
+    """Alle Screener-Bewertungen löschen (auch im gespeicherten Datenbestand) und die dabei angelegten Analysen und Charts
+    aus dem Zwischenspeicher werfen. Gibt (Anzahl, MB vorher, MB nachher) zurück."""
+    before = mem_mb()
+    data = STORE.load()
+    with STORE.lock:
+        n = len(data.get("screener") or {})
+        data["screener"] = {}
+        STORE.dirty = True
+    SCREENER_STATE.update(done=0, target=0, finished=None, mem_stop=False, seen=set(), current=None)
+    CACHE.clear()
+    CHART_CACHE.clear()
+    safe(STORE.save)
+    return n, before, release_memory()
+
+
 def screener_payload():
     store = screener_store()
     syms = screener_symbols()
@@ -12033,6 +12049,15 @@ class Handler(BaseHTTPRequestHandler):
                     unis_ = body.get("unis") if isinstance(body.get("unis"), list) else None
                     ok, msg = screener_start(user, "all" if body.get("mode") == "all" else "due", unis_)
                     return self.send(200, json.dumps(json_safe({**screener_payload(), "message": msg, "started": ok}),
+                                                     ensure_ascii=False), "application/json; charset=utf-8")
+                if u.path == "/api/screener/clear":
+                    if SCREENER_STATE["running"]:
+                        return self.send_json({"error": "Der Screener läuft gerade – bitte zuerst stoppen."}, 409)
+                    n_, mb_before, mb_after = screener_clear()
+                    LOG.warning("[Screener] %s: alle %d bewerteten Werte gelöscht", user, n_)
+                    safe(lambda: audit(user, "Screener geleert", f"{n_} Werte"))
+                    freed = f" – Arbeitsspeicher {mb_before:.0f} → {mb_after:.0f} MB" if mb_before and mb_after else ""
+                    return self.send(200, json.dumps(json_safe({**screener_payload(), "message": f"{n_} bewertete Werte gelöscht{freed}"}),
                                                      ensure_ascii=False), "application/json; charset=utf-8")
                 if u.path == "/api/screener/stop":
                     if SCREENER_STATE["running"]:

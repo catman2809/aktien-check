@@ -2224,3 +2224,14 @@ class TestAdminOps(Isolated):
             self.assertEqual(len(sent), 1)
         finally:
             a.notify_admins = orig
+
+
+class TestScreenerClear(Isolated):
+    def test_clear_removes_ratings_and_caches(self):
+        a.screener_store().update({"SAP.DE": {"symbol": "SAP.DE", "label": "Buy"}, "SIE.DE": {"symbol": "SIE.DE", "label": "Hold"}})
+        a.CACHE["sap.de"] = (time.time(), {"symbol": "SAP.DE"})
+        n, _b, _a = a.screener_clear()
+        self.assertEqual(n, 2)
+        self.assertEqual(a.screener_store(), {})
+        self.assertEqual(len(a.CACHE), 0)
+        self.assertEqual(a.screener_payload()["rows"], [])

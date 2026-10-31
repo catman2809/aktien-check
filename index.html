@@ -2997,6 +2997,7 @@ function renderScreener() {
         ${D.running
           ? `<button class="btn" id="scrstop" ${D.stopping ? "disabled" : ""}>${D.stopping ? "Wird gestoppt …" : "Stopp"}</button>`
           : `<button class="btn primary" id="scrstart" aria-expanded="${SCR.panel}">Screening starten …</button>`}
+        ${!D.running && D.rows.length ? `<button class="btn danger" id="scrclear" title="Alle Bewertungen löschen und Arbeitsspeicher freigeben">Alle löschen</button>` : ""}
         <button class="btn" id="scrback">Zur Startseite</button>
       </div>
     </div>
@@ -3061,6 +3062,13 @@ function renderScreener() {
   const st_ = $("#scrstart"), sp_ = $("#scrstop");
   if (st_) st_.onclick = () => { SCR.panel = !SCR.panel; renderScreener(); };
   if (sp_) sp_.onclick = () => { sp_.disabled = true; scrAction("/api/screener/stop"); };
+  const cl_ = $("#scrclear");
+  if (cl_) cl_.onclick = () => {
+    if (!confirm(`Alle ${D.rows.length} bewerteten Werte aus dem Screener löschen?
+
+Das gibt Arbeitsspeicher frei. Die Bewertungen lassen sich nur durch ein neues Screening wiederherstellen (dauert je Index länger).`)) return;
+    cl_.disabled = true; scrAction("/api/screener/clear");
+  };
   const pn = $("#scrpanel");
   if (pn) {
     const picked = () => [...pn.querySelectorAll("input[name=scruni]:checked")].map(i => i.value);

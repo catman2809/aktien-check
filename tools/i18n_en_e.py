@@ -468,3 +468,10 @@ DEPOT_WILD += [("{0} Fehlerart(en) · {1} Vorkommen · {2} in den letzten 24 Std
                ("heute {0} · Monat {1}{*}", "today {0} · month {1}{*}"), ("Monat: {0} / {1} · Hochrechnung {2}", "Month: {0} / {1} · projection {2}"),
                ("{0} Aktie(n) mit Lücken oder Korrekturen · letzte 30 Tage", "{0} stock(s) with gaps or corrections · last 30 days"),
                ("{0} Einträge gelöscht{*}", "{0} entries deleted{*}"), ("seit {*}", "since {*}")]
+DEPOT_EXACT.update({"Alle löschen": "Delete all", "Alle Bewertungen löschen und Arbeitsspeicher freigeben": "Delete all ratings and free memory",
+                    "Der Screener läuft gerade – bitte zuerst stoppen.": "The screener is running – please stop it first."})
+DEPOT_WILD += [("Alle {0} bewerteten Werte aus dem Screener löschen?
+
+Das gibt Arbeitsspeicher frei. Die Bewertungen lassen sich nur durch ein neues Screening wiederherstellen (dauert je Index länger).",
+                "Delete all {0} rated stocks from the screener?\n\nThis frees memory. The ratings can only be restored by running a new screening (takes a while per index)."),
+               ("{0} bewertete Werte gelöscht{*}", "{0} rated stocks deleted{*}")]
