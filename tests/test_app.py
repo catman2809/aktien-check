@@ -452,6 +452,10 @@ class TestHTTP(Isolated):
         self.assertGreater(st_sub["paid_until"], time.time() + 360 * 86400)
         dash = json.loads(self.call(adm, "/api/admin/dashboard")[2])
         self.assertEqual(dash["subs"]["active"], 1)
+        self.assertTrue(any(x["user"] == "anna" and x["ok"] for x in dash["security"]["logins"]))       # Anmeldung protokolliert
+        self.assertTrue(any(x["action"].startswith("Abo") for x in dash["security"]["audit"]))         # Admin-Aktion protokolliert
+        self.assertTrue(any(f["name"] == "Abo" for f in dash["usage"]["features"]))                     # Nutzung gezählt
+        self.assertIn("sources", dash["sources"])
         self.assertEqual(next(u_ for u_ in dash["users"] if u_["name"] == "anna")["sub"]["state"], "aktiv")
         # Mein Bereich: Einstellungen im Konto, Übersicht
         self.assertEqual(json.loads(self.call(anna, "/api/me")[2])["prefs"]["theme"], "auto")
@@ -2093,3 +2097,26 @@ class TestPatchLastClose(unittest.TestCase):
             out = a.patch_last_close(daily, ["SAP.DE"])
         self.assertAlmostEqual(out["SAP.DE"].dropna().iloc[-1], 211.75)
         self.assertEqual(out["SAP.DE"].dropna().index[-1], pd.Timestamp("2026-10-30"))
+
+
+class TestAdminMonitoring(unittest.TestCase):
+    def test_source_monitor_counts(self):
+        a.SRC_STATS.clear()
+        a.src_record("Nasdaq", True, 0.2)
+        a.src_record("Nasdaq", False, 1.0, "HTTP 500")
+        m = {x["name"]: x for x in a.source_monitor()["sources"]}
+        self.assertEqual(m["Nasdaq"]["n"], 2)
+        self.assertAlmostEqual(m["Nasdaq"]["rate"], 0.5)
+        self.assertEqual(m["Nasdaq"]["last_err"][1], "HTTP 500")
+        self.assertEqual(a.src_name("https://api.nasdaq.com/api/x"), "Nasdaq")
+        a.SRC_STATS.clear()
+
+    def test_audit_summary_never_contains_password(self):
+        act, det = a.audit_summary("/api/admin/users", {"action": "reset", "username": "anna", "password": "geheim123"})
+        self.assertEqual(act, "Passwort zurückgesetzt")
+        self.assertNotIn("geheim", act + det)
+        self.assertIsNone(a.audit_summary("/api/admin/system", {"action": "diag"}))
+
+    def test_ua_family(self):
+        self.assertEqual(a.ua_family("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Safari/604.1"), "Safari auf iPhone")
+        self.assertEqual(a.ua_family("Mozilla/5.0 (Windows NT 10.0) Chrome/130 Safari/537.36 Edg/130"), "Edge auf Windows")

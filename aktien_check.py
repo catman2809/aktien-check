@@ -481,6 +481,98 @@ def convert_df(df, k):
     return df
 
 
+SRC_STATS = {}        # Quelle -> {"calls": [(Zeit, ok, Sekunden)], "last_err": (Zeit, Text)}
+SRC_LOCK = threading.Lock()
+SRC_HOSTS = [("finnhub.io", "Finnhub"), ("api.nasdaq.com", "Nasdaq"), ("onvista.de", "onvista"), ("sec.gov", "SEC EDGAR"),
+             ("news.google.com", "Google News"), ("coingecko.com", "CoinGecko"), ("openfigi.com", "OpenFIGI"),
+             ("gleif.org", "GLEIF"), ("wikidata.org", "Wikidata"), ("ntfy.sh", "ntfy (Push)"), ("api.github.com", "GitHub (Backup)"),
+             ("cboe.com", "Cboe"), ("alternative.me", "Fear & Greed"), ("ecb.europa.eu", "EZB"), ("frankfurter", "Wechselkurse"),
+             ("finance.yahoo.com", "Yahoo News"), ("filings.xbrl.org", "ESEF-Geschäftsberichte"), ("stern.nyu.edu", "Damodaran (NYU)"),
+             ("worldbank.org", "Weltbank"), ("fred.stlouisfed.org", "FRED")]
+EST_SRC = {}          # Quelle der Gewinnprognose -> Anzahl (seit Start)
+
+
+def src_name(url):
+    host = urllib.parse.urlparse(url if isinstance(url, str) else getattr(url, "full_url", "")).netloc.lower()
+    return next((n for h, n in SRC_HOSTS if h in host), host or "?")
+
+
+def src_record(name, ok, secs, err=None):
+    """Ergebnis einer Anfrage an eine Datenquelle merken (24 Stunden, für den Quellen-Monitor im Admin-Dashboard)."""
+    now = time.time()
+    with SRC_LOCK:
+        st = SRC_STATS.setdefault(name, {"calls": [], "last_err": None})
+        st["calls"].append((now, bool(ok), round(secs, 3)))
+        if len(st["calls"]) > 4000 or (st["calls"] and now - st["calls"][0][0] > 86400):
+            st["calls"] = [c for c in st["calls"][-4000:] if now - c[0] <= 86400]
+        if not ok:
+            st["last_err"] = (int(now), str(err or "Fehler")[:120])
+
+
+_ORIG_URLOPEN = urllib.request.urlopen
+
+
+def _urlopen_counted(req, *a, **k):
+    """urllib.request.urlopen mit Zählung je Datenquelle. 404 (nichts gefunden) zählt nicht als Ausfall."""
+    t0, name = time.time(), src_name(req)
+    try:
+        r = _ORIG_URLOPEN(req, *a, **k)
+    except urllib.error.HTTPError as e:
+        src_record(name, e.code == 404, time.time() - t0, f"HTTP {e.code}")
+        raise
+    except Exception as e:
+        src_record(name, False, time.time() - t0, type(e).__name__)
+        raise
+    src_record(name, True, time.time() - t0)
+    return r
+
+
+urllib.request.urlopen = _urlopen_counted
+
+
+def _yf_download_counted(*a, **k):
+    t0 = time.time()
+    try:
+        df = _YF_DOWNLOAD(*a, **k)
+    except Exception as e:
+        src_record("Yahoo Kurse", False, time.time() - t0, type(e).__name__)
+        raise
+    ok = df is not None and len(df) > 0
+    src_record("Yahoo Kurse", ok, time.time() - t0, None if ok else "keine Kurse")
+    return df
+
+
+_YF_DOWNLOAD = yf.download
+yf.download = _yf_download_counted
+
+
+def source_monitor():
+    """Erfolgsquote, Antwortzeit und letzter Fehler je Datenquelle (letzte 24 Stunden) + Herkunft der Gewinnprognosen."""
+    now, out = time.time(), []
+    with SRC_LOCK:
+        items = [(n, list(st["calls"]), st["last_err"]) for n, st in SRC_STATS.items()]
+    for n, calls, err in items:
+        calls = [c for c in calls if now - c[0] <= 86400]
+        if not calls and not err:
+            continue
+        ok = sum(1 for c in calls if c[1])
+        last_h = [c for c in calls if now - c[0] <= 3600]
+        rate_h = (sum(1 for c in last_h if c[1]) / len(last_h)) if last_h else None
+        rate = ok / len(calls) if calls else None
+        status = ("blocked" if n == "Yahoo Unternehmensdaten" and YQ_STATE.get("blocked") else
+                  "bad" if rate_h is not None and rate_h < 0.5 else "warn" if (rate_h if rate_h is not None else rate or 1) < 0.9 else "ok")
+        out.append({"name": n, "n": len(calls), "n_h": len(last_h), "rate": rate, "rate_h": rate_h,
+                    "ms": round(sum(c[2] for c in calls) / len(calls) * 1000) if calls else None,
+                    "last": int(calls[-1][0]) if calls else None, "last_err": err, "status": status})
+    if YQ_STATE.get("blocked") and not any(x["name"] == "Yahoo Unternehmensdaten" for x in out):
+        out.append({"name": "Yahoo Unternehmensdaten", "n": 0, "n_h": 0, "rate": None, "rate_h": None, "ms": None, "last": None,
+                    "last_err": None, "status": "blocked"})
+    out.sort(key=lambda x: ({"bad": 0, "blocked": 1, "warn": 2, "ok": 3}[x["status"]], -x["n"]))
+    tot = sum(EST_SRC.values())
+    return {"sources": out, "estimates": [{"src": k, "n": v, "share": v / tot} for k, v in sorted(EST_SRC.items(), key=lambda kv: -kv[1])],
+            "yahoo_blocked": bool(YQ_STATE.get("blocked"))}
+
+
 YQ_STATE = {"blocked": False, "checked": 0.0, "running": False}
 
 
@@ -506,7 +598,13 @@ def yahoo_qs_ok():
 
 def yq(fn, default=None):
     """Abfrage über Yahoos quoteSummary – bei bekannter Sperre sofort überspringen statt auf Fehler zu warten."""
-    return safe(fn, default) if yahoo_qs_ok() else default
+    if not yahoo_qs_ok():
+        return default
+    t0 = time.time()
+    res = safe(fn, None)
+    empty = res is None or (hasattr(res, "empty") and res.empty) or (isinstance(res, (dict, list)) and not res)
+    src_record("Yahoo Unternehmensdaten", not empty, time.time() - t0, None if not empty else "keine Daten")
+    return default if res is None else res
 
 
 BENCH_HIST = {}  # Index -> (Zeit, Tagesschlusskurse 1 Jahr) für das Beta
@@ -4636,6 +4734,10 @@ def income_data(symbol, freq):
             e0["adj_jump"] = True
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
+        e0_ = out["estimates"][0] if out["estimates"] else None
+        src_ = ("keine Prognose" if not e0_ else "Yahoo" if e0_.get("est") == "consensus" and not e0_.get("ni_consensus")
+                else e0_.get("ni_consensus") or "Fortschreibung")
+        EST_SRC[src_] = EST_SRC.get(src_, 0) + 1
         LOG.info("[Prognose] %s: Yahoo-Schätzungen %s, Nasdaq %s -> %s", symbol, "ja" if has_yahoo_est else "nein",
                  "ja" if nasdaq else "nein", ", ".join(e_["label"] for e_ in out["estimates"]) or "keine Prognosen")
     else:
@@ -9703,6 +9805,74 @@ def maintenance():
     return (STORE.load().get("settings") or {}).get("maintenance") or {"on": False, "text": ""}
 
 
+FEATURES_GET = {"/api/analyze": "Aktienanalyse", "/api/depot": "Depot", "/api/me/summary": "Mein Bereich",
+                "/api/track": "Trefferquote", "/api/screener": "Screener", "/api/ics": "Kalender-Export",
+                "/api/income": "Erfolgsrechnung", "/api/derivatives": "Derivate"}
+FEATURES_POST = {"/api/depot": "Depot-Upload", "/api/watchlist": "Watchlist", "/api/alerts": "Preisalarme",
+                 "/api/prefs": "Einstellungen", "/api/messages": "Nachrichten", "/api/subscription": "Abo",
+                 "/api/report": "Bericht"}
+
+
+def track_feature(user, method, path, qs_or_body=None):
+    """Nutzung je Funktion, Tag und Benutzer zählen (35 Tage). Abfragen im Hintergrund (Polling) zählen nicht."""
+    if not user:
+        return
+    if method == "GET":
+        feat = FEATURES_GET.get(path)
+        if path == "/api/depot" and (qs_or_body or {}).get("job"):
+            return  # Warten auf die Depotanalyse
+        if path == "/api/income" and "quarter" in str((qs_or_body or {}).get("freq")):
+            feat = "Erfolgsrechnung"
+    else:
+        feat = FEATURES_POST.get(path)
+        if path == "/api/watchlist":
+            feat = "Watchlist"
+    if not feat:
+        return
+    data = STORE.load()
+    day = datetime.now().strftime("%Y-%m-%d")
+    with STORE.lock:
+        fs = data.setdefault("stats", {"days": {}, "symbols": {}}).setdefault("features", {})
+        d = fs.setdefault(day, {}).setdefault(feat, {})
+        d[user] = d.get(user, 0) + 1
+        for old in sorted(fs)[:-35]:
+            fs.pop(old, None)
+        STORE.dirty = True
+
+
+def usage_overview():
+    """Aktive Nutzer (heute/7/30 Tage), Nutzung je Funktion und je Benutzer, inaktive Konten."""
+    data = STORE.load()
+    now = time.time()
+    fs = ((data.get("stats") or {}).get("features") or {})
+    days = lambda n: {(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(n)}
+    d1, d7, d30 = days(1), days(7), days(30)
+    feats, per_user = {}, {}
+    for day, fm in fs.items():
+        for feat, um in fm.items():
+            f_ = feats.setdefault(feat, {"today": 0, "d7": 0, "d30": 0, "users": set()})
+            for u_, n in um.items():
+                if day in d1:
+                    f_["today"] += n
+                if day in d7:
+                    f_["d7"] += n
+                if day in d30:
+                    f_["d30"] += n
+                    f_["users"].add(u_)
+                    pu = per_user.setdefault(u_, {})
+                    pu[feat] = pu.get(feat, 0) + n
+    accs = users()
+    seen = {name: ((data.get("u") or {}).get(name) or {}).get("last_seen") or acc.get("last_login") for name, acc in accs.items()}
+    active = lambda sec: sum(1 for t in seen.values() if t and now - t <= sec)
+    return {"active": {"today": active(86400), "d7": active(7 * 86400), "d30": active(30 * 86400), "total": len(accs)},
+            "features": sorted(({"name": k, "today": v["today"], "d7": v["d7"], "d30": v["d30"], "users": len(v["users"])}
+                                for k, v in feats.items()), key=lambda x: -x["d30"]),
+            "per_user": sorted(({"user": u_, "total": sum(fm.values()), "top": sorted(fm.items(), key=lambda kv: -kv[1])[:4]}
+                                for u_, fm in per_user.items()), key=lambda x: -x["total"]),
+            "inactive": sorted(({"user": n, "last": seen.get(n)} for n in accs
+                                if not seen.get(n) or now - seen[n] > 30 * 86400), key=lambda x: x["last"] or 0)}
+
+
 def record_usage(user, symbol):
     """Zählt Analysen je Tag, Benutzer und Wert (für das Admin-Dashboard; 90 Tage)."""
     data = STORE.load()
@@ -9803,6 +9973,7 @@ def admin_dashboard():
                      "universes": scr["universes"],
                      "failed": sorted(k for k, v in screener_store().items() if v.get("failed") and not v.get("label"))[:30]},
         "caches": caches, "warnings": warn, "recent": recent, "finnhub": finnhub_status(),
+        "sources": safe(lambda: source_monitor()), "security": safe(lambda: security_overview()), "usage": safe(lambda: usage_overview()),
         "system": {"python": sys.version.split()[0], "yfinance": getattr(yf, "__version__", "?"),
                    "commit": (os.environ.get("RENDER_GIT_COMMIT") or "")[:7] or "lokal",
                    "hosted": "RENDER" in os.environ, "storage": STORE.backend, "encrypted": STORE.encrypted,
@@ -10842,6 +11013,91 @@ def session_user(token):
         return None
 
 
+def security_store():
+    data = STORE.load()
+    with STORE.lock:
+        sec = data.setdefault("security", {})
+        sec.setdefault("logins", [])
+        sec.setdefault("devices", {})
+        sec.setdefault("audit", [])
+        return sec
+
+
+def ua_family(ua):
+    """Grobe Geräte-/Browserangabe aus dem User-Agent (für das Anmeldeprotokoll)."""
+    ua = ua or ""
+    os_ = next((n for k, n in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Windows", "Windows"),
+                                ("Mac OS", "Mac"), ("Linux", "Linux")) if k in ua), "Unbekannt")
+    br = next((n for k, n in (("Edg/", "Edge"), ("Firefox", "Firefox"), ("Chrome", "Chrome"), ("Safari", "Safari")) if k in ua), "Browser")
+    return f"{br} auf {os_}"
+
+
+def log_login(user, ip, ok, ua):
+    """Anmeldeversuch protokollieren (letzte 300). Bei erfolgreicher Anmeldung von einem neuen Gerät (Browser + Netz) wird
+    das markiert; meldet sich der Admin neu an, gibt es zusätzlich eine Push-Nachricht."""
+    sec = security_store()
+    dev = ua_family(ua)
+    net = ".".join((ip or "").split(".")[:2]) if "." in (ip or "") else (ip or "")[:9]
+    key = f"{dev}|{net}"
+    new = False
+    with STORE.lock:
+        if ok:
+            known = sec["devices"].setdefault(user, [])
+            if key not in known:
+                new = bool(known)  # allererste Anmeldung ist kein „neues Gerät“
+                known.append(key)
+                del known[:-20]
+        sec["logins"].append({"t": int(time.time()), "user": (user or "")[:40], "ip": ip, "ok": bool(ok), "device": dev, "new": new})
+        del sec["logins"][:-300]
+        STORE.dirty = True
+    if new and user == "admin":
+        safe(lambda: ntfy_send("🔐 Neue Anmeldung", f"Admin-Konto: {dev}, IP {ip}", tags=["lock"]))
+    return new
+
+
+def audit(by, action, detail=""):
+    """Admin-Aktion protokollieren (letzte 300) – ohne Passwörter."""
+    sec = security_store()
+    with STORE.lock:
+        sec["audit"].append({"t": int(time.time()), "by": by, "action": action, "detail": str(detail or "")[:160]})
+        del sec["audit"][:-300]
+        STORE.dirty = True
+
+
+def audit_summary(path, body):
+    """Kurzbeschreibung einer Admin-Anfrage fürs Protokoll; None = nicht protokollieren (z. B. reine Abfragen)."""
+    who = str(body.get("username") or body.get("user") or "")[:40]
+    if path == "/api/admin/users":
+        return {"create": "Benutzer angelegt", "reset": "Passwort zurückgesetzt", "delete": "Benutzer gelöscht",
+                "admin": "Admin-Recht geändert", "lock": "Benutzer gesperrt/entsperrt"}.get(body.get("action"), str(body.get("action"))), who
+    if path == "/api/admin/subscription":
+        if body.get("payment_info") is not None:
+            return "Zahlungsanleitung geändert", ""
+        return f"Abo: {body.get('action')}", f"{who}{' · ' + str(body.get('months')) + ' Monate' if body.get('months') else ''}"
+    if path == "/api/admin/restore":
+        return "Backup eingespielt", ""
+    if path == "/api/admin/maintenance":
+        return ("Wartungsmodus an" if body.get("on") else "Wartungsmodus aus"), str(body.get("text") or "")[:80]
+    if path == "/api/admin/system" and body.get("action") not in ("diag",):
+        return f"System: {body.get('action')}", ""
+    if path == "/api/admin/messages":
+        return "Nachricht an Benutzer", who
+    return None
+
+
+def security_overview():
+    sec = security_store()
+    now = time.time()
+    with FAILED_LOCK:
+        blocked = [{"ip": ip, "n": len([t for t in ts if now - t < 900]), "until": int(max(ts) + 900)}
+                   for ip, ts in FAILED_LOGINS.items() if len([t for t in ts if now - t < 900]) >= 8]
+    logins = list(reversed(sec["logins"]))
+    fails_24h = [x for x in logins if not x["ok"] and now - x["t"] <= 86400]
+    return {"logins": logins[:40], "failed_24h": len(fails_24h), "failed_ips_24h": len({x["ip"] for x in fails_24h}),
+            "new_devices": [x for x in logins if x.get("new")][:10], "blocked": blocked,
+            "audit": list(reversed(sec["audit"]))[:40]}
+
+
 def too_many_failures(ip):
     now = time.time()
     with FAILED_LOCK:
@@ -11085,6 +11341,11 @@ class Handler(BaseHTTPRequestHandler):
             user = self.current_user()
             if maintenance().get("on") and not self.is_admin():
                 return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
+            if u.path.startswith("/api/admin/") and self.is_admin():
+                a_ = safe(lambda: audit_summary(u.path, body))
+                if a_:
+                    safe(lambda: audit(user, a_[0], a_[1]))
+            safe(lambda: track_feature(user, "POST", u.path, body))
             try:
                 if u.path == "/api/prefs":
                     with STORE.lock:
@@ -11293,8 +11554,10 @@ class Handler(BaseHTTPRequestHandler):
                 users()[username]["last_login"] = time.time()
             STORE.dirty = True
             LOG.info("[Login] angemeldet: %s", username)
+            safe(lambda: log_login(username, ip, True, self.headers.get("User-Agent")))
             return self.redirect(nxt, self.cookie(make_session_token(username), SESSION_DAYS * 86400))
         LOG.warning("[Login] fehlgeschlagen: Benutzer %r, IP %s", username[:40], ip)
+        safe(lambda: log_login(username, ip, False, self.headers.get("User-Agent")))
         note_failure(ip)
         time.sleep(1)  # bremst Durchprobieren
         acc_ = users().get(username) or {}
@@ -11425,6 +11688,8 @@ class Handler(BaseHTTPRequestHandler):
         user = self.current_user()
         if u.path.startswith("/api/") and u.path != "/api/me" and maintenance().get("on") and not self.is_admin():
             return self.send_json({"error": "maintenance", "text": maintenance().get("text") or ""}, 503)
+        if u.path.startswith("/api/"):
+            safe(lambda: track_feature(user, "GET", u.path, {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}))
         if u.path == "/api/admin/backup":
             if not self.is_admin():
                 return self.send_json({"error": "Nur für Administratoren"}, 403)

@@ -394,3 +394,23 @@ DEPOT_WILD += [("letzte 12 Monate, heutiger Bestand · Rendite {*}", "last 12 mo
                ("Verbraucht {0} (Dividenden {*} steuerpflichtig, Kursgewinne {*1})", "Used {0} (dividends {*} taxable, capital gains {*1})")]
 DEPOT_EXACT.update({"vom Hoch, 12 Monate, heutiger Bestand": "from peak, 12 months, current holdings"})
 DEPOT_WILD += [("{*} · heutiger Bestand", "{*} · current holdings")]
+# Admin: Quellen-Monitor, Sicherheit, Nutzung
+DEPOT_EXACT.update({
+    "Quellen-Monitor": "Source monitor", "Quelle": "Source", "Anfragen": "Requests", "Erfolg 24 h": "Success 24 h", "Erfolg 1 h": "Success 1 h",
+    "Ø Antwort": "Avg. response", "Letzter Fehler": "Last error", "läuft": "working", "wackelt": "flaky", "gestört": "disrupted", "gesperrt": "blocked",
+    "Noch keine Anfragen seit dem Start.": "No requests since start.", "Sicherheit": "Security", "Anmeldungen": "Logins", "Admin-Aktionen": "Admin actions",
+    "Noch keine protokolliert.": "None logged yet.", "neues Gerät": "new device", "Nutzung": "Usage", "Funktion": "Feature", "Heute": "Today",
+    "7 Tage": "7 days", "30 Tage": "30 days", "Nutzer": "Users", "Je Benutzer (30 Tage)": "Per user (30 days)",
+    "Seit über 30 Tagen inaktiv": "Inactive for more than 30 days", "nie angemeldet": "never logged in",
+    "Noch keine Nutzung gezählt (Zählung läuft seit diesem Update).": "No usage counted yet (counting started with this update).",
+    "Herkunft der Gewinnprognosen (Jahresansicht, seit dem Start)": "Origin of earnings forecasts (annual view, since start)",
+    "Yahoo sperrt die Unternehmensdaten (Schätzungen, Kennzahlen) für diesen Server – Stocky nutzt Ersatzquellen (Nasdaq, onvista, SEC).":
+        "Yahoo blocks company data (estimates, metrics) for this server – Stocky uses fallback sources (Nasdaq, onvista, SEC).",
+    "„Nicht gefunden“ (HTTP 404) zählt nicht als Ausfall. Gelb unter 90 %, rot unter 50 % Erfolg in der letzten Stunde.":
+        "“Not found” (HTTP 404) does not count as a failure. Yellow below 90 %, red below 50 % success in the last hour.",
+    "Neues Gerät = Browser und Netz, mit denen sich der Benutzer noch nie angemeldet hat. Beim Admin-Konto kommt dann eine Push-Nachricht. Passwörter werden nie protokolliert.":
+        "New device = browser and network the user has never logged in from. For the admin account a push notification is sent. Passwords are never logged.",
+})
+DEPOT_WILD += [("{0} fehlgeschlagene Anmeldungen in 24 h{*}", "{0} failed logins in 24 h{*}"),
+               ("aktive Benutzer: heute {0} · 7 Tage {1} · 30 Tage {2} von {3}", "active users: today {0} · 7 days {1} · 30 days {2} of {3}"),
+               ("letzte 24 Stunden · seit dem letzten Neustart", "last 24 hours · since last restart")]

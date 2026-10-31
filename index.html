@@ -907,6 +907,15 @@ table.inc-tbl{min-width:520px}
 .mine-set select{height:38px;border-radius:9px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);
   padding:0 10px;font:inherit;font-size:15px;max-width:60%}
 .mine-acct{max-width:640px}
+.adm-src td{font-size:13.5px}
+.adm-2col{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
+.adm-estbar{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px}
+.adm-estbar i,.adm-estlg i{display:block;height:100%}
+.adm-estlg{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;font-size:13px}
+.adm-estlg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.c0{background:var(--accent)} .c1{background:var(--pos)} .c2{background:var(--neu)} .c3{background:#8a6fb0} .c4{background:var(--neg)}
+.adm-ubar{display:block;height:3px;background:var(--surface-2);border-radius:2px;margin-top:3px}
+.adm-ubar i{display:block;height:100%;background:var(--accent);border-radius:2px}
 .fh-now{display:flex;align-items:baseline;gap:8px;margin:2px 0 8px} .fh-now b{font-size:28px}
 .fh-now b.pos{color:var(--pos)} .fh-now b.neu{color:var(--neu)} .fh-now b.neg{color:var(--neg)}
 .fh-bar{position:relative;height:10px;border-radius:5px;background:var(--surface-2);overflow:visible;margin-bottom:12px}
@@ -3524,6 +3533,49 @@ async function loadAdmin() {
   renderAdmin(D);
   admTimer = setTimeout(loadAdmin, 30000);
 }
+const ADM_ST = {ok: ["pos", "läuft"], warn: ["neu", "wackelt"], bad: ["neg", "gestört"], blocked: ["neg", "gesperrt"]};
+function admSources(Q, dt, rel) {
+  if (!Q) return "";
+  const pc0 = v => v == null ? "–" : nf(v * 100, 0) + " %";
+  const rows = Q.sources.map(x => `<tr><td><span class="dot ${ADM_ST[x.status][0]}"></span> <b>${esc(x.name)}</b> <small class="stamp">${ADM_ST[x.status][1]}</small></td>
+      <td class="num">${x.n}</td><td class="num">${pc0(x.rate)}</td><td class="num">${x.rate_h == null ? "–" : pc0(x.rate_h)}</td>
+      <td class="num">${x.ms == null ? "–" : nf(x.ms, 0) + " ms"}</td>
+      <td class="stamp">${x.last_err ? `${rel(x.last_err[0])}: ${esc(x.last_err[1])}` : "–"}</td></tr>`).join("");
+  const est = Q.estimates || [];
+  return `<div class="card pad adm-wide"><h3>Quellen-Monitor <span class="stamp">letzte 24 Stunden · seit dem letzten Neustart</span></h3>
+    ${Q.yahoo_blocked ? `<div class="note" style="margin-bottom:8px">Yahoo sperrt die Unternehmensdaten (Schätzungen, Kennzahlen) für diesen Server – Stocky nutzt Ersatzquellen (Nasdaq, onvista, SEC).</div>` : ""}
+    ${rows ? `<div class="peer-scroll"><table class="trk adm-src"><thead><tr><th>Quelle</th><th class="num">Anfragen</th><th class="num">Erfolg 24 h</th><th class="num">Erfolg 1 h</th><th class="num">Ø Antwort</th><th>Letzter Fehler</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>` : `<div class="stamp">Noch keine Anfragen seit dem Start.</div>`}
+    ${est.length ? `<div class="stamp" style="margin:12px 0 4px">Herkunft der Gewinnprognosen (Jahresansicht, seit dem Start)</div>
+      <div class="adm-estbar">${est.map((e, i) => `<i style="width:${(e.share * 100).toFixed(1)}%" class="c${i % 5}" title="${esc(e.src)}: ${e.n}"></i>`).join("")}</div>
+      <div class="adm-estlg">${est.map((e, i) => `<span><i class="c${i % 5}"></i>${esc(e.src)} ${pc0(e.share)} <small class="stamp">(${e.n})</small></span>`).join("")}</div>` : ""}
+    <p class="stamp" style="margin:8px 0 0">„Nicht gefunden“ (HTTP 404) zählt nicht als Ausfall. Gelb unter 90 %, rot unter 50 % Erfolg in der letzten Stunde.</p></div>`;
+}
+function admSecurity(Z, dt, rel) {
+  if (!Z) return "";
+  const lg = Z.logins.slice(0, 15).map(x => `<div class="adm-row"><span><span class="dot ${x.ok ? "pos" : "neg"}"></span> <b>${esc(x.user || "–")}</b>
+      <small class="stamp">${esc(x.device || "")} · ${esc(x.ip || "")}${x.new ? ` · <b style="color:var(--accent)">neues Gerät</b>` : ""}</small></span><span class="stamp">${x.ok ? "" : "fehlgeschlagen · "}${dt(x.t)}</span></div>`).join("");
+  const au = Z.audit.slice(0, 15).map(x => `<div class="adm-row"><span><b>${esc(x.action)}</b>${x.detail ? ` <small class="stamp">${esc(x.detail)}</small>` : ""}</span>
+      <span class="stamp">${esc(x.by)} · ${dt(x.t)}</span></div>`).join("");
+  return `<div class="card pad adm-wide"><h3>Sicherheit <span class="stamp">${Z.failed_24h} fehlgeschlagene Anmeldungen in 24 h${Z.failed_ips_24h ? ` von ${Z.failed_ips_24h} IP(s)` : ""}</span></h3>
+    ${Z.blocked.length ? `<div class="note" style="margin-bottom:8px">Gerade gesperrt (zu viele Fehlversuche): ${Z.blocked.map(b => `${esc(b.ip)} bis ${dt(b.until)}`).join(", ")}</div>` : ""}
+    ${Z.new_devices.length ? `<div class="stamp" style="margin-bottom:6px">Zuletzt neue Geräte: ${Z.new_devices.slice(0, 5).map(x => `${esc(x.user)} (${esc(x.device)}, ${rel(x.t)})`).join(" · ")}</div>` : ""}
+    <div class="adm-2col"><div><div class="stamp" style="margin-bottom:4px">Anmeldungen</div>${lg || `<div class="stamp">Noch keine protokolliert.</div>`}</div>
+      <div><div class="stamp" style="margin-bottom:4px">Admin-Aktionen</div>${au || `<div class="stamp">Noch keine protokolliert.</div>`}</div></div>
+    <p class="stamp" style="margin:8px 0 0">Neues Gerät = Browser und Netz, mit denen sich der Benutzer noch nie angemeldet hat. Beim Admin-Konto kommt dann eine Push-Nachricht. Passwörter werden nie protokolliert.</p></div>`;
+}
+function admUsage(N, rel) {
+  if (!N) return "";
+  const A = N.active, mx = Math.max(1, ...N.features.map(f => f.d30));
+  return `<div class="card pad adm-wide"><h3>Nutzung <span class="stamp">aktive Benutzer: heute ${A.today} · 7 Tage ${A.d7} · 30 Tage ${A.d30} von ${A.total}</span></h3>
+    <div class="adm-2col"><div>
+      ${N.features.length ? `<table class="trk"><thead><tr><th>Funktion</th><th class="num">Heute</th><th class="num">7 Tage</th><th class="num">30 Tage</th><th class="num">Nutzer</th></tr></thead><tbody>
+        ${N.features.map(f => `<tr><td>${esc(f.name)}<span class="adm-ubar"><i style="width:${(f.d30 / mx * 100).toFixed(1)}%"></i></span></td><td class="num">${f.today}</td><td class="num">${f.d7}</td><td class="num">${f.d30}</td><td class="num">${f.users}</td></tr>`).join("")}</tbody></table>`
+        : `<div class="stamp">Noch keine Nutzung gezählt (Zählung läuft seit diesem Update).</div>`}</div>
+      <div><div class="stamp" style="margin-bottom:4px">Je Benutzer (30 Tage)</div>
+        ${N.per_user.slice(0, 12).map(x => `<div class="adm-row"><span><b>${esc(x.user)}</b> <small class="stamp">${x.top.map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</small></span><b class="num">${x.total}</b></div>`).join("") || `<div class="stamp">–</div>`}
+        ${N.inactive.length ? `<div class="stamp" style="margin:10px 0 4px">Seit über 30 Tagen inaktiv</div>${N.inactive.map(x => `<div class="adm-row"><span>${esc(x.user)}</span><span class="stamp">${x.last ? rel(x.last) : "nie angemeldet"}</span></div>`).join("")}` : ""}</div></div></div>`;
+}
 function admFinnhub(F) {
   if (!F) return "";
   if (!F.active) return `<div class="card pad"><h3>Finnhub-Kontingent</h3><div class="stamp">Kein Finnhub-Schlüssel hinterlegt.</div></div>`;
@@ -3578,6 +3630,10 @@ function renderAdmin(D) {
         <label class="stamp" for="maint-text" style="display:block;margin-top:8px">Hinweis, den Benutzer sehen:</label>
         <textarea id="maint-text" class="adm-ta" rows="2" maxlength="500" placeholder="z. B. Wir spielen ein Update ein – in etwa 15 Minuten geht es weiter.">${esc(M.text || "")}</textarea>
         <div class="modal-actions" style="justify-content:flex-start"><button class="btn ${M.on ? "" : "primary"}" id="maint-save">${M.on ? "Hinweis speichern" : "Speichern"}</button></div></div>
+
+      ${admSources(D.sources, dt, rel)}
+      ${admSecurity(D.security, dt, rel)}
+      ${admUsage(D.usage, rel)}
 
       <div class="card pad adm-wide"><h3>Arbeitsspeicher – letzte 7 Tage <span class="stamp">${O.mem.length ? `Höchstwert ${Math.max(...O.mem.map(x => x[1]))} MB · Messung alle 10 Min.` : "noch keine Messwerte"}</span></h3>
         <div id="mem-chart" class="mem-chart">${memChart(O.mem, S.hosted)}</div></div>
