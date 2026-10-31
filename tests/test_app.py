@@ -2080,3 +2080,16 @@ class TestOnvistaTer(unittest.TestCase):
         with mock.patch.object(a, "_fetch", return_value=b'{"x":{}}'):
             self.assertIsNone(a.onvista_fund_ter("XX0000000000"))
         a.ONVISTA_TER.clear()
+
+
+class TestPatchLastClose(unittest.TestCase):
+    def test_fills_missing_latest_day_from_hourly(self):
+        import unittest.mock as mock, pandas as pd
+        daily = pd.DataFrame({"SAP.DE": [211.2, 208.9, float("nan")]},
+                             index=pd.to_datetime(["2026-10-28", "2026-10-29", "2026-10-30"]))
+        hourly = pd.DataFrame({"SAP.DE": [212.1, 211.75]}, index=pd.to_datetime(
+            ["2026-10-30 16:00", "2026-10-30 17:00"]).tz_localize("Europe/Berlin"))
+        with mock.patch.object(a.yf, "download", return_value={"Close": hourly}):
+            out = a.patch_last_close(daily, ["SAP.DE"])
+        self.assertAlmostEqual(out["SAP.DE"].dropna().iloc[-1], 211.75)
+        self.assertEqual(out["SAP.DE"].dropna().index[-1], pd.Timestamp("2026-10-30"))

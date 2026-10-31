@@ -8658,6 +8658,8 @@ def analyze_depot(positions, history=None):
         close = close.to_frame(tickers[0])
     if isinstance(raw, pd.Series):
         raw = raw.to_frame(tickers[0])
+    if len(close):
+        patch_last_close(close, [x for x in tickers if x in close], frames=(raw,) if raw is not close else ())
     close, raw = close.ffill(), raw.ffill()
 
     def fx_series(cur):
@@ -10056,6 +10058,47 @@ def screener_start(user, mode="due", unis=None):
 
 
 MOVERS_CACHE = {}         # Index -> (Zeit, Gewinner/Verlierer des Tages)
+
+
+def quote_now(sym):
+    """Aktueller bzw. letzter Schlusskurs eines Werts (Yahoo, ca. 15 Min. verzögert); "prev" nur zur Info."""
+    fi = yf.Ticker(sym).fast_info
+    return {"price": num(safe(lambda: fi.last_price)), "prev": num(safe(lambda: fi.previous_close))}
+
+
+def patch_last_close(df, syms, frames=()):
+    """Yahoo liefert in den gebündelten Tagesdaten den jüngsten Handelstag teils leer (Schlusskurs NaN, auch bei Apple),
+    die Stundenkurse sind aber aktuell. Fehlt in df der letzte Handelstag eines Werts, wird er aus dem letzten
+    Stundenkurs ergänzt. frames: weitere DataFrames mit gleichem Index (z. B. unbereinigte Kurse), die mitgezogen werden."""
+    import pandas as pd
+    syms = [x for x in syms if x]
+    if df is None or not len(syms):
+        return df
+    hr = safe(lambda: yf.download(syms, period="5d", interval="1h", auto_adjust=False, progress=False, threads=True)["Close"])
+    if hr is None or not len(hr):
+        return df
+    if isinstance(hr, pd.Series):
+        hr = hr.to_frame(syms[0])
+    tz = getattr(df.index, "tz", None)
+    for x in syms:
+        if x not in hr:
+            continue
+        h = hr[x].dropna()
+        if h.empty:
+            continue
+        day = pd.Timestamp(h.index[-1].date())
+        day = day.tz_localize(tz) if tz is not None else day
+        col = df[x].dropna() if x in df else None
+        last = col.index[-1] if col is not None and len(col) else None
+        if last is None or pd.Timestamp(last).normalize() < day:
+            for f in (df, *frames):
+                if f is not None:
+                    f.loc[day, x] = float(h.iloc[-1])
+    df.sort_index(inplace=True)
+    for f in frames:
+        if f is not None:
+            f.sort_index(inplace=True)
+    return df
 MOVER_NAMES = {}          # Symbol -> Firmenname
 
 
@@ -10084,6 +10127,7 @@ def market_movers(uni="dax", n=5, period="day"):
                      threads=True)["Close"]
     if isinstance(df, pd.Series):
         df = df.to_frame(syms[0])
+    df = patch_last_close(df, syms)  # jüngster Handelstag fehlt in den Tagesdaten teils
     last = {s_: df[s_].dropna().index[-1] for s_ in syms if s_ in df and df[s_].dropna().size >= 2}
     if not last:
         raise ValueError("Keine Kursdaten verfügbar")
@@ -10113,6 +10157,13 @@ def market_movers(uni="dax", n=5, period="day"):
     with ThreadPoolExecutor(max_workers=6) as ex:
         for r_, nm in zip(picked, ex.map(_mover_name, [r_["symbol"] for r_ in picked])):
             r_["name"] = nm
+        # angezeigte Werte mit dem genauen Schluss- bzw. aktuellen Kurs (Tagesdaten/Stundenkurse weichen leicht ab)
+        for r_, q in zip(picked, ex.map(lambda x: safe(lambda: quote_now(x)), [r_["symbol"] for r_ in picked])):
+            # nur den Kurs übernehmen; Basis (Vortag/Vormonat/Vorjahr) bleibt aus den Tagesdaten – Yahoos
+            # „previous_close“ ist unzuverlässig, wenn der jüngste Tagesbalken leer ist
+            if q and q.get("price") and abs(q["price"] / r_["price"] - 1) < 0.05:
+                r_["change"] = q["price"] / (r_["price"] / (1 + r_["change"])) - 1
+                r_["price"] = q["price"]
     res = {"index": name, "key": uni, "period": period, "date": ref.strftime("%Y-%m-%d"),
            "since": since.strftime("%Y-%m-%d") if since is not None else None, "n": len(rows), "up": top, "down": flop,
            "advancers": sum(1 for r_ in rows if r_["change"] > 0), "decliners": sum(1 for r_ in rows if r_["change"] < 0),
@@ -10659,12 +10710,19 @@ def watchlist_quotes(symbols):
     df = yf.download(syms, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True)["Close"]
     if isinstance(df, pd.Series):
         df = df.to_frame(syms[0])
+    df = patch_last_close(df, syms)
     out = {}
     for s_ in syms:
         c = df[s_].dropna() if s_ in df else None
         if c is not None and len(c) >= 2 and float(c.iloc[-2]) > 0:
             out[s_] = {"price": float(c.iloc[-1]), "change": float(c.iloc[-1]) / float(c.iloc[-2]) - 1,
                        "date": c.index[-1].date().isoformat()}
+    if len(syms) <= 40:  # genaue Kurse (Schlusskurs statt Stundenkurs) für überschaubare Listen
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for s_, q in zip(syms, ex.map(lambda x: safe(lambda: quote_now(x)), syms)):
+                if q and q.get("price") and s_ in out and abs(q["price"] / out[s_]["price"] - 1) < 0.05:
+                    base = out[s_]["price"] / (1 + out[s_]["change"])  # Vortagesschluss aus den Tagesdaten
+                    out[s_].update(price=q["price"], change=q["price"] / base - 1)
     WL_QUOTE_CACHE[key] = (time.time(), out)
     if len(WL_QUOTE_CACHE) > 200:
         WL_QUOTE_CACHE.pop(next(iter(WL_QUOTE_CACHE)))

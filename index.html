@@ -2231,7 +2231,13 @@ const MV_UNIS = [["dax", "DAX"], ["mdax", "MDAX"], ["tecdax", "TecDAX"], ["es50"
   ["ndx", "Nasdaq-100"], ["sp500", "S&P 500"]];
 let mvUni = (() => { try { return localStorage.getItem("mvUni") || "dax"; } catch (e) { return "dax"; } })();
 let mvPer = (() => { try { const v = localStorage.getItem("mvPer"); return ["month", "year"].includes(v) ? v : "day"; } catch (e) { return "day"; } })();
+// Top & Flop alle 5 Minuten neu laden, solange die Startseite offen und sichtbar ist (Kurse ca. 15 Min. verzögert)
+setInterval(() => { if (document.visibilityState === "visible" && document.querySelector("#mv")) moversLoad(); }, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && document.querySelector("#mv") && Date.now() - (window.__mvAt || 0) > 5 * 60 * 1000) moversLoad();
+});
 async function moversLoad() {
+  window.__mvAt = Date.now();
   const box = $("#mv");
   if (!box) return;
   const uni = MV_UNIS.some(([k]) => k === mvUni) ? mvUni : "dax";
