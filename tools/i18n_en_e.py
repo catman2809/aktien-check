@@ -475,3 +475,4 @@ DEPOT_WILD += [("Alle {0} bewerteten Werte aus dem Screener löschen?
 Das gibt Arbeitsspeicher frei. Die Bewertungen lassen sich nur durch ein neues Screening wiederherstellen (dauert je Index länger).",
                 "Delete all {0} rated stocks from the screener?\n\nThis frees memory. The ratings can only be restored by running a new screening (takes a while per index)."),
                ("{0} bewertete Werte gelöscht{*}", "{0} rated stocks deleted{*}")]
+DEPOT_EXACT.update({"Kann bis zu 90 Sekunden dauern": "Can take up to 90 seconds"})

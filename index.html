@@ -4152,7 +4152,7 @@ async function run(q) {
   $("#subnav").style.display = "none";
   const steps = ["Unternehmen finden", "Kurs- und Bilanzdaten laden", "Nachrichten aus Tier 1–3 sammeln", "Kategorien bewerten"];
   $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}
-    <b>Analysiere „${esc(q)}“</b><div class="stamp">Dauert in der Regel 10–25 Sekunden</div>
+    <b>Analysiere „${esc(q)}“</b><div class="stamp">Kann bis zu 90 Sekunden dauern</div>
     <ul class="steps">${steps.map(s => `<li>${s}</li>`).join("")}</ul></div>`;
   const lis = [...document.querySelectorAll(".steps li")];
   const timers = [1500, 5000, 10000].map((t, i) => setTimeout(() => lis[i]?.classList.add("done"), t));
