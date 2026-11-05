@@ -2109,6 +2109,13 @@ def onvista_dps_forecast(D, ov, dropped=None):
     if (n_match >= 3 and spread_ > 0.05) or (n_match == 2 and spread_ > 0.03) or             (n_match == 1 and not (same_cur and abs(best[2] - 1) <= 0.03)):  # ein Jahr reicht nur bei gleicher Währung
         return {}
     _, off, scale, _ = best
+    if not same_cur:
+        # Verhältnis muss ungefähr dem Wechselkurs entsprechen: Volvo zahlt neben der ordentlichen eine Sonderdividende,
+        # onvista zählt nur die ordentliche -> Verhältnis 24 statt Kurs 11, Prognose mehr als doppelt so hoch
+        cur_ov = next((e.get("cur") for e in ov["dps"].values() if e.get("cur")), None) or ov.get("currency")
+        u_ov, u_d = (safe(lambda: usd_rate(cur_ov)) if cur_ov else None), safe(lambda: usd_rate(D.get("currency")))
+        if u_ov and u_d and not 0.8 <= scale / (u_ov / u_d) <= 1.25:
+            return {}
     est = sorted((y, e["dps"]) for y, e in ov["dps"].items() if e["est"] and e["dps"])
     last_paid = max(past.items())[1]["dps"] if past else None
     out = {}
@@ -4260,6 +4267,11 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
         return []
     last = periods[-1]
     end = datetime.fromisoformat(last["end"])
+    # Geschäftsjahr abgeschlossen, aber noch nicht in den Daten (Visa: Jahresbericht noch nicht eingereicht) – der
+    # Konsens beginnt dann ein Jahr später
+    lagged = not nasdaq.get(end.year + 1) and bool(nasdaq.get(end.year + 2)) and (datetime.now() - end).days > 385
+    if lagged:
+        end = end.replace(year=end.year + 1, day=min(end.day, 28) if end.month == 2 else end.day)
     shares = est_shares(last, eps_last)
     k = fx_rate(eps_cur, currency) if eps_cur and currency and currency != eps_cur else 1.0
     # Gemeldete Aktienzahl als Ersatz, wenn der Vorjahresgewinn als Basis nicht taugt: Verlust oder starke
@@ -4278,7 +4290,9 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
     if not shares or not k:
         return []
     g = trend_growth(rev_hist)
-    out, rev, prev_ni = [], last["revenue"], (None if alt else last["net_income"])
+    out, rev, prev_ni = [], last["revenue"], (None if alt or lagged else last["net_income"])
+    if lagged and g is not None and rev:
+        rev *= 1 + g  # das fehlende Jahr mit fortschreiben
     for i in (1, 2, 3):
         try:
             d = end.replace(year=end.year + i)
@@ -4295,6 +4309,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
         rev = rev * (1 + g) if g is not None and rev else None
         out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
                     "margin": ni / rev if rev else None, "op_income": None, "op_margin": None,
+                    **({"fy_missing": end.year} if lagged and i == 1 else {}),
                     "est": "consensus", "n_rev": 0, "n_eps": e.get("n") or 0, "ni_consensus": src, "rev_trend": rev is not None,
                     "ni_low": shares * e["low"] * k if e.get("low") else None, "ni_high": shares * e["high"] * k if e.get("high") else None})
         prev_ni = ni
@@ -4516,10 +4531,15 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=Non
         else:
             r0, r1 = r1, None
         e0, e1 = e1, None
+    # Geschäftsjahr schon abgeschlossen, aber noch nicht in den Daten (Visa Nov. 2026: GJ bis Sept. 2026, Jahresbericht
+    # noch nicht eingereicht), und Yahoo hat schon umgestellt: der Vorjahreswert der Prognose ist dann das fehlende Jahr
+    # (45,9 statt gemeldet 40,0 Mrd. $) -> alle Prognosen gehören ein Jahr später
+    lag = bool(r0 and r0["ago"] and (datetime.now() - datetime.fromisoformat(last["end"])).days > 385
+               and abs(r0["ago"] / last["revenue"] - 1) > 0.015 and 0.8 <= r0["ago"] / last["revenue"] <= 1.6)
     # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen: andere Abgrenzung (Versicherer) -> auf die
     # gemeldete Basis umgerechnet, falscher Vorjahreswert -> Prognose direkt; sonst nur Gewinnprognosen (der Umsatz
     # wird dann in income_data fortgeschrieben)
-    basis = rev_basis(r0["avg"], r0["ago"], last["revenue"]) if r0 else None
+    basis = (1.0, None) if lag else rev_basis(r0["avg"], r0["ago"], last["revenue"]) if r0 else None
     if not basis:
         r0 = r1 = None
     elif basis[1] == "rebased":
@@ -4530,6 +4550,8 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=Non
         return []
     shares = est_shares(last, eps_last, shares_out, periods)
     end = datetime.fromisoformat(last["end"])
+    if lag:
+        end = end.replace(year=end.year + 1, day=min(end.day, 28) if end.month == 2 else end.day)
 
     def at(i):
         try:
@@ -4546,6 +4568,8 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=Non
             out_.update(rng)
         if n_rev and basis and basis[1] == "rebased":
             out_["rev_rebased"] = True
+        if lag and i == 1:
+            out_["fy_missing"] = end.year  # abgeschlossenes, noch nicht veröffentlichtes Geschäftsjahr davor
         return out_
     ni_of = lambda e: shares * e["avg"] if shares and e else None
     ni0 = ni_of(e0)
@@ -4743,7 +4767,8 @@ def income_estimates_q_fallback(symbol, periods, eps_last, t=None, shares_out=No
         cur_y, prev_y = chain[j][1], chain[j - 1][1]
         if not cur_y.get("revenue") or not prev_y.get("revenue"):
             break
-        g_rev = cur_y["revenue"] / prev_y["revenue"] - 1
+        yrs = max(1, round((chain[j][0] - chain[j - 1][0]).days / 365))  # 2, wenn ein Geschäftsjahr noch fehlt (Visa)
+        g_rev = (cur_y["revenue"] / prev_y["revenue"]) ** (1 / yrs) - 1
         rev = ago["revenue"] * (1 + g_rev)
         ni, src = None, None
         q = (nq or {}).get((d.year, d.month)) or (nq or {}).get(((d + timedelta(days=20)).year, (d + timedelta(days=20)).month))

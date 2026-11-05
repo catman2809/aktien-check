@@ -493,3 +493,5 @@ DEPOT_WILD += [
 ]
 DEPOT_EXACT.update({"Nicht im Tarif (24 Std. ausgelassen)": "Not in plan (skipped for 24 h)"})
 DEPOT_WILD += [("Stand {0}, laut Wikidata", "as of {0}, per Wikidata")]
+DEPOT_WILD += [("Das Geschäftsjahr {0} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – die Prognosen beginnen deshalb mit {1}.",
+                "Fiscal year {0} has ended, but its figures have not been published yet – the forecasts therefore start with {1}.")]

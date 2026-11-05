@@ -4747,7 +4747,8 @@ function estSources(E) {
   return groups.map(g => ` <span>${esc(g.l.join(" / "))}: ${esc(g.k)}.</span>`).join("");
 }
 function incTableNote(est) {
-  return `<span>e = erwartet.</span>${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` + coupledNote(est) +
+  const miss = (est.find(e => e.fy_missing) || {}).fy_missing;
+  return `<span>e = erwartet.</span>${miss ? ` <span>Das Geschäftsjahr ${miss} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – die Prognosen beginnen deshalb mit ${miss + 1}.</span>` : ""}${estSources(est)} <span>* abgeleitet bzw. fortgeschrieben: Bruttomarge als Median der letzten Jahre, EBIT aus der erwarteten Nettomarge plus der üblichen Differenz.</span>` + coupledNote(est) +
     (est.some(e => e.pe != null) ? ` <span>KGV: gemeldete Jahre = Kurs am Geschäftsjahresende ÷ Gewinn je Aktie; Prognosejahre = heutiger Kurs ÷ erwarteter Gewinn je Aktie (Forward-KGV).</span>` : "");
 }
 function coupledNote(E) {

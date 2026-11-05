@@ -1793,6 +1793,28 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertTrue(a.yahoo_year_stale(477.7, 416.2, 478.8, 416.2))
         self.assertFalse(a.yahoo_year_stale(526.9, 478.8, 478.8, 416.2))   # normal: Vorjahr = letztes gemeldetes Jahr
 
+    def test_onvista_dividend_scale_must_match_fx(self):
+        import unittest.mock as um
+        D = {"years": [2023, 2024, 2025], "dps": [14.0, 18.0, 18.5], "currency": "SEK"}   # inkl. Sonderdividende
+        ov = {"dps": {2023: {"dps": 0.62, "est": False, "cur": "EUR"}, 2024: {"dps": 0.73, "est": False, "cur": "EUR"},
+                      2025: {"dps": 0.776, "est": False, "cur": "EUR"}, 2026: {"dps": 1.44, "est": True, "cur": "EUR"}}}
+        rates = {"EUR": 1.08, "SEK": 1.08 / 11.0}
+        with um.patch.object(a, "usd_rate", side_effect=lambda c: rates.get(c)):
+            self.assertEqual(a.onvista_dps_forecast(D, ov), {})                   # Verhältnis ~24 statt Kurs 11
+            D2 = dict(D, dps=[6.8, 8.0, 8.5])                                       # nur ordentliche Dividende
+            out = a.onvista_dps_forecast(D2, ov)
+        self.assertAlmostEqual(out[2026], 1.44 * 8.5 / 0.776, places=2)
+
+    def test_visa_fiscal_year_not_yet_in_data(self):
+        nq = {2027: {"avg": 15.0, "n": 30}, 2028: {"avg": 17.1, "n": 28}, 2029: {"avg": 19.4, "n": 10}}
+        per = [{"end": f"{y}-09-30", "revenue": r, "net_income": r * 0.5, "margin": 0.5}
+               for y, r in ((2023, 32.7), (2024, 35.9), (2025, 40.0))]
+        est = a.income_estimates_nasdaq(per, "USD", 10.2, nq, [32.7, 35.9, 40.0])  # GJ 2026 fehlt, Nasdaq ab 2027
+        self.assertEqual(est[0]["label"], "2027e")
+        self.assertEqual(est[0]["fy_missing"], 2026)
+        g = a.trend_growth([32.7, 35.9, 40.0])
+        self.assertAlmostEqual(est[0]["revenue"], 40.0 * (1 + g) ** 2)
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),
