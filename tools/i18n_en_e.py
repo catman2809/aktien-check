@@ -470,9 +470,15 @@ DEPOT_WILD += [("{0} Fehlerart(en) · {1} Vorkommen · {2} in den letzten 24 Std
                ("{0} Einträge gelöscht{*}", "{0} entries deleted{*}"), ("seit {*}", "since {*}")]
 DEPOT_EXACT.update({"Alle löschen": "Delete all", "Alle Bewertungen löschen und Arbeitsspeicher freigeben": "Delete all ratings and free memory",
                     "Der Screener läuft gerade – bitte zuerst stoppen.": "The screener is running – please stop it first."})
-DEPOT_WILD += [("Alle {0} bewerteten Werte aus dem Screener löschen?
-
-Das gibt Arbeitsspeicher frei. Die Bewertungen lassen sich nur durch ein neues Screening wiederherstellen (dauert je Index länger).",
+DEPOT_WILD += [("Alle {0} bewerteten Werte aus dem Screener löschen?\n\nDas gibt Arbeitsspeicher frei. Die Bewertungen lassen sich nur durch ein neues Screening wiederherstellen (dauert je Index länger).",
                 "Delete all {0} rated stocks from the screener?\n\nThis frees memory. The ratings can only be restored by running a new screening (takes a while per index)."),
                ("{0} bewertete Werte gelöscht{*}", "{0} rated stocks deleted{*}")]
 DEPOT_EXACT.update({"Kann bis zu 90 Sekunden dauern": "Can take up to 90 seconds"})
+DEPOT_WILD += [
+    ("{*}: Umsatz mit dem Wachstum laut Analystenkonsens (Yahoo Finance) – der Konsens grenzt den Umsatz anders ab, daher auf den gemeldeten Umsatz übertragen, {*1}.",
+     "{*}: revenue with the growth from the analyst consensus (Yahoo Finance) – the consensus defines revenue differently, so the growth is applied to reported revenue, {*1}."),
+    ("Prognose · Konsens von {0} Analysten (Gewinn: {1}) · Umsatzwachstum auf den gemeldeten Umsatz übertragen",
+     "Forecast · consensus of {0} analysts (earnings: {1}) · revenue growth applied to reported revenue"),
+    ("Prognose · Konsens von {0} Analysten · Umsatzwachstum auf den gemeldeten Umsatz übertragen",
+     "Forecast · consensus of {0} analysts · revenue growth applied to reported revenue"),
+]

@@ -1265,8 +1265,20 @@ class TestCurrencyGuards(unittest.TestCase):
                "+1y": {"growth": -0.01, "ago": 12.9e12, "avg": 12.8e12, "cur": "JPY"}}
         m = defaultdict(lambda: None, {"currency": "USD", "fin_currency": "JPY", "revenues": [None, 83e9], "est_rev": bad})
         with um.patch.object(a, "usd_rate", side_effect=lambda c: {"USD": 1.0, "JPY": 1 / 150}.get(c)):
-            a.check_revenue_estimates(m)            # Vorjahr 0,8 statt ~12,5 Bio. JPY -> Prognose verworfen
-            self.assertEqual(m["est_rev"], {})
+            a.check_revenue_estimates(m)            # Vorjahr 0,8 statt ~12,5 Bio. JPY, Prognose passt -> Wachstum neu
+            self.assertAlmostEqual(m["est_rev"]["0y"]["growth"], 12.9e12 / 150 / 83e9 - 1)
+            self.assertEqual(m["est_rev_fixed"], "ago_bad")
+            m3 = defaultdict(lambda: None, {"currency": "USD", "fin_currency": "JPY", "revenues": [83e9],
+                                            "est_rev": {"0y": {"growth": 15.1, "ago": 0.8e12, "avg": 40e12, "cur": "JPY"}}})
+            a.check_revenue_estimates(m3)           # auch die Prognose passt nicht -> verworfen
+            self.assertEqual(m3["est_rev"], {})
+            ins = {"0y": {"growth": -0.01, "ago": 186.9e9, "avg": 185.0e9, "low": 177e9, "high": 190e9},
+                   "+1y": {"growth": 0.025, "ago": 185.0e9, "avg": 189.6e9}}
+            m4 = defaultdict(lambda: None, {"currency": "EUR", "revenues": [137.4e9], "est_rev": ins})
+            a.check_revenue_estimates(m4)           # Versicherer: Geschäftsvolumen statt Umsatz -> umgerechnet
+            self.assertAlmostEqual(m4["est_rev"]["0y"]["avg"], 185.0e9 * 137.4 / 186.9)
+            self.assertAlmostEqual(m4["est_rev"]["0y"]["growth"], -0.01)
+            self.assertAlmostEqual(m4["est_rev"]["+1y"]["avg"], 189.6e9 * 137.4 / 186.9)
             good = {"0y": {"growth": 0.04, "ago": 12.48e12, "avg": 12.9e12, "cur": "JPY"}}
             m2 = defaultdict(lambda: None, {"currency": "USD", "fin_currency": "JPY", "revenues": [83e9], "est_rev": good})
             a.check_revenue_estimates(m2)
@@ -1672,13 +1684,13 @@ class TestIncomeEstimates(unittest.TestCase):
 
 
 class TestIncomeEstimatesSources(unittest.TestCase):
-    def _t(self, rev_ago):
+    def _t(self, rev_ago, avg0=110.0, avg1=121.0):
         import pandas as pd
 
         class T:
             pass
         t = T()
-        t.revenue_estimate = pd.DataFrame({"avg": [110.0, 121.0], "low": [105.0, 115.0], "high": [115.0, 127.0],
+        t.revenue_estimate = pd.DataFrame({"avg": [avg0, avg1], "low": [105.0, 115.0], "high": [115.0, 127.0],
                                            "numberOfAnalysts": [20, 18], "yearAgoRevenue": [rev_ago, 110.0], "currency": ["USD", "USD"]},
                                           index=["0y", "+1y"])
         t.earnings_estimate = pd.DataFrame({"avg": [2.2, 2.4], "low": [2.0, 2.2], "high": [2.4, 2.6], "numberOfAnalysts": [20, 18],
@@ -1697,10 +1709,32 @@ class TestIncomeEstimatesSources(unittest.TestCase):
 
     def test_without_usable_revenue_estimate(self):
         periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
-        est = a.income_estimates(self._t(50.0), periods, "USD", 2.0)       # Vorjahreswert passt nicht -> kein Umsatz
+        est = a.income_estimates(self._t(50.0, 300.0), periods, "USD", 2.0)  # weder Vorjahr noch Prognose passen
         self.assertIsNone(est[0]["revenue"])
         self.assertAlmostEqual(est[0]["net_income"], 22.0)                  # Gewinnprognose bleibt
         self.assertIsNone(est[0]["margin"])
+        hist = [{"end": "2024-12-31", "revenue": 90.0}] + periods
+        a.fill_revenue_trend(hist, est)                                     # Umsatz dann fortgeschrieben
+        self.assertTrue(est[0]["rev_trend"])
+        self.assertAlmostEqual(est[0]["revenue"], 100.0 * (1 + a.trend_growth([90.0, 100.0])))
+        self.assertAlmostEqual(est[0]["margin"], 22.0 / est[0]["revenue"])
+        self.assertGreater(est[1]["revenue"], est[0]["revenue"])
+
+    def test_wrong_year_ago_revenue(self):
+        periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
+        est = a.income_estimates(self._t(37.0), periods, "USD", 2.0)       # Vorjahr falsch (Toyota), Prognose passt
+        self.assertAlmostEqual(est[0]["revenue"], 110.0)
+        self.assertNotIn("rev_rebased", est[0])
+
+    def test_revenue_consensus_other_definition(self):
+        periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
+        est = a.income_estimates(self._t(136.0, 140.0, 150.0), periods, "USD", 2.0)  # Versicherer: Geschäftsvolumen
+        self.assertAlmostEqual(est[0]["revenue"], 140.0 * 100 / 136)        # Wachstum auf den gemeldeten Umsatz
+        self.assertAlmostEqual(est[1]["revenue"], 150.0 * 100 / 136)
+        self.assertAlmostEqual(est[0]["rev_low"], 105.0 * 100 / 136)
+        self.assertTrue(est[0]["rev_rebased"] and est[1]["rev_rebased"])
+        self.assertIsNone(a.rev_basis(140.0, 136.0, 0))
+        self.assertEqual(a.rev_basis(110.0, 101.0, 100.0), (1.0, None))
 
 
 class TestIncomeFallbacks(unittest.TestCase):

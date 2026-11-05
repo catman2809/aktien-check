@@ -1107,18 +1107,47 @@ def est_fx(m, e):
     return 1.0 if (m.get("fin_currency") or m["currency"]) == m["currency"] else None  # unbekannt -> nicht nutzbar
 
 
+def rev_basis(avg, ago, last):
+    """Passt eine Umsatzprognose (laufendes Geschäftsjahr) zum gemeldeten Umsatz des letzten Geschäftsjahres?
+    (1, None): ja. (Faktor, "rebased"): der Konsens grenzt den Umsatz anders ab (Versicherer: Geschäftsvolumen statt
+    Umsatz, Allianz 186 statt 137 Mrd. €), das Wachstum ist aber plausibel -> auf die gemeldete Basis umrechnen.
+    (1, "ago_bad"): der Vorjahreswert der Prognose ist falsch (Toyota 18 statt 51 Bio. JPY, Sony 0,8 statt 12,5),
+    die Prognose selbst passt zum gemeldeten Umsatz. None: unbrauchbar."""
+    if not avg or not last or last <= 0 or avg <= 0:
+        return None
+    if ago and 0.8 <= ago / last <= 1.25:
+        return 1.0, None
+    if ago and ago > 0 and -0.3 <= avg / ago - 1 <= 0.5 and 0.2 <= last / ago <= 5:
+        return last / ago, "rebased"
+    if 0.8 <= avg / last <= 1.3:
+        return 1.0, "ago_bad"
+    return None
+
+
 def check_revenue_estimates(m):
-    """Fehlerhafte Umsatzprognosen verwerfen: Der Vorjahreswert der Prognose für das laufende Geschäftsjahr muss zum
-    gemeldeten Umsatz des letzten Geschäftsjahres passen (Yahoo-Fehler z. B. Sony: 0,8 statt 12,5 Bio. JPY ->
-    angeblich +1.510 % Wachstum). Unplausible Wachstumsraten (über +300 % / unter −80 %) werden ebenfalls verworfen."""
+    """Umsatzprognosen prüfen: Der Vorjahreswert der Prognose für das laufende Geschäftsjahr muss zum gemeldeten Umsatz
+    des letzten Geschäftsjahres passen (rev_basis). Falscher Vorjahreswert bei passender Prognose -> Wachstum gegen
+    den gemeldeten Umsatz neu berechnet; andere Abgrenzung -> Beträge auf die gemeldete Basis umgerechnet (Wachstum
+    bleibt); sonst verworfen. Unplausible Wachstumsraten (über +300 % / unter −80 %) werden ebenfalls verworfen."""
     R = m.get("est_rev") or {}
     last = first(m.get("revenues") or [])
     r0 = R.get("0y") or {}
     k = est_fx(m, r0)
-    if r0.get("ago") and last and k and not 0.75 <= r0["ago"] * k / last <= 1.33:
-        R.pop("0y", None)
-        R.pop("+1y", None)  # baut auf der fehlerhaften Basis auf
-        m["est_rev_dropped"] = True
+    if r0.get("ago") and last and k:
+        b = rev_basis((r0.get("avg") or 0) * k, r0["ago"] * k, last)
+        if not b:
+            R.pop("0y", None)
+            R.pop("+1y", None)  # baut auf der fehlerhaften Basis auf
+            m["est_rev_dropped"] = True
+        elif b[1] == "ago_bad":
+            r0["ago"], r0["growth"] = last / k, r0["avg"] * k / last - 1
+            m["est_rev_fixed"] = "ago_bad"
+        elif b[1] == "rebased":
+            for e in (r0, R.get("+1y") or {}):
+                for f_ in ("avg", "low", "high", "ago"):
+                    if e.get(f_):
+                        e[f_] *= b[0]
+            m["est_rev_fixed"] = "rebased"
     for per, e in list(R.items()):
         if e.get("growth") is not None and not -0.8 <= e["growth"] <= 3.0:
             e["growth"] = None
@@ -4209,6 +4238,21 @@ def trend_growth(revs, cap=0.25):
     return clamp(0.25 * med + 0.25 * recent + 0.5 * steps[-1], -0.10, cap)
 
 
+def fill_revenue_trend(periods, est):
+    """Prognosejahre ohne Umsatz (Umsatzkonsens unbrauchbar, nur Gewinnkonsens – z. B. Versicherer mit unpassendem
+    Vorjahreswert): Umsatz mit dem Trend der letzten Jahre fortschreiben (trend_growth), klar gekennzeichnet."""
+    g = trend_growth([p_["revenue"] for p_ in periods])
+    rev = periods[-1].get("revenue") if periods else None
+    if g is None:
+        return
+    for e in est:
+        if e.get("revenue") is None and rev:
+            e.update(revenue=rev * (1 + g), rev_trend=True, rev_low=None, rev_high=None)
+            if e.get("net_income") is not None:
+                e["margin"] = e["net_income"] / e["revenue"]
+        rev = e.get("revenue")
+
+
 def income_estimates_trend(periods):
     """Letzte Stufe ohne jede Analystenschätzung: Umsatz mit dem mittleren Wachstum der letzten Jahre fortgeschrieben,
     Reinertrag = Umsatz × mittlere Nettomarge – bis einschließlich des nächsten Geschäftsjahres."""
@@ -4268,10 +4312,16 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None):
                 "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
     rev_df, eps_df = yq(lambda: t.revenue_estimate), yq(lambda: t.earnings_estimate)
     r0, r1, e0, e1 = get(rev_df, "0y"), get(rev_df, "+1y"), get(eps_df, "0y"), get(eps_df, "+1y")
-    # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen (sonst andere Abgrenzung oder Yahoo-Fehler,
-    # z. B. bei Versicherern) – dann nur Gewinnprognosen
-    if not r0 or not r0["ago"] or not 0.8 <= r0["ago"] / last["revenue"] <= 1.25:
+    # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen: andere Abgrenzung (Versicherer) -> auf die
+    # gemeldete Basis umgerechnet, falscher Vorjahreswert -> Prognose direkt; sonst nur Gewinnprognosen (der Umsatz
+    # wird dann in income_data fortgeschrieben)
+    basis = rev_basis(r0["avg"], r0["ago"], last["revenue"]) if r0 else None
+    if not basis:
         r0 = r1 = None
+    elif basis[1] == "rebased":
+        for r_ in (r0, r1):
+            if r_:
+                r_.update(avg=r_["avg"] * basis[0], low=r_["low"] * basis[0], high=r_["high"] * basis[0])
     if not r0 and not e0:
         return []
     shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
@@ -4290,6 +4340,8 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None):
                 "est": kind, "n_rev": n_rev, "n_eps": n_eps}
         if rng:
             out_.update(rng)
+        if n_rev and basis and basis[1] == "rebased":
+            out_["rev_rebased"] = True
         return out_
     ni_of = lambda e: shares * e["avg"] if shares and e else None
     ni0 = ni_of(e0)
@@ -4744,6 +4796,7 @@ def income_data(symbol, freq):
             e0["adj_jump"] = True
         if not out["estimates"]:  # gar keine Analystenschätzung erreichbar -> klar gekennzeichnete Fortschreibung
             out["estimates"] = safe(lambda: income_estimates_trend(periods), []) or []
+        safe(lambda: fill_revenue_trend(periods, out["estimates"]))
         e0_ = out["estimates"][0] if out["estimates"] else None
         src_ = ("keine Prognose" if not e0_ else "Yahoo" if e0_.get("est") == "consensus" and not e0_.get("ni_consensus")
                 else e0_.get("ni_consensus") or "Fortschreibung")
