@@ -1720,6 +1720,17 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertAlmostEqual(est[0]["margin"], 22.0 / est[0]["revenue"])
         self.assertGreater(est[1]["revenue"], est[0]["revenue"])
 
+    def test_symbol_alias(self):
+        self.assertEqual(a.canon_symbol(" rog.sw "), "ROP.SW")             # Roche: altes Kürzel -> heutiges
+        self.assertEqual(a.canon_symbol("sap.de"), "SAP.DE")
+        import unittest.mock as um
+        import pandas as pd
+        df = pd.DataFrame({"Close": [100.0, 102.0]}, index=pd.to_datetime(["2026-11-04", "2026-11-05"]))
+        with um.patch.object(a.yf, "download", return_value=df) as dl, um.patch.object(a, "quote_now", return_value=None),                 um.patch.object(a, "patch_last_close", side_effect=lambda d, s_: d), um.patch.dict(a.WL_QUOTE_CACHE, clear=True):
+            q = a.watchlist_quotes(["ROG.SW"])
+        self.assertEqual(dl.call_args[0][0], ["ROP.SW"])
+        self.assertAlmostEqual(q["ROG.SW"]["change"], 0.02)                 # unter dem gespeicherten Kürzel
+
     def test_earnings_after_loss_year(self):
         hist = [{"end": "2023-12-31", "revenue": 90.0, "net_income": 15.0},
                 {"end": "2024-12-31", "revenue": 95.0, "net_income": 12.0},

@@ -733,8 +733,21 @@ UNSUPPORTED_TYPES = {"INDEX": "Index", "FUTURE": "Terminkontrakt (Future)", "CUR
                      "MUTUALFUND": "Investmentfonds (kein ETF)", "OPTION": "Optionsschein/Option"}
 
 
+# Börsenkürzel, die Yahoo nicht mehr führt -> heutiges Kürzel derselben Aktie (gespeicherte Watchlists, Alarme und
+# Links mit dem alten Kürzel funktionieren so weiter)
+SYMBOL_ALIASES = {
+    "ROG.SW": "ROP.SW",  # Roche-Genussschein: bei Yahoo jetzt ROP.SW, unter ROG.SW weder Kurs noch Zahlen
+}
+
+
+def canon_symbol(sym):
+    s_ = (sym or "").strip().upper()
+    return SYMBOL_ALIASES.get(s_, s_)
+
+
 def resolve(query):
     q = query.strip()
+    q = SYMBOL_ALIASES.get(q.upper(), q)
     is_isin = bool(re.fullmatch(r"[A-Za-z]{2}[A-Za-z0-9]{9}\d", q))  # ISIN -> über die Suche zur Börsennotierung
     if re.fullmatch(r"[A-Za-z0-9.\-^=]{1,15}", q) and not is_isin:
         sym = q.upper()
@@ -3752,7 +3765,7 @@ CHART_CACHE = {}
 
 
 def chart_data(symbol, rng):
-    symbol = symbol.strip().upper()
+    symbol = canon_symbol(symbol)
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or rng not in CHART_RANGES:
         raise ValueError("Ungültige Anfrage")
     period, interval, ttl = CHART_RANGES[rng]
@@ -4697,7 +4710,7 @@ def fcf_by_period(cf, periods):
 
 def income_data(symbol, freq):
     """Erfolgsrechnung (Umsatz, Reinertrag, Nettomarge) je Geschäftsjahr oder Quartal, in Berichtswährung."""
-    symbol = symbol.strip().upper()
+    symbol = canon_symbol(symbol)
     if not re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", symbol) or freq not in ("annual", "quarterly"):
         raise ValueError("Ungültige Anfrage")
     key = (symbol, freq, "v30")  # v22: Quartals-Free-Cashflow mit Saisonalität
@@ -10802,7 +10815,7 @@ MOVERS_CACHE = {}         # Index -> (Zeit, Gewinner/Verlierer des Tages)
 
 def quote_now(sym):
     """Aktueller bzw. letzter Schlusskurs eines Werts (Yahoo, ca. 15 Min. verzögert); "prev" nur zur Info."""
-    fi = yf.Ticker(sym).fast_info
+    fi = yf.Ticker(canon_symbol(sym)).fast_info
     return {"price": num(safe(lambda: fi.last_price)), "prev": num(safe(lambda: fi.previous_close))}
 
 
@@ -11192,7 +11205,7 @@ def fmt_price(v, cur):
 
 
 def live_quote(symbol):
-    fi = yf.Ticker(symbol).fast_info
+    fi = yf.Ticker(canon_symbol(symbol)).fast_info
     last, prev = num(safe(lambda: fi.last_price)), num(safe(lambda: fi.previous_close))
     return last, prev
 
@@ -11459,10 +11472,10 @@ WL_QUOTE_CACHE = {}  # Symbole -> (Zeit, {Symbol: Tagesveränderung})
 def watchlist_quotes(symbols):
     """Kurs und Veränderung zum Vortag für die Watchlist (ein gebündelter Abruf, 10 Minuten zwischengespeichert)."""
     import pandas as pd
-    syms = sorted(set(symbols))[:60]
+    syms = sorted({canon_symbol(s_) for s_ in symbols})[:60]
     if not syms:
         return {}
-    key = tuple(syms)
+    key = tuple(sorted(set(symbols))[:60])
     hit = WL_QUOTE_CACHE.get(key)
     if hit and time.time() - hit[0] < 600:
         return hit[1]
@@ -11482,6 +11495,9 @@ def watchlist_quotes(symbols):
                 if q and q.get("price") and s_ in out and abs(q["price"] / out[s_]["price"] - 1) < 0.05:
                     base = out[s_]["price"] / (1 + out[s_]["change"])  # Vortagesschluss aus den Tagesdaten
                     out[s_].update(price=q["price"], change=q["price"] / base - 1)
+    for s_ in symbols:  # alte Kürzel (SYMBOL_ALIASES) unter dem gespeicherten Namen zurückgeben
+        if s_ not in out and canon_symbol(s_) in out:
+            out[s_] = out[canon_symbol(s_)]
     WL_QUOTE_CACHE[key] = (time.time(), out)
     if len(WL_QUOTE_CACHE) > 200:
         WL_QUOTE_CACHE.pop(next(iter(WL_QUOTE_CACHE)))
