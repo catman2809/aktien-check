@@ -3404,6 +3404,24 @@ def finnhub(path, **params):
     return data
 
 
+FH_SLOW_CACHE = {}  # Adresse -> (Zeit, Antwort) für Finnhub-Daten, die sich selten ändern (Firmenprofil, Wettbewerber)
+FH_SLOW_TTL = 7 * 86400
+
+
+def finnhub_slow(path, **params):
+    """Wie finnhub(), aber eine Woche zwischengespeichert – für Firmenprofil (Name, Währung, Börsenwert für den
+    Größenvergleich) und Wettbewerberliste. Spart beim Konkurrenzvergleich rund die Hälfte der Anfragen. Fehlschläge
+    (None, z. B. Limit erreicht) werden nicht gespeichert."""
+    key = path + "?" + urllib.parse.urlencode(sorted(params.items()))
+    hit = FH_SLOW_CACHE.get(key)
+    if hit and time.time() - hit[0] < FH_SLOW_TTL:
+        return hit[1]
+    data = finnhub(path, **params)
+    if data is not None:
+        FH_SLOW_CACHE[key] = (time.time(), data)
+    return data
+
+
 def finnhub_currency_ok(sym, prof):
     """Finnhub-Kennzahlen mit Kursbezug (KGV) nur übernehmen, wenn die Berichtswährung der Firma (profile2
     'currency') der Börsenwährung der Notierung entspricht – bei ADRs wie Alibaba (Kurs USD, Bilanz CNY)
@@ -3448,7 +3466,7 @@ def finnhub_enrich(m, symbol, alternatives):
                 m["finnhub"].append(f"Kursziel ({sym})")
         # Kennzahlen (Quoten sind währungsneutral, daher auch von einer ADR übertragbar)
         met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
-        if m.get("pe") is None and met.get("peTTM") is not None and not finnhub_currency_ok(sym, finnhub("stock/profile2", symbol=sym)):
+        if m.get("pe") is None and met.get("peTTM") is not None and not finnhub_currency_ok(sym, finnhub_slow("stock/profile2", symbol=sym)):
             met = {k: v for k, v in met.items() if k != "peTTM"}  # Quoten ohne Kursbezug bleiben nutzbar
         filled = []
         for key, src, scale in (("pe", "peTTM", 1), ("beta", "beta", 1), ("roe", "roeTTM", 100),
@@ -3505,14 +3523,15 @@ def industry_key(name):
 
 
 def peer_metrics(sym, name_hint=None):
-    """KGV, operative Marge, Umsatzwachstum und Börsenwert eines Wettbewerbers (Finnhub, sonst Yahoo)."""
+    """KGV, operative Marge, Umsatzwachstum und Börsenwert eines Wettbewerbers (Finnhub, sonst Yahoo). Einen Tag
+    zwischengespeichert: Quoten der letzten zwölf Monate ändern sich nur mit neuen Quartalszahlen."""
     hit = PEER_CACHE.get(sym)
-    if hit and time.time() - hit[0] < 6 * 3600:
+    if hit and time.time() - hit[0] < 24 * 3600:
         return hit[1]
     out = None
     if finnhub_key():
         met = (finnhub("stock/metric", symbol=sym, metric="all") or {}).get("metric") or {}
-        prof = (finnhub("stock/profile2", symbol=sym) or {}) if met else {}
+        prof = (finnhub_slow("stock/profile2", symbol=sym) or {}) if met else {}
         if met and not finnhub_currency_ok(sym, prof):
             met = {}  # Auslandsfirma mit US-Notierung: Kennzahlen selbst aus Yahoo rechnen (Währungen getrennt umgerechnet)
         if met:
@@ -3560,7 +3579,7 @@ def competitors(symbol, info, alternatives):
     cands, names, source = [], {}, []
     if finnhub_key():
         for sym in [symbol] + [a["symbol"] for a in alternatives if "." not in a["symbol"]][:2]:
-            ps = finnhub("stock/peers", symbol=sym)
+            ps = finnhub_slow("stock/peers", symbol=sym)
             if isinstance(ps, list) and len(ps) > 1:
                 cands += [x for x in ps if isinstance(x, str)]
                 source.append("Finnhub")
@@ -7598,7 +7617,7 @@ def company_profile(symbol, info, company):
     isin_cc, exch = SUFFIX_MARKET.get(suf, (None, None))
     wd = safe(lambda: wikidata_company(base, company, isin_cc or "")) or {}
     figi = safe(lambda: openfigi(base, exch)) if exch else None
-    fh = (safe(lambda: finnhub("stock/profile2", symbol=symbol)) or {}) if not suf else {}
+    fh = (safe(lambda: finnhub_slow("stock/profile2", symbol=symbol)) or {}) if not suf else {}
     # CEO: Yahoo ist aktueller als Wikidata
     ceo = None
     for o in info.get("companyOfficers") or []:
@@ -11117,8 +11136,8 @@ def cache_rules():
     """(Name, Speicher, Lebensdauer in Sekunden, Höchstzahl Einträge) – Einträge sind (Zeitstempel, Daten)."""
     return [("Analysen", CACHE, 900, 40), ("Charts", CHART_CACHE, 12 * 3600, 120),
             ("Erfolgsrechnung", INCOME_CACHE, 12 * 3600, 60), ("Profile", PROFILE_CACHE, 7 * 86400, 150),
-            ("Wettbewerber", PEER_CACHE, 6 * 3600, 200), ("Termine", EVENT_CACHE, 6 * 3600, 100),
-            ("Finnhub", FINNHUB_CACHE, 3600, 400), ("CoinGecko", CG_CACHE, 86400, 60),
+            ("Wettbewerber", PEER_CACHE, 24 * 3600, 300), ("Termine", EVENT_CACHE, 6 * 3600, 100),
+            ("Finnhub", FINNHUB_CACHE, 3600, 400), ("Finnhub-Profile", FH_SLOW_CACHE, FH_SLOW_TTL, 600), ("CoinGecko", CG_CACHE, 86400, 60),
             ("Trefferquote", TRACK_CACHE, 3600, 10), ("Wechselkurse", FX_CACHE, 86400, 50),
             ("ETF-Bestände", ISSUER_CACHE, 12 * 3600, 25), ("SEC EDGAR", SEC_CACHE, 7 * 86400, 300),
             ("ESEF-Berichte", ESEF_CACHE, 7 * 86400, 200), ("Depot-Symbole", DEPOT_SYM_CACHE, 7 * 86400, 3000),
@@ -11129,6 +11148,7 @@ def cache_rules():
             ("Gewinner/Verlierer", MOVERS_CACHE, 600, 20),
             ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300), ("Fondskosten (onvista)", ONVISTA_TER, 7 * 86400, 500),
             ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
+            ("stockanalysis-Kursziele", STOCKANALYSIS_TARGET_CACHE, 12 * 3600, 300),
             ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 

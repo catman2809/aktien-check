@@ -706,7 +706,7 @@ class TestCachePruning(unittest.TestCase):
         try:
             a.CACHE.clear()
             a.CACHE.update({f"x{i}": (time.time() - i, {}) for i in range(60)})
-            a.PEER_CACHE["alt"] = (time.time() - 7 * 3600, None)
+            a.PEER_CACHE["alt"] = (time.time() - 25 * 3600, None)
             a.prune_caches()
             self.assertEqual(len(a.CACHE), 40)          # Höchstzahl
             self.assertIn("x0", a.CACHE)                # neueste bleiben
@@ -2176,6 +2176,20 @@ class TestFinnhubThrottle(unittest.TestCase):
             self.assertEqual(op.call_count, 7)                                   # nie gesperrt
         a.FINNHUB_DENIED.clear()
         a.FINNHUB_OK.clear()
+
+    def test_slow_cache_for_profiles(self):
+        import unittest.mock as mock
+        a.FH_SLOW_CACHE.clear()
+        resp = iter([None, {"currency": "USD"}, {"currency": "EUR"}])
+        with mock.patch.object(a, "finnhub", side_effect=lambda path, **kw: next(resp)) as fh:
+            self.assertIsNone(a.finnhub_slow("stock/profile2", symbol="AAPL"))         # Fehlschlag nicht gespeichert
+            self.assertEqual(a.finnhub_slow("stock/profile2", symbol="AAPL"), {"currency": "USD"})
+            self.assertEqual(a.finnhub_slow("stock/profile2", symbol="AAPL"), {"currency": "USD"})  # aus dem Speicher
+            self.assertEqual(fh.call_count, 2)
+            k_ = next(iter(a.FH_SLOW_CACHE))
+            a.FH_SLOW_CACHE[k_] = (a.FH_SLOW_CACHE[k_][0] - a.FH_SLOW_TTL - 1, a.FH_SLOW_CACHE[k_][1])
+            self.assertEqual(a.finnhub_slow("stock/profile2", symbol="AAPL"), {"currency": "EUR"})  # nach einer Woche neu
+        a.FH_SLOW_CACHE.clear()
 
     def test_quote_only_with_price_target(self):
         import unittest.mock as mock
