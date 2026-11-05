@@ -4098,7 +4098,7 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
         return []
     last = periods[-1]
     end = datetime.fromisoformat(last["end"])
-    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    shares = est_shares(last, eps_last)
     k = fx_rate(eps_cur, currency) if eps_cur and currency and currency != eps_cur else 1.0
     # Gemeldete Aktienzahl als Ersatz, wenn der Vorjahresgewinn als Basis nicht taugt: Verlust oder starke
     # Sonderbelastung (bereinigter Konsens > 2,5 × berichteter Gewinn, z. B. GM, AbbVie). Nur bei gleicher Aktienbasis
@@ -4126,8 +4126,10 @@ def income_estimates_nasdaq(periods, currency, eps_last, nasdaq, rev_hist, src="
         if not e or not e.get("avg") or e["avg"] <= 0:
             break
         ni = shares * e["avg"] * k
-        if prev_ni and not 0.4 <= ni / prev_ni <= 2.5:
+        if prev_ni and prev_ni > 0 and not 0.4 <= ni / prev_ni <= 2.5:
             break  # andere Aktienbasis (ADR-Verhältnis) oder Geschäftsjahr anders zugeordnet
+        if i == 1 and not alt and not (prev_ni and prev_ni > 0) and not ni_plausible(ni, periods):
+            break  # nach einem Verlustjahr gegen die Größenordnung der letzten Jahre prüfen
         rev = rev * (1 + g) if g is not None and rev else None
         out.append({"label": f"{d.year}e", "end": d.date().isoformat(), "revenue": rev, "net_income": ni,
                     "margin": ni / rev if rev else None, "op_income": None, "op_margin": None,
@@ -4289,7 +4291,37 @@ def income_estimates_trend(periods):
     return out
 
 
-def income_estimates(t, periods, currency, eps_last, nasdaq=None):
+def est_shares(last, eps_last, shares_out=None, periods=None):
+    """Aktienbasis, mit der der Gewinnkonsens je Aktie in einen Reinertrag umgerechnet wird: zuletzt gemeldeter
+    Reinertrag ÷ Gewinn je Aktie (gleiche Basis wie die Schätzungen, auch bei ADRs) – auch in einem Verlustjahr
+    (beide negativ). Ersatzweise die gemeldete Aktienzahl (Plausibilität prüft ni_plausible), auch wenn der
+    Reinertrag fast null war (BP 2025: 0,06 Mrd. $ – der auf Cent gerundete Gewinn je Aktie gibt dann keine
+    verlässliche Aktienzahl)."""
+    ni = last.get("net_income")
+    big = max([abs(p_["net_income"]) for p_ in (periods or [])[-5:] if p_.get("net_income")] + [0])
+    if shares_out and ni and big and abs(ni) < 0.2 * big:
+        return shares_out
+    if ni and eps_last and (ni > 0) == (eps_last > 0) and abs(eps_last) > 1e-9:
+        return ni / eps_last
+    return shares_out or None
+
+
+def ni_plausible(ni, periods):
+    """Passt ein aus dem Konsens berechneter Reinertrag zur Größenordnung des Unternehmens? Gegen das Vorjahr (Faktor
+    0,25–4) oder – nach einem Verlust- oder Sonderjahr (Bayer, Intel, GM, BP) – gegen den größten Gewinn/Verlust der
+    letzten fünf Jahre (Faktor 0,1–4); ein Gewinn höchstens 60 % des Umsatzes. Fängt eine falsche Aktienbasis ab."""
+    if ni is None:
+        return False
+    last = periods[-1]
+    if last["net_income"] > 0 and ni > 0 and 0.25 <= ni / last["net_income"] <= 4:
+        return True
+    big = max([abs(p_["net_income"]) for p_ in periods[-5:] if p_.get("net_income")] + [0])
+    if not big or not 0.1 <= abs(ni) / big <= 4:
+        return False
+    return ni <= 0 or ni <= 0.6 * last["revenue"]
+
+
+def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=None):
     """Prognosen für die Erfolgsrechnung: laufendes und folgendes Geschäftsjahr aus dem Analystenkonsens (Yahoo),
     das zweite Folgejahr als Fortschreibung des Trends (dafür gibt es keinen Konsens). Umsatz direkt aus der
     Umsatzprognose; Reinertrag = prognostizierter Gewinn je Aktie × Aktienzahl, wobei die Aktienzahl aus dem zuletzt
@@ -4324,7 +4356,7 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None):
                 r_.update(avg=r_["avg"] * basis[0], low=r_["low"] * basis[0], high=r_["high"] * basis[0])
     if not r0 and not e0:
         return []
-    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    shares = est_shares(last, eps_last, shares_out, periods)
     end = datetime.fromisoformat(last["end"])
 
     def at(i):
@@ -4345,7 +4377,7 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None):
         return out_
     ni_of = lambda e: shares * e["avg"] if shares and e else None
     ni0 = ni_of(e0)
-    if ni0 is not None and not 0.25 <= ni0 / last["net_income"] <= 4:
+    if ni0 is not None and not ni_plausible(ni0, periods):
         ni0 = None  # unplausibel -> vermutlich andere Aktienbasis
     rng = lambda r_, e_: {"rev_low": r_["low"], "rev_high": r_["high"],
                           "ni_low": shares * e_["low"] if shares and e_ else None,
@@ -4390,7 +4422,7 @@ def income_estimates_q(t, periods, currency, eps_last):
     if not periods:
         return []
     last = periods[-1]
-    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    shares = est_shares(last, eps_last)
     end = datetime.fromisoformat(last["end"])
     by_end = {datetime.fromisoformat(p_["end"]): p_ for p_ in periods}
 
@@ -4514,7 +4546,7 @@ def income_estimates_q_fallback(symbol, periods, eps_last, t=None, shares_out=No
     last = periods[-1]
     end = datetime.fromisoformat(last["end"])
     by_end = {datetime.fromisoformat(p_["end"]): p_ for p_ in periods}
-    shares = last["net_income"] / eps_last if eps_last and last["net_income"] > 0 and eps_last > 0 else None
+    shares = est_shares(last, eps_last)
     nq = safe(lambda: nasdaq_eps_quarterly(symbol)) if "." not in symbol else None
     sh_gap = shares_out or shares
     gap = (safe(lambda: adjusted_gap(symbol, t, sh_gap), 1.0) or 1.0) if t is not None and "." not in symbol and sh_gap else 1.0
@@ -4772,7 +4804,7 @@ def income_data(symbol, freq):
                 LOG.info("[Nasdaq] %s: Gewinnprognosen für %s", us_sym, ", ".join(map(str, sorted(nasdaq))) or "keine Jahre")
             except Exception as e:
                 LOG.warning("[Nasdaq] %s: nicht erreichbar (%s)", us_sym, type(e).__name__)
-        out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq), []) or []
+        out["estimates"] = safe(lambda: income_estimates(t, periods, out["currency"], eps_last, nasdaq, shares_last), []) or []
         rev_hist = [p_["revenue"] for p_ in periods]
         ov_est = []
         if not out["estimates"]:  # keine Yahoo-Schätzungen (z. B. auf dem Server gesperrt) -> onvista und Nasdaq

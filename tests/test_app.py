@@ -1720,6 +1720,24 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertAlmostEqual(est[0]["margin"], 22.0 / est[0]["revenue"])
         self.assertGreater(est[1]["revenue"], est[0]["revenue"])
 
+    def test_earnings_after_loss_year(self):
+        hist = [{"end": "2023-12-31", "revenue": 90.0, "net_income": 15.0},
+                {"end": "2024-12-31", "revenue": 95.0, "net_income": 12.0},
+                {"end": "2025-12-31", "revenue": 100.0, "net_income": -8.0}]
+        est = a.income_estimates(self._t(100.0), hist, "USD", -0.8)        # Verlustjahr: 10 Aktien (beide negativ)
+        self.assertAlmostEqual(est[0]["net_income"], 22.0)
+        self.assertAlmostEqual(est[1]["net_income"], 24.0)
+        est = a.income_estimates(self._t(100.0), hist, "USD", 0.0, shares_out=10.0)  # kein EPS -> gemeldete Aktien
+        self.assertAlmostEqual(est[0]["net_income"], 22.0)
+        est = a.income_estimates(self._t(100.0), hist, "USD", -0.008)      # 1000 Aktien -> 2.200 = unplausibel
+        self.assertIsNone(est[0]["net_income"])
+        near0 = hist[:2] + [{"end": "2025-12-31", "revenue": 100.0, "net_income": 0.06}]
+        self.assertEqual(a.est_shares(near0[-1], 0.0034, 10.0, near0), 10.0)  # fast null -> gemeldete Aktienzahl
+        self.assertAlmostEqual(a.est_shares(hist[1], 1.2, 10.0, hist[:2]), 10.0)
+        self.assertTrue(a.ni_plausible(-5.0, hist))
+        self.assertFalse(a.ni_plausible(70.0, hist))                       # Gewinn > 60 % des Umsatzes
+        self.assertFalse(a.ni_plausible(None, hist))
+
     def test_wrong_year_ago_revenue(self):
         periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
         est = a.income_estimates(self._t(37.0), periods, "USD", 2.0)       # Vorjahr falsch (Toyota), Prognose passt
