@@ -1253,7 +1253,7 @@ class TestCurrencyGuards(unittest.TestCase):
         from collections import defaultdict
         m = defaultdict(lambda: None, {"price": 100.0, "upside": None})
         calls = {"stock/recommendation": [{"buy": 5, "hold": 1, "period": "2026-10-01"}],
-                 "stock/price-target": {"targetMean": 900.0}, "stock/quote": {"c": 100.0}, "stock/metric": {"metric": {}}}
+                 "stock/price-target": {"targetMean": 900.0}, "quote": {"c": 100.0}, "stock/metric": {"metric": {}}}
         with um.patch.object(a, "finnhub_key", return_value="x"),                 um.patch.object(a, "finnhub", side_effect=lambda path, **kw: calls.get(path)):
             a.finnhub_enrich(m, "TSM", [])
         self.assertIsNone(m["upside"])  # Kursziel 9-fach = andere Währung
@@ -2148,6 +2148,45 @@ class TestFinnhubThrottle(unittest.TestCase):
             st = a.finnhub_status()
         self.assertEqual(st["today"], a.FINNHUB_SAFE + 1)
         self.assertEqual(st["waited"], 1)
+
+    def test_denied_endpoint_skipped_for_a_day(self):
+        import unittest.mock as mock
+        import urllib.error
+        a.FINNHUB_DENIED.clear()
+        a.FINNHUB_OK.clear()
+        a.FINNHUB_CACHE.clear()
+        err = urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+        with mock.patch.object(a, "finnhub_key", return_value="x"),                 mock.patch.object(a.urllib.request, "urlopen", side_effect=err) as op:
+            a.finnhub("stock/price-target", symbol="AAPL")
+            a.finnhub("stock/price-target", symbol="MSFT")                      # zweiter Wert -> jetzt gesperrt
+            self.assertEqual(op.call_count, 2)
+            self.assertIsNone(a.finnhub("stock/price-target", symbol="NVDA"))   # ausgelassen, keine Anfrage
+            self.assertEqual(op.call_count, 2)
+            a.finnhub("stock/price-target", symbol="SAP.DE")                    # anderer Markt -> eigener Versuch
+            self.assertEqual(op.call_count, 3)
+            self.assertEqual(a.finnhub_status()["denied"], ["stock/price-target"])
+            for k_ in a.FINNHUB_DENIED[("stock/price-target", "US")]:
+                a.FINNHUB_DENIED[("stock/price-target", "US")][k_] -= a.FINNHUB_DENY_S + 1
+            a.finnhub("stock/price-target", symbol="AAPL")                      # nach einem Tag wieder versucht
+            self.assertEqual(op.call_count, 4)
+            a.FINNHUB_OK[("stock/metric", "US")] = a.time.time()               # Endpunkt läuft sonst -> nur der Wert
+            a.finnhub("stock/metric", symbol="RHHBY")
+            a.finnhub("stock/metric", symbol="TCEHY")
+            a.finnhub("stock/metric", symbol="SSNLF")
+            self.assertEqual(op.call_count, 7)                                   # nie gesperrt
+        a.FINNHUB_DENIED.clear()
+        a.FINNHUB_OK.clear()
+
+    def test_quote_only_with_price_target(self):
+        import unittest.mock as mock
+        from collections import defaultdict
+        seen = []
+        resp = {"stock/recommendation": [{"buy": 5, "hold": 1, "period": "2026-10-01"}], "stock/metric": {"metric": {}}}
+        m = defaultdict(lambda: None, {"price": 100.0, "upside": None})
+        with mock.patch.object(a, "finnhub_key", return_value="x"),                 mock.patch.object(a, "finnhub", side_effect=lambda path, **kw: seen.append(path) or resp.get(path)):
+            a.finnhub_enrich(m, "AAPL", [])
+        self.assertIn("stock/price-target", seen)
+        self.assertNotIn("quote", seen)                                         # ohne Kursziel kein Kursabruf
 
     def test_skips_when_wait_too_long(self):
         import unittest.mock as mock

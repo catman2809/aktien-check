@@ -3289,6 +3289,19 @@ FINNHUB_MAX_WAIT = 20       # länger nicht warten – dann diese Anfrage auslas
 FINNHUB_STATS = {"calls": [], "day": "", "today": 0, "waited": 0, "wait_s": 0.0, "skipped": 0, "rejected": 0,
                  "minutes": {}, "last_reject": None}
 FINNHUB_LOCK = threading.Lock()
+# (Endpunkt, Markt) -> {Symbol: Zeitpunkt der Ablehnung}. Finnhub meldet 401/403 für Endpunkte, die der Tarif nicht
+# enthält (Kursziele sind kostenpflichtig), teils für Börsen außerhalb der USA, aber auch für einzelne Werte (OTC).
+# Lehnt Finnhub einen Endpunkt für zwei verschiedene Werte ab und hat er am selben Tag nie geantwortet, wird er einen Tag
+# lang ausgelassen, statt bei jeder Analyse das Minutenlimit zu belasten; mit bezahltem Tarif läuft er danach wieder.
+FINNHUB_DENIED, FINNHUB_OK = {}, {}  # FINNHUB_OK: (Endpunkt, Markt) -> letzte erfolgreiche Antwort
+FINNHUB_DENY_S = 24 * 3600
+
+
+def finnhub_blocked(key, now=None):
+    now = now or time.time()
+    if now - FINNHUB_OK.get(key, 0) < FINNHUB_DENY_S:
+        return False
+    return sum(1 for t_ in (FINNHUB_DENIED.get(key) or {}).values() if now - t_ < FINNHUB_DENY_S) >= 2
 
 
 def _fh_day():
@@ -3338,11 +3351,13 @@ def finnhub_status():
         last = sum(1 for c in FINNHUB_STATS["calls"] if now - c <= 60)
         mins = dict(FINNHUB_STATS["minutes"])
         st = {k: FINNHUB_STATS[k] for k in ("today", "waited", "skipped", "rejected", "last_reject")}
+        denied = sorted(f"{p_}" + ("" if mk_ == "US" else f" (.{mk_})") for (p_, mk_) in FINNHUB_DENIED
+                        if finnhub_blocked((p_, mk_), now))
     keys = [(datetime.now() - timedelta(minutes=i)).strftime("%H:%M") for i in range(59, -1, -1)]
     series = [mins.get(k, 0) for k in keys]
     return {"active": bool(finnhub_key()), "limit": FINNHUB_LIMIT, "safe": FINNHUB_SAFE, "last_min": last,
             "series": series, "first": keys[0], "peak_hour": max(series) if series else 0,
-            "wait_s": round(FINNHUB_STATS["wait_s"], 1), **st}
+            "wait_s": round(FINNHUB_STATS["wait_s"], 1), "denied": denied, **st}
 
 
 def finnhub(path, **params):
@@ -3355,6 +3370,10 @@ def finnhub(path, **params):
     hit = FINNHUB_CACHE.get(url)
     if hit and time.time() - hit[0] < 3600:
         return hit[1]
+    sym = str(params.get("symbol") or "")
+    deny_key = (path, sym.partition(".")[2] or "US")
+    if finnhub_blocked(deny_key):
+        return None  # vom Tarif nicht abgedeckt – erst morgen wieder versuchen
     if not finnhub_slot():
         return None
     req = urllib.request.Request(url, headers={**UA, "X-Finnhub-Token": key})  # Schlüssel im Header, nicht in der URL
@@ -3368,11 +3387,19 @@ def finnhub(path, **params):
                 FINNHUB_STATS["rejected"] += 1
                 FINNHUB_STATS["last_reject"] = int(time.time())
             LOG.warning("[Finnhub] Minutenlimit erreicht (429) bei %s", path)
+        elif e.code in (401, 403):
+            with FINNHUB_LOCK:
+                FINNHUB_DENIED.setdefault(deny_key, {})[sym] = time.time()
+                if len(FINNHUB_DENIED) > 50:
+                    FINNHUB_DENIED.pop(next(iter(FINNHUB_DENIED)))
+            if finnhub_blocked(deny_key):
+                LOG.info("[Finnhub] %s (%s) nicht im Tarif enthalten (HTTP %d) – 24 Stunden ausgelassen", path, deny_key[1], e.code)
         return None
     except Exception:
         return None
     if isinstance(data, dict) and data.get("error"):
         return None
+    FINNHUB_OK[deny_key] = time.time()
     FINNHUB_CACHE[url] = (time.time(), data)
     return data
 
@@ -3413,9 +3440,8 @@ def finnhub_enrich(m, symbol, alternatives):
         # Kursziel: Potenzial in der Währung der gefundenen Notierung berechnen, dann auf unseren Kurs übertragen
         if m.get("upside") is None:
             pt = finnhub("stock/price-target", symbol=sym)
-            q = finnhub("quote", symbol=sym)
             tgt = num((pt or {}).get("targetMean"))
-            px = num((q or {}).get("c"))
+            px = num((finnhub("quote", symbol=sym) or {}).get("c")) if tgt else None  # Kurs nur, wenn es ein Kursziel gibt
             if tgt and px and m.get("price") and 0.33 < tgt / px < 3:  # sonst Kursziel vermutlich in anderer Währung
                 m["upside"] = tgt / px - 1
                 m["target"] = m["price"] * (1 + m["upside"])

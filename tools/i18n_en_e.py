@@ -491,3 +491,4 @@ DEPOT_WILD += [
     ("Potenzial {0} · Median aus {1} Analysten-Kurszielen in Nachrichten, 90 Tage",
      "Upside {0} · median of {1} analyst price targets in the news, 90 days"),
 ]
+DEPOT_EXACT.update({"Nicht im Tarif (24 Std. ausgelassen)": "Not in plan (skipped for 24 h)"})

@@ -3736,7 +3736,8 @@ function admFinnhub(F) {
     <div class="stamp fh-axis"><span>${esc(F.first)}</span><span>jetzt</span></div>
     ${[["Anfragen heute", F.today], ["Höchstwert je Minute (letzte Stunde)", F.peak_hour],
        ["Gebremst (kurz gewartet)", F.waited ? `${F.waited}× · ${nf(F.wait_s, 0)} s` : "0"],
-       ["Ausgelassen (zu lange Wartezeit)", F.skipped], ["Von Finnhub abgelehnt (429)", F.rejected + (F.last_reject ? ` · zuletzt ${fmtAgo(F.last_reject)}` : "")]]
+       ["Ausgelassen (zu lange Wartezeit)", F.skipped], ["Von Finnhub abgelehnt (429)", F.rejected + (F.last_reject ? ` · zuletzt ${fmtAgo(F.last_reject)}` : "")],
+       ...((F.denied || []).length ? [["Nicht im Tarif (24 Std. ausgelassen)", F.denied.join(", ")]] : [])]
       .map(([k, v]) => `<div class="adm-row"><span>${k}</span><b class="num">${esc(String(v))}</b></div>`).join("")}
     <p class="stamp" style="margin:8px 0 0">Gezählt werden nur echte Anfragen (Zwischenspeicher-Treffer nicht). Ab ${F.safe} Anfragen pro Minute bremst Stocky und wartet, bis wieder Platz ist – so geht keine Antwort durch das Limit verloren. Zähler „heute“ setzt um Mitternacht zurück und beginnt bei einem Neustart des Servers neu.</p></div>`;
 }
