@@ -488,7 +488,7 @@ SRC_HOSTS = [("finnhub.io", "Finnhub"), ("api.nasdaq.com", "Nasdaq"), ("onvista.
              ("gleif.org", "GLEIF"), ("wikidata.org", "Wikidata"), ("ntfy.sh", "ntfy (Push)"), ("api.github.com", "GitHub (Backup)"),
              ("cboe.com", "Cboe"), ("alternative.me", "Fear & Greed"), ("ecb.europa.eu", "EZB"), ("frankfurter", "Wechselkurse"),
              ("finance.yahoo.com", "Yahoo News"), ("filings.xbrl.org", "ESEF-Geschäftsberichte"), ("stern.nyu.edu", "Damodaran (NYU)"),
-             ("worldbank.org", "Weltbank"), ("fred.stlouisfed.org", "FRED")]
+             ("worldbank.org", "Weltbank"), ("fred.stlouisfed.org", "FRED"), ("stockanalysis.com", "stockanalysis.com")]
 EST_SRC = {}          # Quelle der Gewinnprognose -> Anzahl (seit Start)
 
 
@@ -3946,6 +3946,63 @@ def apply_onvista_target(m, symbol):
         m["target_items"] = [{**{k_: v_ for k_, v_ in it.items() if k_ != "age"}, "value": it["value"] * k} for it in tg["items"]]
 
 
+STOCKANALYSIS_TARGET_CACHE = {}  # Symbol -> (Zeit, Kursziel-Konsens oder None)
+# Yahoo-Börsenkürzel -> Börse in den Adressen von stockanalysis.com (deutsche Plätze alle über Xetra)
+STOCKANALYSIS_EX = {"T": "tyo", "HK": "hkg", "KS": "krx", "TW": "tpe", "NS": "nse", "SW": "swx", "L": "lon", "PA": "epa",
+                    "MI": "bit", "AS": "ams", "MC": "bme", "BR": "ebr", "VI": "vie", "IR": "ise", "CO": "cph", "ST": "sto",
+                    "OL": "osl", "HE": "hel", "TO": "tsx", "AX": "asx", **{k_: "etr" for k_ in ("DE", "F", "BE", "MU", "SG", "HM", "DU", "HA")}}
+
+
+def stockanalysis_target(symbol):
+    """Kursziel-Konsens von stockanalysis.com (Daten von S&P Global – dieselbe Quelle wie bei Yahoo, gleiche Werte):
+    Mittel, Median, Spanne, Zahl der Analysten und Währung. Deckt auch Japan, Hongkong, Korea, Taiwan und Indien ab, wo
+    onvista und Nasdaq nichts haben. 12 Stunden zwischengespeichert."""
+    hit = STOCKANALYSIS_TARGET_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 12 * 3600:
+        return hit[1]
+    base, _, suf = symbol.partition(".")
+    if suf and suf not in STOCKANALYSIS_EX:
+        return None
+    path = f"quote/{STOCKANALYSIS_EX[suf]}/{base.replace('-', '.')}" if suf else f"stocks/{base.replace('-', '.').lower()}"
+    out = None
+    try:
+        page = _fetch(f"https://stockanalysis.com/{path}/forecast/", headers={**ONVISTA_UA, "Accept": "text/html"},
+                      timeout=20).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:  # 404: Wert dort nicht geführt
+            raise
+        page = ""
+    m_ = re.search(r"priceTargets:\{([^{}]*)\}", page)
+    if m_:
+        f_ = dict(re.findall(r'(\w+):("?[^,"]*"?)', m_.group(1)))
+        val = lambda k_: num(f_.get(k_, "").strip('"')) if f_.get(k_) not in (None, "null", "void 0") else None
+        cur = (f_.get("currency") or "").strip('"')
+        if val("avg"):
+            out = {"mean": val("avg"), "median": val("median"), "low": val("low"), "high": val("high"),
+                   "n": int(val("numPriceTargets") or 0), "cur": "GBp" if cur == "GBX" else cur}
+    STOCKANALYSIS_TARGET_CACHE[symbol] = (time.time(), out)
+    return out
+
+
+def apply_stockanalysis_target(m, symbol):
+    """Kursziel aus dem S&P-Global-Konsens von stockanalysis.com übernehmen, wenn noch keines vorliegt."""
+    if m.get("upside") is not None or not m.get("price"):
+        return
+    tg = stockanalysis_target(symbol)
+    if not tg or tg["n"] < 2:
+        return
+    cur = m.get("currency") or tg["cur"]
+    k = 1.0 if not tg["cur"] or tg["cur"] == cur else fx_rate(tg["cur"], cur)
+    if not k or not 0.33 < tg["mean"] * k / m["price"] < 3:
+        return  # Währung oder Aktienbasis passt offenbar nicht
+    m["target"] = tg["mean"] * k
+    m["target_low"] = tg["low"] * k if tg.get("low") else None
+    m["target_high"] = tg["high"] * k if tg.get("high") else None
+    m["target_n"] = tg["n"]
+    m["target_src"] = f"Konsens von {tg['n']} Analysten (S&P Global über stockanalysis.com)"
+    m["upside"] = m["target"] / m["price"] - 1
+
+
 def apply_nasdaq_target(m, symbol):
     """Kursziel aus dem Nasdaq-Konsens übernehmen, wenn Yahoo keines liefert. Bei ausländischen Werten über die ADR:
     Potenzial in Dollar berechnen und auf den eigenen Kurs übertragen (wie bei Finnhub)."""
@@ -4062,7 +4119,8 @@ def _onvista_isin(symbol, name=None):
                 continue
             # Name gleich, oder onvista führt die Kurzform (Toyota für Toyota Motor); auch Kürzel in Klammern (GSK)
             names = [toks(nm)] + [toks(m_) for m_ in re.findall(r"\(([^)]+)\)", nm)]
-            same = _legal_tokens(nm) == full or any(t_ and (t_ == core or t_ == core[:len(t_)]) for t_ in names)
+            same = _legal_tokens(nm) == full or any(t_ and (t_ == core or t_ == core[:len(t_)] or t_ == core[-len(t_):])
+                                                    for t_ in names)
             if not same:
                 continue
             if not land or isin.startswith(land):
@@ -7887,8 +7945,10 @@ def analyze(query):
     if comp["summary"]["pe"]["n"] >= 3:
         m["peer_pe_med"], m["peer_n"] = comp["summary"]["pe"]["median"], comp["summary"]["pe"]["n"]
     m["target_n"], m["target_src"], m["target_items"] = 0, "", tgt["items"]
-    # Konsens-Kursziele: US-Werte zuerst über Nasdaq, andere zuerst über onvista
-    order = (apply_nasdaq_target, apply_onvista_target) if "." not in symbol else (apply_onvista_target, apply_nasdaq_target)
+    # Konsens-Kursziele: US-Werte zuerst über Nasdaq, andere zuerst über onvista (mit Kurszielen einzelner Banken);
+    # stockanalysis.com (S&P Global) schließt die Lücken, v. a. in Asien – vor der Umrechnung über eine US-Notierung
+    order = ((apply_nasdaq_target, apply_stockanalysis_target, apply_onvista_target) if "." not in symbol
+             else (apply_onvista_target, apply_stockanalysis_target, apply_nasdaq_target))
     for fn in order:
         safe(lambda: fn(m, symbol))
     if m["upside"] is None and tgt["n"] >= 2:

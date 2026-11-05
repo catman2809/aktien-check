@@ -1720,6 +1720,29 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertAlmostEqual(est[0]["margin"], 22.0 / est[0]["revenue"])
         self.assertGreater(est[1]["revenue"], est[0]["revenue"])
 
+    def test_stockanalysis_target(self):
+        import unittest.mock as um
+        from collections import defaultdict
+        page = (b'..meta:{},priceTargets:{source:"spg",currency:"GBX",avg:5180.5,median:5150,low:4000,high:6000,'
+                b'numPriceTargets:9},currentRatings:{count:9}..')
+        with um.patch.object(a, "_fetch", return_value=page) as f, um.patch.dict(a.STOCKANALYSIS_TARGET_CACHE, clear=True):
+            tg = a.stockanalysis_target("ULVR.L")
+            self.assertEqual(f.call_args[0][0], "https://stockanalysis.com/quote/lon/ULVR/forecast/")
+            self.assertEqual((tg["mean"], tg["low"], tg["high"], tg["n"], tg["cur"]), (5180.5, 4000, 6000, 9, "GBp"))
+            m = defaultdict(lambda: None, {"price": 5000.0, "currency": "GBp"})
+            a.apply_stockanalysis_target(m, "ULVR.L")
+            self.assertAlmostEqual(m["upside"], 0.0361)
+            self.assertIn("S&P Global", m["target_src"])
+            a.stockanalysis_target("BRK-B")
+            self.assertEqual(f.call_args[0][0], "https://stockanalysis.com/stocks/brk.b/forecast/")
+            self.assertIsNone(a.stockanalysis_target("ABC.XX"))              # Börse dort nicht geführt
+        empty = b'priceTargets:{low:null,high:null,avg:null,numPriceTargets:0}'
+        with um.patch.object(a, "_fetch", return_value=empty), um.patch.dict(a.STOCKANALYSIS_TARGET_CACHE, clear=True):
+            self.assertIsNone(a.stockanalysis_target("7203.T"))
+            m = defaultdict(lambda: None, {"price": 3500.0, "currency": "JPY"})
+            a.apply_stockanalysis_target(m, "7203.T")
+            self.assertIsNone(m["upside"])
+
     def test_symbol_alias(self):
         self.assertEqual(a.canon_symbol(" rog.sw "), "ROP.SW")             # Roche: altes Kürzel -> heutiges
         self.assertEqual(a.canon_symbol("sap.de"), "SAP.DE")

@@ -482,3 +482,12 @@ DEPOT_WILD += [
     ("Prognose · Konsens von {0} Analysten · Umsatzwachstum auf den gemeldeten Umsatz übertragen",
      "Forecast · consensus of {0} analysts · revenue growth applied to reported revenue"),
 ]
+DEPOT_WILD += [
+    ("Potenzial {0} · Konsens von {1} Analysten (S&P Global über stockanalysis.com)",
+     "Upside {0} · consensus of {1} analysts (S&P Global via stockanalysis.com)"),
+    ("Potenzial {0} · Konsens von {1} Analysten (Nasdaq), über die US-Notierung {*}",
+     "Upside {0} · consensus of {1} analysts (Nasdaq), via the US listing {*}"),
+    ("Potenzial {0} · Konsens von {1} Analysten ({*})", "Upside {0} · consensus of {1} analysts ({*})"),
+    ("Potenzial {0} · Median aus {1} Analysten-Kurszielen in Nachrichten, 90 Tage",
+     "Upside {0} · median of {1} analyst price targets in the news, 90 days"),
+]
