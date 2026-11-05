@@ -1772,6 +1772,32 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertFalse(a.ni_plausible(70.0, hist))                       # Gewinn > 60 % des Umsatzes
         self.assertFalse(a.ni_plausible(None, hist))
 
+    def test_yahoo_not_yet_rolled_over(self):
+        import pandas as pd
+
+        class T:
+            pass
+        t = T()   # Apple Nov. 2026: 0y = gerade gemeldetes GJ 2026, +1y schon GJ 2028 (Vorjahr = Prognose 2027)
+        t.revenue_estimate = pd.DataFrame({"avg": [477.7, 570.1], "low": [476.0, 492.2], "high": [480.0, 600.0],
+                                           "numberOfAnalysts": [36, 26], "yearAgoRevenue": [416.2, 526.9]}, index=["0y", "+1y"])
+        t.earnings_estimate = pd.DataFrame({"avg": [9.45, 10.57], "low": [8.9, 8.6], "high": [9.9, 11.6], "numberOfAnalysts": [38, 28],
+                                            "yearAgoEps": [7.46, 8.84]}, index=["0y", "+1y"])
+        periods = [{"end": "2025-09-27", "revenue": 416.2, "net_income": 112.0},
+                   {"end": "2026-09-26", "revenue": 478.8, "net_income": 132.2}]
+        est = a.income_estimates(t, periods, "USD", 8.98, {2027: {"avg": 10.6, "n": 30}, 2028: {"avg": 11.9, "n": 25}})
+        self.assertEqual(est[0]["label"], "2027e")
+        self.assertAlmostEqual(est[0]["revenue"], 526.9)                    # nicht 477,7 (= schon gemeldetes Jahr)
+        self.assertAlmostEqual(est[0]["net_income"], 132.2 / 8.98 * 10.57, places=3)
+        self.assertAlmostEqual(est[1]["revenue"], 570.1)
+        self.assertEqual(est[1]["ni_consensus"], "Nasdaq")                 # zweites Gewinnjahr aus dem Nasdaq-Wachstum
+        self.assertTrue(a.yahoo_year_stale(477.7, 416.2, 478.8, 416.2))
+        self.assertFalse(a.yahoo_year_stale(526.9, 478.8, 478.8, 416.2))   # normal: Vorjahr = letztes gemeldetes Jahr
+
+    def test_company_name_legal_forms(self):
+        self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
+        self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),
+                         "LVMH Moët Hennessy - Louis Vuitton")
+
     def test_wrong_year_ago_revenue(self):
         periods = [{"end": "2025-12-31", "revenue": 100.0, "net_income": 20.0}]
         est = a.income_estimates(self._t(37.0), periods, "USD", 2.0)       # Vorjahr falsch (Toyota), Prognose passt

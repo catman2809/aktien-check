@@ -5190,7 +5190,7 @@ function aboutSection(d) {
     ["Gegründet", p.founded],
     [p.ipo_label === "Erster Handelstag" ? "Erster Handelstag" : "IPO-Datum", p.ipo ? date(p.ipo) : "", false,
      p.ipo_label === "Erster Handelstag" ? "an diesem Börsenplatz, laut Yahoo" : ""],
-    ["Mitarbeiter", p.employees ? nf(p.employees, 0) : ""],
+    ["Mitarbeiter", p.employees ? nf(p.employees, 0) : "", false, p.employees_date ? `Stand ${p.employees_date.slice(0, 4)}, laut Wikidata` : ""],
     ["ISIN", p.isin, false, p.isin_home ? "der Aktie an der Heimatbörse" : "", true],
     ["CUSIP", p.cusip, false, "", true],
     ["FIGI", p.figi, false, "Composite-FIGI dieses Börsenplatzes", true],

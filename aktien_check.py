@@ -755,6 +755,8 @@ def resolve(query):
         info = yq(lambda: t.info, {}) or {}
         found = search_symbols(info.get("longName") or q)
         hint = next((a for a in found if a["symbol"] == sym), None)
+        if not hint and info.get("longName"):  # Suche nach dem amtlichen Namen trifft die Notierung nicht (Inditex)
+            hint = next((a for a in search_symbols(sym) if a["symbol"] == sym), None)
         if current_price(info) or hint:
             info = fill_info(t, info, hint)
         if current_price(info) and info.get("quoteType", "EQUITY") in ("EQUITY", "ETF"):
@@ -923,13 +925,19 @@ def mentions_sibling(title, siblings):
 def clean_company_name(name):
     n = re.sub(r"[,.]", " ", name or "")
     n = re.sub(r"\b(Inc|Incorporated|Corp|Corporation|Company|Co|AG|Aktiengesellschaft|SE|KGaA|plc|PLC|Ltd|Limited|N V|NV|SA|S A|"
-               r"Holding|Holdings|Group|Class [A-C]|& Co|GmbH|ASA|AB|Oyj|SpA)\b", " ", n)
+               r"Holding|Holdings|Group|Class [A-C]|& Co|GmbH|ASA|AB|Oyj|SpA|S p A|Société Européenne|Societe Europeenne)\b", " ", n)
     return re.sub(r"\s+", " ", n).strip() or name
 
 
-def collect_news(symbol, company, website, siblings=(), terms=("stock", "Aktie")):
+def collect_news(symbol, company, website, siblings=(), terms=("stock", "Aktie"), alias_fn=None):
+    """Schlagzeilen der letzten 30 Tage. alias_fn liefert optional den gebräuchlichen Namen (Wikidata: Inditex statt
+    „Industria de Diseño Textil“, LVMH, Generali) – damit wird zusätzlich gesucht, wenn er sich vom Firmennamen
+    unterscheidet."""
     company_domain = domain_of(website) if website else ""
     base_sym = symbol.split(".")[0]
+    alias = clean_company_name(safe(alias_fn) or "") if alias_fn else ""
+    if not alias or alias.lower() == company.lower() or len(alias) < 3:
+        alias = ""
     jobs = {
         "en": lambda: google_news(f'"{company}" {terms[0]}', "en"),
         "de": lambda: google_news(f'"{company}" {terms[1]}', "de"),
@@ -938,8 +946,11 @@ def collect_news(symbol, company, website, siblings=(), terms=("stock", "Aktie")
                                      + (f" OR site:{company_domain}" if company_domain else "") + ")", "en"),
         "yahoo": lambda: yahoo_rss(base_sym if "." not in symbol else symbol),
     }
+    if alias:
+        jobs["en2"] = lambda: google_news(f'"{alias}" {terms[0]}', "en")
+        jobs["de2"] = lambda: google_news(f'"{alias}" {terms[1]}', "de")
     raw, errors = [], []
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futs = {k: ex.submit(fn) for k, fn in jobs.items()}
         for k, f in futs.items():
             try:
@@ -948,6 +959,8 @@ def collect_news(symbol, company, website, siblings=(), terms=("stock", "Aktie")
                 errors.append(f"{k}: {type(e).__name__}")
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     name_tokens = [w for w in re.findall(r"[a-zäöüß0-9]{3,}", company.lower())][:2] or [company.lower()]
+    if alias:
+        name_tokens += [w for w in re.findall(r"[a-zäöüß0-9]{3,}", alias.lower())][:1]
     seen, items = set(), []
     for it in raw:
         key = re.sub(r"\W+", "", it["title"].lower())[:80]
@@ -1120,6 +1133,13 @@ def est_fx(m, e):
     return 1.0 if (m.get("fin_currency") or m["currency"]) == m["currency"] else None  # unbekannt -> nicht nutzbar
 
 
+def yahoo_year_stale(avg0, ago0, last, prev):
+    """Hat Yahoo nach der Jahresmeldung noch nicht auf das neue Geschäftsjahr umgestellt? Dann ist „laufendes
+    Geschäftsjahr“ (0y) das gerade gemeldete Jahr: Sein Vorjahreswert entspricht dem vorletzten gemeldeten Jahr und die
+    Prognose fast dem gemeldeten Umsatz (Apple Anfang Nov. 2026: 0y = GJ 2026 mit 477,7 Mrd. $, gemeldet 478,8)."""
+    return bool(avg0 and ago0 and last and prev and abs(ago0 / prev - 1) < 0.02 and abs(avg0 / last - 1) < 0.08)
+
+
 def rev_basis(avg, ago, last):
     """Passt eine Umsatzprognose (laufendes Geschäftsjahr) zum gemeldeten Umsatz des letzten Geschäftsjahres?
     (1, None): ja. (Faktor, "rebased"): der Konsens grenzt den Umsatz anders ab (Versicherer: Geschäftsvolumen statt
@@ -1143,9 +1163,27 @@ def check_revenue_estimates(m):
     den gemeldeten Umsatz neu berechnet; andere Abgrenzung -> Beträge auf die gemeldete Basis umgerechnet (Wachstum
     bleibt); sonst verworfen. Unplausible Wachstumsraten (über +300 % / unter −80 %) werden ebenfalls verworfen."""
     R = m.get("est_rev") or {}
-    last = first(m.get("revenues") or [])
+    revs = [v for v in (m.get("revenues") or []) if v]
+    last = revs[0] if revs else None
     r0 = R.get("0y") or {}
     k = est_fx(m, r0)
+    if k and len(revs) >= 2 and yahoo_year_stale((r0.get("avg") or 0) * k, (r0.get("ago") or 0) * k, last, revs[1]):
+        E = m.get("est_eps") or {}
+        r1 = R.get("+1y") or {}
+        if r1.get("ago") and r1.get("avg") and abs(r1["ago"] / r0["avg"] - 1) > 0.03 and 0.7 <= r1["ago"] * k / last <= 1.5:
+            # +1y ist schon das übernächste Jahr (siehe income_estimates): sein Vorjahr = laufendes Geschäftsjahr
+            R["0y"] = {**r1, "avg": r1["ago"], "low": None, "high": None, "ago": last / k, "growth": r1["ago"] * k / last - 1}
+        else:
+            R["0y"] = R.pop("+1y", None) or {}
+            if not R["0y"]:
+                R.pop("0y")
+        if E.get("+1y"):  # gerade gemeldetes Jahr verwerfen, „nächstes“ wird „laufendes“ Geschäftsjahr
+            E["0y"] = E.pop("+1y")
+        else:
+            E.pop("0y", None)
+        m["est_rolled"] = True
+        r0 = R.get("0y") or {}
+        k = est_fx(m, r0)
     if r0.get("ago") and last and k:
         b = rev_basis((r0.get("avg") or 0) * k, r0["ago"] * k, last)
         if not b:
@@ -1204,15 +1242,22 @@ def est_eps_fallback(m, symbol):
         return
     m["est_eps"] = out
     m["est_eps_src"] = src
-    # Forward-KGV (Yahoo: Kurs / Gewinn der nächsten 12 Monate) aus den Schätzungen nachbilden, falls es fehlt
-    if not m.get("fpe") and m.get("price"):
-        k = est_fx(m, out["0y"])
-        p_ = fy_progress(m)
-        e12 = ((1 - p_) * out["0y"]["avg"] + p_ * out["+1y"]["avg"]) * (k or 0)
-        if e12 > 0:
-            m["fpe"] = m["price"] / e12
     LOG.info("[Prognose] %s: Gewinn je Aktie aus %s (%s: %.2f, %s: %.2f %s)", symbol, src, y0, out["0y"]["avg"], y0 + 1,
              out["+1y"]["avg"], out["0y"]["cur"])
+
+
+def fill_forward_pe(m):
+    """Forward-KGV (Yahoo: Kurs / Gewinn der nächsten 12 Monate) aus den Gewinnschätzungen nachbilden, falls Yahoo es
+    nicht liefert (auf dem Server gesperrt) – egal ob die Schätzungen von Yahoo, Nasdaq oder onvista stammen."""
+    E = m.get("est_eps") or {}
+    e0, e1 = E.get("0y") or {}, E.get("+1y") or {}
+    if m.get("fpe") or not m.get("price") or not e0.get("avg"):
+        return
+    k = est_fx(m, e0)
+    p_ = fy_progress(m) if e1.get("avg") else 0.0
+    e12 = ((1 - p_) * e0["avg"] + p_ * (e1.get("avg") or 0)) * (k or 0)
+    if e12 > 0:
+        m["fpe"] = m["price"] / e12
 
 
 def expectations(m, t):
@@ -1830,6 +1875,7 @@ def gather(symbol, t, info):
     m["target_median"] = num(g("targetMedianPrice"))
     expectations(m, t)
     safe(lambda: est_eps_fallback(m, symbol))
+    safe(lambda: fill_forward_pe(m))
     m["crp"] = safe(lambda: country_risk(m))
     safe(lambda: chart_extras(m, t, inc, bs, divs))
     return m
@@ -4460,6 +4506,16 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=Non
                 "ago": ago * k if ago else None, "n": int(num(r_.get("numberOfAnalysts")) or 0)}
     rev_df, eps_df = yq(lambda: t.revenue_estimate), yq(lambda: t.earnings_estimate)
     r0, r1, e0, e1 = get(rev_df, "0y"), get(rev_df, "+1y"), get(eps_df, "0y"), get(eps_df, "+1y")
+    if r0 and len(periods) >= 2 and yahoo_year_stale(r0["avg"], r0["ago"], last["revenue"], periods[-2]["revenue"]):
+        # Yahoo noch nicht (ganz) umgestellt: 0y ist das gerade gemeldete Jahr. Ist +1y schon das übernächste Jahr
+        # (sein Vorjahreswert ≠ Prognose für 0y – Apple Nov. 2026: +1y = GJ 2028, Vorjahr 527 Mrd. $ = GJ 2027),
+        # ist dieser Vorjahreswert die Prognose für das laufende Jahr; sonst wird +1y zum laufenden Jahr
+        if r1 and r1["ago"] and abs(r1["ago"] / r0["avg"] - 1) > 0.03 and 0.7 <= r1["ago"] / last["revenue"] <= 1.5:
+            f_ = r1["ago"] / r1["avg"]
+            r0 = {**r1, "avg": r1["ago"], "low": r1["low"] * f_, "high": r1["high"] * f_, "ago": last["revenue"]}
+        else:
+            r0, r1 = r1, None
+        e0, e1 = e1, None
     # Die Umsatzprognose muss auf dem zuletzt gemeldeten Jahr aufbauen: andere Abgrenzung (Versicherer) -> auf die
     # gemeldete Basis umgerechnet, falscher Vorjahreswert -> Prognose direkt; sonst nur Gewinnprognosen (der Umsatz
     # wird dann in income_data fortgeschrieben)
@@ -4507,10 +4563,19 @@ def income_estimates(t, periods, currency, eps_last, nasdaq=None, shares_out=Non
                   e0["n"] if e0 and ni0 is not None else 0, rng(r0, e0 if ni0 is not None else None))]
     rev1 = r1["avg"] if r1 and r0 and 0.5 <= r1["avg"] / r0["avg"] <= 2 else None
     ni1 = ni_of(e1) if ni0 is not None else None
+    nq_ = nasdaq or {}
+    y0_, y1_ = at(1).year, at(2).year
+    if ni1 is None and ni0 and ni0 > 0 and (nq_.get(y0_) or {}).get("avg") and (nq_.get(y1_) or {}).get("avg")             and nq_[y0_]["avg"] > 0 and 0.5 <= nq_[y1_]["avg"] / nq_[y0_]["avg"] <= 2:
+        ni1 = ni0 * nq_[y1_]["avg"] / nq_[y0_]["avg"]  # nur ein Yahoo-Gewinnjahr (Umstellung) -> Wachstum laut Nasdaq
+        ni1_nq = True
+    else:
+        ni1_nq = False
     if rev1 is None and ni1 is None:
         return out
     out.append(period(2, rev1, ni1, "consensus", r1["n"] if rev1 is not None else 0,
                       e1["n"] if e1 and ni1 is not None else 0, rng(r1 if rev1 is not None else None, e1 if ni1 is not None else None)))
+    if ni1_nq:
+        out[-1].update(ni_consensus="Nasdaq", n_eps=nq_[y1_].get("n") or 0)
     # zweites Folgejahr: Gewinn aus dem Nasdaq-Konsens (Zacks; Wachstum je Aktie, damit ADR-Verhältnis und Währung
     # keine Rolle spielen), sonst Wachstum des Vorjahres fortgeschrieben; Umsatz immer fortgeschrieben (begrenzt)
     rev2 = rev1 * (1 + clamp(rev1 / r0["avg"] - 1, -0.15, 0.30)) if rev1 is not None else None
@@ -7535,19 +7600,38 @@ def _plain_name(s):
     return re.sub(r"[^a-z0-9 ]", " ", (s or "").lower().replace("&", " and ")).split()
 
 
-def wikidata_company(ticker, company, isin_cc):
-    """Stammdaten über das Börsenkürzel aus Wikidata; nur wenn der Firmenname passt."""
-    variants = {ticker, ticker.replace("-", " "), ticker.replace("-", "."), ticker.replace("-", "")}
-    vals = " ".join('"%s"' % v.replace('"', "") for v in variants)
+def wikidata_employees(qid):
+    """Jüngste Mitarbeiterzahl (P1128, nach Stichtag) eines Wikidata-Eintrags."""
+    q = '''SELECT ?emp ?d WHERE { wd:%s p:P1128 ?es. ?es ps:P1128 ?emp. OPTIONAL { ?es pq:P585 ?d } }
+      ORDER BY DESC(?d) LIMIT 1''' % qid
+    req = urllib.request.Request("https://query.wikidata.org/sparql?format=json&query=" + urllib.parse.quote(q),
+                                 headers={"User-Agent": "Stocky/1.0 (private Analyse-App)"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        rows = json.loads(r.read())["results"]["bindings"]
+    v = num(rows[0]["emp"]["value"]) if rows else None
+    d = (rows[0].get("d") or {}).get("value", "")[:10] if rows else ""
+    if not v or v <= 0 or (d and d < (datetime.now() - timedelta(days=4 * 365)).date().isoformat()):
+        return None  # ohne oder mit veraltetem Stichtag (Tencent 2019: 62.885 statt heute über 115.000) lieber nichts
+    return {"n": int(v), "date": d or None}
+
+
+def wikidata_company(ticker, company, isin_cc, isin=None):
+    """Stammdaten aus Wikidata: zuerst über die ISIN (eindeutig), sonst über das Börsenkürzel – dann nur, wenn der
+    Firmenname passt (Kürzel sind mehrdeutig: ROP = Roper statt Roche, HFG = Hilton Food statt HelloFresh)."""
+    if isin:
+        sel = 'VALUES ?i0 { "%s" } ?c wdt:P946 ?i0.' % re.sub(r"[^A-Z0-9]", "", isin.upper())
+    else:
+        variants = {ticker, ticker.replace("-", " "), ticker.replace("-", "."), ticker.replace("-", ""), ticker.lstrip("0") or ticker}
+        sel = "VALUES ?t { %s } ?c p:P414 ?st. ?st pq:P249 ?t." % " ".join('"%s"' % v.replace('"', "") for v in variants)
     q = '''SELECT ?c ?cLabel ?isin ?inc ?ceoLabel ?hqLabel ?web ?ctyEn WHERE {
-      VALUES ?t { %s } ?c p:P414 ?st. ?st pq:P249 ?t.
+      %s
       OPTIONAL { ?c wdt:P946 ?isin }
       OPTIONAL { ?c wdt:P571 ?inc }
       OPTIONAL { ?c p:P169 ?cs. ?cs ps:P169 ?ceo. FILTER NOT EXISTS { ?cs pq:P582 ?end } }
       OPTIONAL { ?c wdt:P159 ?hq }
       OPTIONAL { ?c wdt:P856 ?web }
       OPTIONAL { ?c wdt:P17 ?cty. ?cty rdfs:label ?ctyEn FILTER(lang(?ctyEn) = "en") }
-      SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". } } LIMIT 80''' % vals
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". } } LIMIT 80''' % sel
     url = "https://query.wikidata.org/sparql?format=json&query=" + urllib.parse.quote(q)
     req = urllib.request.Request(url, headers={"User-Agent": "Stocky/1.0 (private Analyse-App)"})
     with urllib.request.urlopen(req, timeout=12) as r:
@@ -7560,9 +7644,10 @@ def wikidata_company(ticker, company, isin_cc):
         v = {k: x["value"] for k, x in b.items()}
         got = _plain_name(v.get("cLabel"))
         # Erster Namensbestandteil muss übereinstimmen (verhindert z. B. SAP -> Sappi, ALV -> Autoliv/Allianz)
-        if not got or got[0] != want[0]:
+        if not isin and (not got or got[0] != want[0]):
             continue
-        e = best.setdefault(v["c"], {"isins": set(), "inc": None, "ceo": None, "hq": None, "web": None, "cty": None})
+        e = best.setdefault(v["c"], {"isins": set(), "inc": None, "ceo": None, "hq": None, "web": None, "cty": None,
+                                     "label": v.get("cLabel") if not re.fullmatch(r"Q\d+", v.get("cLabel") or "") else None})
         e["web"] = e["web"] or v.get("web")
         e["cty"] = e["cty"] or v.get("ctyEn")
         if v.get("isin"):
@@ -7570,14 +7655,15 @@ def wikidata_company(ticker, company, isin_cc):
         e["inc"] = e["inc"] or v.get("inc")
         if v.get("ceoLabel") and not re.fullmatch(r"Q\d+", v["ceoLabel"]):
             e["ceo"] = e["ceo"] or v["ceoLabel"]
-        if v.get("hqLabel") and not re.fullmatch(r"Q\d+", v["hqLabel"]):
+        if v.get("hqLabel") and not re.fullmatch(r"Q\d+", v["hqLabel"]) and not re.match(r"(Headquarters|Hauptsitz|Zentrale)\b", v["hqLabel"], re.I):
             e["hq"] = e["hq"] or v["hqLabel"]
     if len(best) != 1:
         return None  # nicht eindeutig -> lieber nichts anzeigen
-    e = next(iter(best.values()))
+    qid, e = next(iter(best.items()))
     isins = sorted(e["isins"], key=lambda i: (not i.startswith(isin_cc), i))
     return {"isins": isins, "founded": e["inc"][:4] if e["inc"] and e["inc"][:1] != "-" else None,
-            "ceo": e["ceo"], "hq": e["hq"], "website": e["web"], "country_en": e["cty"]}
+            "ceo": e["ceo"], "hq": e["hq"], "website": e["web"], "country_en": e["cty"], "label": e["label"],
+            "employees": safe(lambda: wikidata_employees(qid.rsplit("/", 1)[-1]))}
 
 
 def openfigi_map(id_type, value, exch):
@@ -7615,7 +7701,8 @@ def company_profile(symbol, info, company):
         return hit[1]
     base, _, suf = symbol.partition(".")
     isin_cc, exch = SUFFIX_MARKET.get(suf, (None, None))
-    wd = safe(lambda: wikidata_company(base, company, isin_cc or "")) or {}
+    ov_isin = safe(lambda: onvista_isin(symbol, company))
+    wd = (safe(lambda: wikidata_company(base, company, isin_cc or "", ov_isin)) if ov_isin else None)         or safe(lambda: wikidata_company(base, company, isin_cc or "")) or {}
     figi = safe(lambda: openfigi(base, exch)) if exch else None
     fh = (safe(lambda: finnhub_slow("stock/profile2", symbol=symbol)) or {}) if not suf else {}
     # CEO: Yahoo ist aktueller als Wikidata
@@ -7632,6 +7719,8 @@ def company_profile(symbol, info, company):
     hq = wd.get("hq") or info.get("city")
     country = COUNTRY_DE.get(info.get("country") or "", info.get("country") or "")
     isin, isin_ok = verified_isin(wd.get("isins") or [], base, exch)
+    if not isin and ov_isin:
+        isin, isin_ok = ov_isin, True  # onvista ordnet die ISIN dieser Notierung zu
     ipo, ipo_label = None, "Börsengang"
     if fh.get("ipo"):
         ipo = fh["ipo"]
@@ -7644,13 +7733,15 @@ def company_profile(symbol, info, company):
         "ceo": ceo, "website": info.get("website") or fh.get("weburl") or wd.get("website") or "",
         "hq": ", ".join(x for x in (hq, country) if x) or None,
         "founded": wd.get("founded"), "ipo": ipo, "ipo_label": ipo_label,
-        "employees": num(info.get("fullTimeEmployees")),
+        "employees": num(info.get("fullTimeEmployees")) or (wd.get("employees") or {}).get("n"),
+        "employees_date": None if num(info.get("fullTimeEmployees")) else (wd.get("employees") or {}).get("date"),
         "isin": isin,
         # ISIN einer anderen Börse (z. B. US-Hinterlegungsschein auf eine deutsche Aktie)
         "isin_home": bool(isin and not isin_ok and isin_cc and not isin.startswith(isin_cc)),
         "country_en": info.get("country") or wd.get("country_en"),
         "cusip": isin[2:11] if isin and isin[:2] in ("US", "CA") else None,
         "figi": figi,
+        "common_name": wd.get("label"),  # gebräuchlicher Name (Wikidata), für die Nachrichtensuche
         "sources": [s for s, ok in (("Yahoo Finance", True), ("Wikidata", bool(wd)), ("OpenFIGI", bool(figi)),
                                     ("Finnhub", bool(fh))) if ok],
     }
@@ -7952,12 +8043,13 @@ def analyze(query):
         fm = ex.submit(timed("Kennzahlen", gather_primary))
         fmac = ex.submit(timed("Makro", gather_macro, info.get("currency") or ""))
         siblings = sibling_names(company, symbol)
-        fnews = ex.submit(timed("Nachrichten", collect_news, symbol, company, info.get("website") or "", siblings))
+        fprof = ex.submit(timed("Profil", company_profile, symbol, info, company))
+        fnews = ex.submit(timed("Nachrichten", collect_news, symbol, company, info.get("website") or "", siblings,
+                                alias_fn=lambda: (fprof.result(timeout=15) or {}).get("common_name")))
         ftgt = ex.submit(timed("Kursziele", news_targets, company, info.get("currency") or "", current_price(info), siblings,
                                symbol=symbol))
         fev = ex.submit(timed("Termine", company_events, symbol, alternatives, info.get("currency") or ""))
         fpeer = ex.submit(timed("Konkurrenz", competitors, symbol, info, alternatives))
-        fprof = ex.submit(timed("Profil", company_profile, symbol, info, company))
         fesef = ex.submit(lambda t0=t: esef_check(fprof.result(timeout=30), t0, financial_currency(symbol, info) or "", symbol,
                                              info.get("longName") or info.get("shortName") or company)) \
             if equity_ and not os.environ.get("NO_ESEF") else None
