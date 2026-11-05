@@ -103,7 +103,7 @@ a.brand:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .suggest > div > span{min-width:0;overflow-wrap:anywhere}
 
 /* ---------- Section nav ---------- */
-.subnav{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:64px;z-index:15;display:none}
+.subnav{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:var(--top-h,64px);z-index:15;display:none;transition:top .2s}
 .subnav .container{display:flex;gap:4px;overflow-x:auto;height:46px;align-items:center;scrollbar-width:none}
 .subnav a{padding:6px 12px;border-radius:8px;text-decoration:none;color:var(--text-2);font-size:13.5px;font-weight:500;white-space:nowrap}
 .subnav a:hover{background:var(--surface-2);color:var(--text)}
@@ -1170,6 +1170,24 @@ table.peers .neg{color:var(--neg)}
   .suggest{position:fixed;left:8px;right:8px;top:68px;max-height:calc(100vh - 88px);max-height:calc(100dvh - 88px);overflow-y:auto;z-index:30}
   .suggest > div{flex-direction:column;align-items:flex-start;gap:2px}
   .suggest small{white-space:normal}
+  /* Kopfzeile zweizeilig: Logo und Symbole oben, Suchfeld in voller Breite darunter; blendet sich beim Herunterscrollen aus */
+  .topbar{transition:transform .2s ease}
+  .topbar .container{flex-wrap:wrap;height:auto;padding-top:8px;padding-bottom:8px;row-gap:8px;gap:8px}
+  .brand{margin-right:auto}
+  .search{order:9;flex:1 0 100%;max-width:none;margin-left:0}
+  .search input,.search button{height:42px}
+  .suggest{position:absolute;left:0;right:0;top:46px;max-height:calc(100dvh - 130px)}
+  body.hdr-hide .topbar{transform:translateY(-100%)}
+  body.hdr-hide .subnav{top:0}
+  /* iOS zoomt bei Eingabefeldern unter 16 px beim Antippen heran */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px !important}
+  input[type=checkbox],input[type=radio]{width:20px;height:20px;flex:none}
+  details>summary{min-height:36px;display:flex;align-items:center}
+  .mine-more{display:inline-block;padding:8px 0}
+  /* breite Tabellen: erste Spalte bleibt beim seitlichen Wischen stehen */
+  .peer-scroll table th:first-child,.peer-scroll table td:first-child{position:sticky;left:0;z-index:1;background:var(--surface);
+    box-shadow:1px 0 0 var(--border)}
+  .adm-k{padding:10px 12px} .adm-k b{font-size:20px}
 }
 </style>
 </head>
@@ -1351,6 +1369,26 @@ async function setLang(lang, save = true) {
 (() => { const c = window.confirm.bind(window), p = window.prompt.bind(window), a = window.alert.bind(window);
   window.confirm = m => c(tr(String(m))); window.prompt = (m, d) => p(tr(String(m)), d); window.alert = m => a(tr(String(m))); })();
 document.getElementById("langbtn").onclick = () => setLang(I18N.lang === "en" ? "de" : "en");
+(() => {  // Handy: Kopfzeile beim Herunterscrollen ausblenden, beim Hochscrollen zeigen; Höhe für die Abschnittsleiste
+  const mq = matchMedia("(max-width:600px)");
+  let lastY = 0;
+  const init = () => {
+    const bar = document.querySelector(".topbar");
+    if (!bar) return;
+    const setH = () => document.documentElement.style.setProperty("--top-h", bar.offsetHeight + "px");
+    if (window.ResizeObserver) new ResizeObserver(setH).observe(bar);
+    setH();
+    addEventListener("scroll", () => {
+      const y = scrollY;
+      if (!mq.matches || y < 80) { document.body.classList.remove("hdr-hide"); lastY = y; return; }
+      if (Math.abs(y - lastY) < 10) return;
+      const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest(".topbar");
+      document.body.classList.toggle("hdr-hide", y > lastY && !typing);
+      lastY = y;
+    }, {passive: true});
+  };
+  document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", init) : init();
+})();
 (() => {  // Startsprache: gespeichert, sonst Browsersprache
   let l = null; try { l = localStorage.getItem("ac-lang"); } catch (e) {}
   l = l || ((navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en");
@@ -3598,8 +3636,8 @@ function admUsage(N, rel) {
   const A = N.active, mx = Math.max(1, ...N.features.map(f => f.d30));
   return `<div class="card pad adm-wide"><h3>Nutzung <span class="stamp">aktive Benutzer: heute ${A.today} · 7 Tage ${A.d7} · 30 Tage ${A.d30} von ${A.total}</span></h3>
     <div class="adm-2col"><div>
-      ${N.features.length ? `<table class="trk"><thead><tr><th>Funktion</th><th class="num">Heute</th><th class="num">7 Tage</th><th class="num">30 Tage</th><th class="num">Nutzer</th></tr></thead><tbody>
-        ${N.features.map(f => `<tr><td>${esc(f.name)}<span class="adm-ubar"><i style="width:${(f.d30 / mx * 100).toFixed(1)}%"></i></span></td><td class="num">${f.today}</td><td class="num">${f.d7}</td><td class="num">${f.d30}</td><td class="num">${f.users}</td></tr>`).join("")}</tbody></table>`
+      ${N.features.length ? `<div class="peer-scroll"><table class="trk"><thead><tr><th>Funktion</th><th class="num">Heute</th><th class="num">7 Tage</th><th class="num">30 Tage</th><th class="num">Nutzer</th></tr></thead><tbody>
+        ${N.features.map(f => `<tr><td>${esc(f.name)}<span class="adm-ubar"><i style="width:${(f.d30 / mx * 100).toFixed(1)}%"></i></span></td><td class="num">${f.today}</td><td class="num">${f.d7}</td><td class="num">${f.d30}</td><td class="num">${f.users}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="stamp">Noch keine Nutzung gezählt (Zählung läuft seit diesem Update).</div>`}</div>
       <div><div class="stamp" style="margin-bottom:4px">Je Benutzer (30 Tage)</div>
         ${N.per_user.slice(0, 12).map(x => `<div class="adm-row"><span><b>${esc(x.user)}</b> <small class="stamp">${x.top.map(([k, v]) => `${esc(k)} ${v}`).join(" · ")}</small></span><b class="num">${x.total}</b></div>`).join("") || `<div class="stamp">–</div>`}
