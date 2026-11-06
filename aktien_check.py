@@ -8090,17 +8090,29 @@ def price_calc(query):
     revs = [p_["revenue"] for p_ in P]
     ly = int(last["end"][:4])
 
-    # Konsens je Geschäftsjahr (nur echte Analystenschätzungen, keine Fortschreibung)
+    # Konsens je Geschäftsjahr: Umsatz aus dem Umsatzkonsens oder – wenn es nur einen Gewinnkonsens gibt (Yahoo auf dem
+    # Server gesperrt) – aus dem Gewinnkonsens abgeleitet (couple_revenue); reine Trend-Fortschreibung zählt nicht
+    # (Applied Materials: sonst +3,8 % Umsatz bei +48 % Gewinn -> Nettomarge 60 %)
     cons = {}
     for e in E:
         y = int(str(e["label"])[:4])
-        cons[y] = {"rev": e["revenue"] if e.get("revenue") and not e.get("rev_trend") and e.get("est") == "consensus" else None,
-                   "ni": e["net_income"] if e.get("net_income") is not None and e.get("est") == "consensus" else None}
+        ni_ok = e.get("net_income") is not None and (e.get("est") == "consensus" or e.get("ni_consensus"))
+        rev_kind = None
+        if e.get("revenue") and e.get("est") == "consensus" and not e.get("rev_trend"):
+            rev_kind = "Konsens"
+        elif e.get("revenue") and e.get("rev_coupled") and ni_ok:
+            rev_kind = "aus Gewinnkonsens abgeleitet"
+        elif e.get("revenue") and ni_ok:  # wie in der Kennzahlen-Tabelle fortgeschrieben, passend zum Gewinnkonsens
+            rev_kind = "fortgeschrieben"
+        cons[y] = {"rev": e["revenue"] if rev_kind else None, "rev_kind": rev_kind,
+                   "ni": e["net_income"] if ni_ok else None}
     hist_g = trend_growth(revs, cap=0.40)
     hist_m = [p_["margin"] for p_ in P[-3:] if p_.get("margin") is not None]
     m0 = _pc_med(hist_m) if hist_m else 0.0
     fcf_ms = [p_["fcf"] / p_["revenue"] for p_ in P[-4:] if p_.get("fcf") is not None and p_.get("revenue")]
     fcf_m0 = _pc_med(fcf_ms)
+    best_m = max([p_["margin"] for p_ in P[-5:] if p_.get("margin") is not None] + [0.0])
+    m_cap = min(0.7, max(best_m * 1.5, best_m + 0.15))  # Nettomarge im Basisfall höchstens so weit über dem bisher Besten
 
     # Basisfall: Umsatz- und Margenpfad (Konsens, danach schrittweise Richtung langfristiges Wachstum)
     base_g, base_m, src_g, src_m = [], [], [], []
@@ -8109,7 +8121,7 @@ def price_calc(query):
         c = cons.get(ly + i) or {}
         if c.get("rev") and rev_prev:
             g_ = c["rev"] / rev_prev - 1
-            src_g.append("Konsens")
+            src_g.append(c["rev_kind"])
         else:
             prev_g = base_g[-1] if base_g else (hist_g if hist_g is not None else 0.03)
             g_ = prev_g + (PC_SCEN["base"]["g_term"] + 0.01 - prev_g) * 0.35
@@ -8118,7 +8130,7 @@ def price_calc(query):
         base_g.append(g_)
         rev_i = rev_prev * (1 + g_)
         if c.get("ni") is not None and rev_i:
-            base_m.append(clamp(c["ni"] / rev_i, -1.0, 0.7))
+            base_m.append(clamp(c["ni"] / rev_i, -1.0, m_cap))
             src_m.append("Konsens")
         else:
             base_m.append(base_m[-1] if base_m else m0)

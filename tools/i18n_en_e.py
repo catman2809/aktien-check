@@ -563,3 +563,4 @@ DEPOT_WILD += [
     ("Das Geschäftsjahr {0} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – Basisjahr ist deshalb {1}.",
      "Fiscal year {0} has ended, but its figures have not been published yet – the base year is therefore {1}."),
 ]
+DEPOT_WILD += [("{0}: aus Gewinnkonsens abgeleitet", "{0}: derived from the earnings consensus")]
