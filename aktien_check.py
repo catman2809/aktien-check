@@ -12161,7 +12161,7 @@ LOGIN_PAGE = """<!doctype html>
 <title>Anmelden · Stocky</title>
 <style>
 :root{--bg:#efe7dc;--surface:rgba(255,251,245,.66);--field:rgba(255,255,255,.55);--border:rgba(90,66,42,.16);--text:#2b2521;--text-2:#5f554d;--accent:#1f5e5b;--accent-soft:rgba(31,94,91,.14);--neg:#a83a2c;--neg-soft:rgba(168,58,44,.10);--on-accent:#fffcf7;
-  --veil:linear-gradient(180deg,rgba(245,239,230,.22),rgba(245,239,230,.50))}
+  --veil:linear-gradient(180deg,rgba(18,13,9,.34),rgba(18,13,9,.56))}
 @media (prefers-color-scheme:dark){:root{--bg:#120e0b;--surface:rgba(20,16,13,.74);--field:rgba(255,255,255,.06);--border:rgba(255,255,255,.10);--text:#f2ebe1;--text-2:#cbbfb1;--accent:#76b8ac;--accent-soft:rgba(118,184,172,.16);--neg:#ec8a74;--neg-soft:rgba(236,138,116,.12);--on-accent:#14211f;
   --veil:linear-gradient(180deg,rgba(14,11,9,.55),rgba(14,11,9,.82))}}
 @font-face{font-family:"Source Sans 3";src:url(/static/source-sans-3.woff2) format("woff2");font-weight:200 900;font-display:swap}

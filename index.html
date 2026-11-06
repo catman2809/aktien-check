@@ -1061,7 +1061,7 @@ table.peers .neg{color:var(--neg)}
   --pos-soft:rgba(63,122,31,.10); --neu-soft:rgba(168,98,10,.10); --neg-soft:rgba(168,58,44,.10);
   --shadow:0 8px 32px rgba(60,40,20,.10);
   --glass-blur:blur(22px) saturate(150%);
-  --veil:linear-gradient(180deg,rgba(245,239,230,.22),rgba(245,239,230,.38) 55%,rgba(245,239,230,.50));
+  --veil:linear-gradient(180deg,rgba(18,13,9,.34),rgba(18,13,9,.46) 55%,rgba(18,13,9,.56));
   --radius:20px;
 }
 @media (prefers-color-scheme: dark){
@@ -1085,12 +1085,13 @@ table.peers .neg{color:var(--neg)}
   --veil:linear-gradient(180deg,rgba(14,11,9,.58),rgba(14,11,9,.76) 55%,rgba(14,11,9,.86));
 }
 /* Text direkt auf dem Foto (Überschriften, Einleitungen): weicher Lichthof in Hintergrundfarbe, damit er lesbar bleibt */
-:root{--halo:0 0 3px rgba(245,239,230,1),0 0 8px rgba(245,239,230,.95),0 0 18px rgba(245,239,230,.9),0 0 32px rgba(245,239,230,.75)}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--halo:0 0 2px rgba(14,11,9,.9),0 0 12px rgba(14,11,9,.8)}}
-:root[data-theme="dark"]{--halo:0 0 2px rgba(14,11,9,.9),0 0 12px rgba(14,11,9,.8)}
-.welcome>h1,.welcome>p,.welcome-kerzi,h2.section,.section-sub,.pc-page>h1,.pc-page>p,.pc-head,.wl-head,.dp-head,.mv-head,
+:root{--halo:0 0 2px rgba(14,11,9,.85),0 0 12px rgba(14,11,9,.7);--on-photo:#fbf6ef;--on-photo-2:rgba(251,246,239,.86)}
+.welcome>h1,.welcome>p,.welcome-kerzi,h2.section,.section-sub,.pc-page>h1,.pc-page>p,.pc-head,.wl-head>*:not(.btn):not(.seg),.dp-head>*:not(.btn),.mv-head>*:not(.seg),
 .loading b,.loading span,.loading li{text-shadow:var(--halo)}
-body .welcome>p,body .section-sub,body .pc-page>p,body .pc-head .stamp{color:var(--text)}
+/* auf dem abgedunkelten Foto in beiden Modi helle Schrift */
+.welcome>h1,h2.section,.pc-page>h1,.pc-head h2,.wl-head h1,.wl-head h2,.dp-head h1,.mv-head h2,.loading b{color:var(--on-photo)}
+body .welcome>p,body .section-sub,body .pc-page>p,body .pc-head .stamp,.loading span,.loading li,
+body .mv-head .stamp,body .wl-head .stamp,body .wl-head>p,body .dp-head .stamp,body .dp-head>p{color:var(--on-photo-2)}
 /* fester Hintergrund (eigene Ebene statt background-attachment:fixed – das kann iOS nicht) */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:var(--veil),url(/static/bg.jpg) center/cover no-repeat}
