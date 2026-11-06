@@ -4542,9 +4542,11 @@ function erOutlook(D) {
 function erGuideQuotes(D, full) {
   const G = D.guidance;
   if (erOutlook(D) || !G || (!G.excerpt && !G.quotes?.length)) return "";
-  const qs = [G.excerpt, ...(G.quotes || [])].filter(Boolean).slice(0, full ? 3 : 2);
+  // auf Deutsch übersetzt (maschinell); in der englischen Ansicht oder ohne Übersetzung das Original
+  const de = G.de && I18N.lang !== "en";
+  const qs = (de ? [G.excerpt_de, ...(G.quotes_de || [])] : [G.excerpt, ...(G.quotes || [])]).filter(Boolean).slice(0, full ? 3 : 2);
   return `<div class="er-quote" translate="no">${qs.map(q => `<blockquote>„${esc(q)}“</blockquote>`).join("")}</div>
-    <p class="stamp er-qsrc"><span>Wörtlich aus der Ergebnis-Pressemitteilung (englisch)</span>${G.url ? ` · <a href="${esc(G.url)}" target="_blank" rel="noopener">Pressemitteilung öffnen</a>` : ""}</p>`;
+    <p class="stamp er-qsrc"><span>${de ? "Aus der Ergebnis-Pressemitteilung, maschinell übersetzt" : "Wörtlich aus der Ergebnis-Pressemitteilung (englisch)"}</span>${G.url ? ` · <a href="${esc(G.url)}" target="_blank" rel="noopener">Original öffnen</a>` : ""}</p>`;
 }
 function erRender() {
   const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict];

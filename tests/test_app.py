@@ -1957,6 +1957,31 @@ class TestIncomeEstimatesSources(unittest.TestCase):
                 um.patch.object(a.STORE, "load", return_value={"gsum": {}}):
             self.assertIsNone(a.release_guidance(1, "0001-26-2"))
 
+    def test_translate_guidance_de(self):
+        import json
+        import unittest.mock as um
+        g_resp = json.dumps([[["Der Umsatz wird voraussichtlich ", "Revenue is expected to be ", None],
+                              ["108,0 Mrd. $ betragen.", "$108.0 billion.", None]]]).encode()
+        with um.patch.object(a, "_fetch", return_value=g_resp):
+            self.assertEqual(a.translate_de("Revenue is expected to be $108.0 billion."),
+                             "Der Umsatz wird voraussichtlich 108,0 Mrd. $ betragen.")
+
+        def fallback(url, **kw):  # Google nicht erreichbar -> MyMemory
+            if "googleapis" in url:
+                raise OSError("down")
+            return json.dumps({"responseData": {"translatedText": "Wir erwarten Wachstum."}}).encode()
+        with um.patch.object(a, "_fetch", side_effect=fallback):
+            self.assertEqual(a.translate_de("We expect growth."), "Wir erwarten Wachstum.")
+        store = {"gsum": {}}
+        g = {"excerpt": "Outlook Revenue is expected to be $1 billion.", "quotes": ["We expect growth."], "direction": None, "url": "u"}
+        with um.patch.object(a, "translate_de", side_effect=lambda t: "DE: " + t), um.patch.object(a.STORE, "load", return_value=store):
+            d = a.guidance_de("acc1", g)
+        self.assertTrue(d["de"])
+        self.assertEqual(d["quotes_de"], ["DE: We expect growth."])
+        self.assertTrue(store["gsum"]["acc1"]["de"])                          # gespeichert, nicht erneut übersetzen
+        with um.patch.object(a, "translate_de", return_value=None):
+            self.assertNotIn("de", a.guidance_de("acc2", g))                  # Fehlschlag -> Original, später neu versuchen
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

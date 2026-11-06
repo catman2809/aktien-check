@@ -516,7 +516,8 @@ SRC_HOSTS = [("finnhub.io", "Finnhub"), ("api.nasdaq.com", "Nasdaq"), ("onvista.
              ("gleif.org", "GLEIF"), ("wikidata.org", "Wikidata"), ("ntfy.sh", "ntfy (Push)"), ("api.github.com", "GitHub (Backup)"),
              ("cboe.com", "Cboe"), ("alternative.me", "Fear & Greed"), ("ecb.europa.eu", "EZB"), ("frankfurter", "Wechselkurse"),
              ("finance.yahoo.com", "Yahoo News"), ("filings.xbrl.org", "ESEF-Geschäftsberichte"), ("stern.nyu.edu", "Damodaran (NYU)"),
-             ("worldbank.org", "Weltbank"), ("fred.stlouisfed.org", "FRED"), ("stockanalysis.com", "stockanalysis.com")]
+             ("worldbank.org", "Weltbank"), ("fred.stlouisfed.org", "FRED"), ("stockanalysis.com", "stockanalysis.com"),
+             ("translate.googleapis.com", "Google Übersetzer"), ("mymemory.translated.net", "MyMemory (Übersetzung)")]
 EST_SRC = {}          # Quelle der Gewinnprognose -> Anzahl (seit Start)
 
 
@@ -8577,6 +8578,55 @@ GUIDE_BOILER = re.compile(r"forward[- ]looking|risks? and uncertaint|undue relia
 GUIDE_NUM = re.compile(r"\d[\d.,]*\s*(%|percent|billion|million|basis points)|\$\s?\d", re.I)
 
 
+def translate_de(text):
+    """Englisch -> Deutsch ohne Schlüssel: Google-Übersetzer (Web-Schnittstelle), sonst MyMemory (bis 500 Zeichen je
+    Abruf, daher satzweise). Übersetzt wird nur öffentlicher Text (Pressemitteilungen). None bei Fehlschlag."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        u = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode(
+            {"client": "gtx", "sl": "en", "tl": "de", "dt": "t", "q": text[:4500]})
+        d = json.loads(_fetch(u, timeout=15))
+        out = "".join(seg[0] for seg in (d[0] or []) if seg and seg[0]).strip()
+        if out:
+            return out
+    except Exception as e:
+        LOG.info("[Übersetzung] Google nicht erreichbar (%s), versuche MyMemory", type(e).__name__)
+    parts, cur = [], ""
+    for s_ in re.split(r"(?<=[.!?])\s+", text):
+        if len(cur) + len(s_) > 450 and cur:
+            parts.append(cur)
+            cur = ""
+        cur = (cur + " " + s_).strip()
+    parts.append(cur)
+    res = []
+    for p_ in parts:
+        d = safe(lambda: json.loads(_fetch("https://api.mymemory.translated.net/get?" + urllib.parse.urlencode(
+            {"q": p_[:480], "langpair": "en|de"}), timeout=15)))
+        tr = ((d or {}).get("responseData") or {}).get("translatedText")
+        if not tr or "MYMEMORY WARNING" in tr.upper():
+            return None
+        res.append(tr)
+    return " ".join(res).strip() or None
+
+
+def guidance_de(acc, g):
+    """Deutsche Fassung der Ausblick-Zitate ergänzen (einmal je Meldung, mit dem Ausblick gespeichert)."""
+    if not g or g.get("de"):
+        return g
+    ex = translate_de(g.get("excerpt")) if g.get("excerpt") else None
+    qs = [translate_de(q) for q in g.get("quotes") or []]
+    if (g.get("excerpt") and not ex) or any(q is None for q in qs):
+        return g  # Übersetzung (noch) nicht möglich -> beim nächsten Aufruf erneut versuchen
+    g = {**g, "excerpt_de": ex, "quotes_de": qs, "de": True}
+    data = STORE.load()
+    with STORE.lock:
+        data.setdefault("gsum", {})[acc] = g
+        STORE.dirty = True
+    return g
+
+
 def release_guidance(cik, acc):
     """Ausblick ohne KI aus der Ergebnis-Pressemitteilung (wörtlich, englisch): der Abschnitt „Outlook“/„Guidance“ mit
     den meisten konkreten Zahlen (Nvidia: „Revenue is expected to be $108.0 billion, plus or minus 2%“, Intel: Tabelle
@@ -8689,6 +8739,7 @@ def earnings_review(query):
         ai = safe(lambda: earnings_ai(sec_["cik"], er["acc"], name, facts))
         if not ai:
             guide = safe(lambda: release_guidance(sec_["cik"], er["acc"]))
+            guide = safe(lambda: guidance_de(er["acc"], guide)) or guide
     nxt = next((e for e in (events or []) if e.get("type") == "earnings"), None)
     seen, press = set(), []
     for it in sorted(news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
