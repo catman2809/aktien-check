@@ -402,7 +402,35 @@ def domain_of(url):
 # ---------------------------------------------------------------------------
 # Symbol-Suche
 # ---------------------------------------------------------------------------
+def search_variants(q):
+    """Suchvarianten für Umlaute und Akzente – Yahoo findet „Münchener Rück“, „Südzucker“, „L'Oréal“ sonst nicht:
+    zuerst deutsche Umschrift (ü -> ue), dann ohne Akzente (é -> e), zuletzt die Eingabe selbst."""
+    import unicodedata
+    if q.isascii():
+        return [q]
+    de = q
+    for a_, b_ in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("Ä", "Ae"), ("Ö", "Oe"), ("Ü", "Ue"), ("ß", "ss")):
+        de = de.replace(a_, b_)
+    plain = "".join(c for c in unicodedata.normalize("NFKD", q) if not unicodedata.combining(c)).replace("ß", "ss")
+    return list(dict.fromkeys(v for v in (de if de != q else "", plain, q) if v.strip()))
+
+
 def search_symbols(q, include_crypto=False):
+    variants = search_variants(q)
+    if len(variants) == 1:
+        return _search_one(q, include_crypto)
+    seen, merged = set(), []  # Umlaute/Akzente: Treffer der Varianten zusammenführen, beste Variante zuerst
+    for v in variants:
+        for it in _search_one(v, include_crypto):
+            if it["symbol"] not in seen:
+                seen.add(it["symbol"])
+                merged.append(it)
+        if len(merged) >= 8:
+            break
+    return merged[:10]
+
+
+def _search_one(q, include_crypto=False):
     out = []
     res = safe(lambda: yf.Search(q, max_results=10, news_count=0).quotes, [])
     if not res:

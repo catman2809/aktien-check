@@ -1896,6 +1896,18 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         with um.patch.dict(a.os.environ, {"ANTHROPIC_API_KEY": ""}):
             self.assertIsNone(a.earnings_ai(1, "0000-1", "Apple", ""))         # ohne Schlüssel keine Tiefenanalyse
 
+    def test_search_umlauts(self):
+        import unittest.mock as um
+        self.assertEqual(a.search_variants("Allianz"), ["Allianz"])
+        self.assertEqual(a.search_variants("Münchener Rück"), ["Muenchener Rueck", "Munchener Ruck", "Münchener Rück"])
+        self.assertEqual(a.search_variants("L'Oréal"), ["L'Oreal", "L'Oréal"])
+        self.assertEqual(a.search_variants("Straße"), ["Strasse", "Straße"])
+        res = {"Suedzucker": [{"symbol": "SZU.DE"}, {"symbol": "SZU.F"}], "Sudzucker": [{"symbol": "SZU.F"}, {"symbol": "X"}],
+               "Südzucker": []}
+        with um.patch.object(a, "_search_one", side_effect=lambda q, c=False: res.get(q, [])) as s1:
+            self.assertEqual([x["symbol"] for x in a.search_symbols("Südzucker")], ["SZU.DE", "SZU.F", "X"])
+            self.assertEqual(s1.call_count, 3)
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

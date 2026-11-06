@@ -698,7 +698,8 @@ tr.u-locked td{opacity:.65}
 @media (max-width:640px){.adm-l{grid-template-columns:1fr}.adm-uni{grid-template-columns:90px 1fr 50px}}
 .pc-page h1{font-size:26px;margin:8px 0 4px}
 .pc-page>p{margin:0 0 14px}
-.pc-form{display:flex;gap:8px;margin-bottom:10px;max-width:560px}
+.pc-form{display:flex;gap:8px;margin-bottom:10px;max-width:560px;position:relative;z-index:5}
+.pc-form .suggest{position:absolute;left:0;right:0;top:46px;max-height:min(60vh,420px);overflow-y:auto;z-index:30}
 .pc-form input{flex:1;font:inherit;font-size:15px;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);min-width:0}
 .pc-page .quick{justify-content:flex-start;margin-bottom:18px}
 .pc-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 0 12px}
@@ -1613,6 +1614,41 @@ function renderSg() {
   $("#sg").querySelectorAll("div").forEach(d => d.onmousedown = () => pick(d.dataset.s));
 }
 function hideSg() { $("#sg").style.display = "none"; }
+// Vorschlagsliste wie in der Kopfzeile für weitere Suchfelder (Kursrechner, Earnings Reviewer); Krypto/ETF optional
+function attachSuggest(inp, box, onPick, allowFunds = true) {
+  let tm, list = [], cur = -1;
+  const hide = () => { box.style.display = "none"; };
+  const pickIt = sym => { inp.value = sym; hide(); onPick(sym); };
+  const render = () => {
+    if (!list.length) return hide();
+    box.innerHTML = list.map((s, i) => `<div class="${i === cur ? "act" : ""}" data-s="${esc(s.symbol)}">
+      <span>${esc(s.name)}</span><small>${esc(s.symbol)} · ${esc(s.exchange)}</small></div>`).join("");
+    box.style.display = "block";
+    box.querySelectorAll("div").forEach(d => d.onmousedown = e => { e.preventDefault(); pickIt(d.dataset.s); });
+  };
+  inp.addEventListener("input", () => {
+    clearTimeout(tm);
+    const v = inp.value.trim();
+    if (v.length < 2) return hide();
+    tm = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/search?q=" + encodeURIComponent(v));
+        if (r.status === 401) return toLogin();
+        if (inp.value.trim() !== v) return;  // inzwischen weitergetippt
+        list = (await r.json()).filter(s => allowFunds || (!s.crypto && !s.etf)); cur = -1; render();
+      } catch (e) {}
+    }, 280);
+  });
+  inp.addEventListener("keydown", e => {
+    if (!list.length || box.style.display !== "block") return;
+    if (e.key === "ArrowDown") { cur = Math.min(cur + 1, list.length - 1); render(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { cur = Math.max(cur - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === "Enter" && cur >= 0) { e.preventDefault(); pickIt(list[cur].symbol); }
+    else if (e.key === "Escape") hide();
+  });
+  inp.addEventListener("blur", () => setTimeout(hide, 150));
+  return {hide};
+}
 function toLogin(q) {
   const next = q ? "/?q=" + encodeURIComponent(q) : location.pathname + location.search;
   location.href = "/login?next=" + encodeURIComponent(next);
@@ -4464,10 +4500,11 @@ function showPriceCalc(q) {
     <h1>Aktienkursrechner</h1>
     <p class="stamp">Mögliche Kursspanne der nächsten fünf Jahre aus Umsatzwachstum, Gewinnwachstum und KGV – mit Bear-, Base- und Bull-Szenario nach einem DCF-Modell. Alle Annahmen lassen sich danach selbst überschreiben.</p>
     <form class="pc-form" id="pc-form"><input id="pc-q" type="text" placeholder="Aktie, z. B. Apple, SAP.DE oder Allianz" autocomplete="off" value="${esc(q || "")}">
-      <button class="btn primary" type="submit">Berechnen</button></form>
+      <button class="btn primary" type="submit">Berechnen</button><div class="suggest" id="pc-sg" translate="no"></div></form>
     <div class="quick">${["Apple", "Microsoft", "SAP.DE", "Allianz", "NVIDIA", "Coca-Cola"].map(x => `<button type="button" data-pq="${x}">${x}</button>`).join("")}</div>
     <div id="pc-res"></div></section>`;
-  $("#pc-form").onsubmit = e => { e.preventDefault(); pcRun($("#pc-q").value); };
+  const pcSg = attachSuggest($("#pc-q"), $("#pc-sg"), sym => pcRun(sym), false);
+  $("#pc-form").onsubmit = e => { e.preventDefault(); pcSg.hide(); pcRun($("#pc-q").value); };
   document.querySelectorAll("[data-pq]").forEach(b => b.onclick = () => { $("#pc-q").value = b.dataset.pq; pcRun(b.dataset.pq); });
   if (q) pcRun(q);
 }
@@ -4627,10 +4664,11 @@ function showEarnings(q) {
     <h1>Earnings Reviewer</h1>
     <p class="stamp">Das letzte Quartal auf einen Blick: Ergebnis ggü. den Erwartungen der Analysten, die wichtigsten Kennzahlen, der Ausblick des Managements und geänderte Schätzungen – kurz als Stichpunkte und ausführlich als One-Pager (A4).</p>
     <form class="pc-form" id="er-form"><input id="er-q" type="text" placeholder="Aktie, z. B. Apple, SAP.DE oder Allianz" autocomplete="off" value="${esc(q || "")}">
-      <button class="btn primary" type="submit">Auswerten</button></form>
+      <button class="btn primary" type="submit">Auswerten</button><div class="suggest" id="er-sg" translate="no"></div></form>
     <div class="quick">${["Apple", "Microsoft", "NVIDIA", "SAP.DE", "Allianz", "Siemens"].map(x => `<button type="button" data-eq="${x}">${x}</button>`).join("")}</div>
     <div id="er-res"></div></section>`;
-  $("#er-form").onsubmit = e => { e.preventDefault(); erRun($("#er-q").value); };
+  const erSg = attachSuggest($("#er-q"), $("#er-sg"), sym => erRun(sym), false);
+  $("#er-form").onsubmit = e => { e.preventDefault(); erSg.hide(); erRun($("#er-q").value); };
   document.querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { $("#er-q").value = b.dataset.eq; erRun(b.dataset.eq); });
   if (q) erRun(q);
 }
