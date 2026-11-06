@@ -632,3 +632,28 @@ DEPOT_WILD += [
     ("Kennzahlen: {*}", "Figures: {*}"), ("Konsens Gewinn je Aktie: {*}", "EPS consensus: {*}"),
     ("Schätzungsänderungen: {*}", "Estimate revisions: {*}"), ("Analyse der Pressemitteilung: Claude ({*})", "Press release analysis: Claude ({*})"),
 ]
+
+# Earnings Reviewer: Strategie & Entscheidungen
+DEPOT_EXACT.update({
+    "Strategie & wichtige Entscheidungen": "Strategy & key decisions", "Quartal": "Quarter", "Vorjahr": "Prior year",
+    "Free Cashflow": "Free cash flow", "Aktienrückkäufe": "Share buybacks", "Dividenden gezahlt": "Dividends paid",
+    "Investitionen (Sachanlagen)": "Capital expenditure", "Zukäufe von Unternehmen (netto)": "Acquisitions (net)",
+    "Schulden aufgenommen (+) / getilgt (−)": "Debt raised (+) / repaid (−)",
+    "Pflichtmeldungen an die US-Börsenaufsicht (8-K)": "Filings with the US SEC (8-K)",
+    "Meldungen der letzten Monate": "News from recent months", "Keine Angaben zur Kapitalverwendung.": "No capital allocation data.",
+    "Wesentlicher Vertrag abgeschlossen": "Material agreement entered", "Wesentlicher Vertrag beendet": "Material agreement terminated",
+    "Cybersicherheitsvorfall": "Cybersecurity incident", "Kauf oder Verkauf von Unternehmensteilen abgeschlossen": "Acquisition or disposition completed",
+    "Neue Finanzierung (Anleihe oder Kredit)": "New financing (bond or loan)", "Umbau mit Restrukturierungskosten": "Restructuring with costs",
+    "Wertminderung von Vermögenswerten": "Asset impairment", "Ausgabe neuer Aktien": "Issuance of new shares",
+    "Änderung von Aktionärsrechten": "Change in shareholder rights", "Wechsel des Wirtschaftsprüfers": "Change of auditor",
+    "Wechsel der Kontrolle": "Change in control", "Wechsel im Vorstand oder Aufsichtsrat": "Change of directors or officers",
+    "Satzungsänderung": "Amendment to articles", "Abstimmungen der Hauptversammlung": "Shareholder meeting votes",
+    "Information an Investoren": "Investor information (Reg FD)", "Sonstiges wichtiges Ereignis": "Other material event",
+})
+DEPOT_WILD += [
+    ("Kapitalverwendung (Quartal bis {0})", "Capital allocation (quarter ended {0})"),
+    ("Dividende je Aktie zuletzt {0} ({1}) – unverändert ggü. {2} ({3})", "Latest dividend per share {0} ({1}) – unchanged vs. {2} ({3})"),
+    ("Dividende je Aktie zuletzt {0} ({1}) – erhöht um {2} ggü. {3} ({4})", "Latest dividend per share {0} ({1}) – raised by {2} vs. {3} ({4})"),
+    ("Dividende je Aktie zuletzt {0} ({1}) – gesenkt um {2} ggü. {3} ({4})", "Latest dividend per share {0} ({1}) – cut by {2} vs. {3} ({4})"),
+    ("Kapitalverwendung und Dividende: {*}", "Capital allocation and dividend: {*}"), ("Meldungen: {*}", "News: {*}"),
+]

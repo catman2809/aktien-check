@@ -743,24 +743,26 @@ body.op-open{overflow:hidden}
 .op-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #1f4e79;padding-bottom:8px}
 .op-id{display:flex;gap:10px;align-items:center}
 .op-logo{width:40px;height:40px;object-fit:contain}
-.op-name{font-size:20px;font-weight:700;color:#1f4e79}
+.op-name{font-size:1.9em;font-weight:700;color:#1f4e79}
 .op-sub,.op-meta{font-size:10px;color:#555} .op-meta{text-align:right}
 .op-verdict{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 4px;font-size:10px;color:#444}
 .op-tag{font-weight:700;padding:2px 8px;border-radius:3px;color:#fff}
 .op-tag.pos{background:#2e7d32} .op-tag.neg{background:#c62828} .op-tag.neu{background:#8a6d1f}
-.op-title{font-size:17px;line-height:1.25;margin:6px 0 8px;color:#111}
+.op-title{font-size:1.6em;line-height:1.25;margin:5px 0 6px;color:#111}
 .op-cols{display:grid;grid-template-columns:1fr 1fr;gap:6mm}
-.op-sheet h4{font-size:11.5px;color:#1f4e79;margin:9px 0 3px;border-bottom:1px solid #d9e1f2;padding-bottom:2px}
+.op-sheet h4{font-size:1.1em;color:#1f4e79;margin:7px 0 3px;border-bottom:1px solid #d9e1f2;padding-bottom:2px}
 .op-sheet h4 small{font-weight:400;color:#666}
 .op-sheet ul{margin:0;padding-left:15px} .op-sheet li{margin:2px 0} .op-sheet p{margin:2px 0}
-.op-tbl{width:100%;border-collapse:collapse;font-size:10px}
+.op-tbl{width:100%;border-collapse:collapse;font-size:.95em}
 .op-tbl td{padding:2px 4px;border-bottom:1px solid #e3e3e3} .op-tbl td:not(:first-child){text-align:right}
 .op-tbl thead td{font-weight:700;color:#555}
 .op-chart{width:100%;height:auto;display:block;color:#222}
 .op-chart text{fill:#333;font-family:inherit}
 .op-press small{color:#666}
+.op-div{margin-top:6px}
+.op-sublab{font-weight:700;color:#444;margin:4px 0 1px !important}
 .op-next{margin-top:8px}
-.op-foot{margin-top:10px;padding-top:6px;border-top:1px solid #ccc;font-size:8.5px;color:#555;word-break:break-word}
+.op-foot{margin-top:8px;padding-top:5px;border-top:1px solid #ccc;font-size:.82em;color:#555;word-break:break-word}
 @media print{
   body.op-open>*:not(#op-wrap){display:none !important}
   body.op-open::before{display:none}
@@ -4557,7 +4559,7 @@ function erBars(D) {
   const P = (D.quarters || []).map(q => ({l: q.label, v: q.revenue, e: false})).concat((D.q_estimates || []).map(q => ({l: q.label, v: q.revenue, e: true})))
     .filter(x => x.v);
   if (P.length < 2) return "";
-  const W = 330, H = 130, mx = Math.max(...P.map(x => x.v)), bw = W / P.length;
+  const W = 330, H = 108, mx = Math.max(...P.map(x => x.v)), bw = W / P.length;
   return `<svg viewBox="0 0 ${W} ${H + 18}" class="op-chart">${P.map((x, i) => {
     const h = x.v / mx * (H - 16), y = H - h;
     return `<rect x="${i * bw + 5}" y="${y}" width="${bw - 10}" height="${h}" rx="2" fill="${x.e ? "#9db7d6" : "#1f4e79"}"/>
@@ -4567,7 +4569,7 @@ function erBars(D) {
 function erEps(D) {
   const E = (D.eps_history || []).filter(e => e.act != null);
   if (E.length < 2) return "";
-  const W = 330, H = 120, vals = E.flatMap(e => [e.act, e.est]).filter(v => v != null);
+  const W = 330, H = 96, vals = E.flatMap(e => [e.act, e.est]).filter(v => v != null);
   const lo = Math.min(0, ...vals), hi = Math.max(...vals), sy = v => H - 10 - (v - lo) / ((hi - lo) || 1) * (H - 28), bw = W / E.length;
   return `<svg viewBox="0 0 ${W} ${H + 18}" class="op-chart">${E.map((e, i) => {
     const x = i * bw + bw / 2, beat = e.est != null && e.act >= e.est;
@@ -4575,6 +4577,21 @@ function erEps(D) {
       <circle cx="${x}" cy="${sy(e.act)}" r="4.5" fill="${beat ? "#2e7d32" : "#c62828"}"/>
       <text x="${x}" y="${sy(e.act) - 8}" text-anchor="middle" font-size="8.5">${nf(e.act)}</text>
       <text x="${x}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(String(e.q).slice(0, 7))}</text>`; }).join("")}</svg>`;
+}
+// Strategie & wichtige Entscheidungen: Claude (Pressemitteilung), Kapitalverwendung, Dividende, 8-K-Meldungen, Nachrichten
+function erStrategy(D) {
+  const A = D.ai, C = D.capital, Dv = D.dividend, c = D.quarter?.currency || D.fin_currency || "";
+  const left = [], right = [];
+  if (C?.rows?.length) left.push(`<table class="op-tbl"><thead><tr><td>Kapitalverwendung (Quartal bis ${erDate(C.end)})</td><td>Quartal</td><td>Vorjahr</td></tr></thead><tbody>
+    ${C.rows.map(r => `<tr><td>${esc(r.label)}</td><td>${pcMoney(r.q, c)}</td><td>${r.ago != null ? pcMoney(r.ago, c) : "–"}</td></tr>`).join("")}</tbody></table>`);
+  if (Dv) left.push(`<p class="op-div">Dividende je Aktie zuletzt <b>${nf(Dv.amount)}</b> (${erDate(Dv.date)}) – ${Math.abs(Dv.change) < 0.005 ? "unverändert" : (Dv.change > 0 ? "erhöht" : "gesenkt") + ` um ${nf(Math.abs(Dv.change) * 100, 1)} %`} ggü. ${nf(Dv.prev)} (${erDate(Dv.prev_date)})</p>`);
+  if (A?.strategy?.length) right.push(`<ul>${A.strategy.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`);
+  const ev = (D.events_8k || []).slice(0, 4);
+  if (ev.length) right.push(`<p class="op-sublab">Pflichtmeldungen an die US-Börsenaufsicht (8-K)</p><ul>${ev.map(e => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${erDate(e.date)}: ${esc(e.items.join(", "))}</a></li>`).join("")}</ul>`);
+  const sn = (D.strategic_news || []).slice(0, A?.strategy?.length ? 2 : 4);
+  if (sn.length) right.push(`<p class="op-sublab">Meldungen der letzten Monate</p><ul class="op-press">${sn.map(n => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <small>${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`).join("")}</ul>`);
+  if (!left.length && !right.length) return "";
+  return `<h4>Strategie &amp; wichtige Entscheidungen</h4><div class="op-cols"><div>${left.join("") || "<p>Keine Angaben zur Kapitalverwendung.</p>"}</div><div>${right.join("")}</div></div>`;
 }
 function erOnePager() {
   const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict], G = A && ER_GUIDE[A.guidance];
@@ -4595,6 +4612,8 @@ function erOnePager() {
   src.push(`<span>Kennzahlen: ${Q.source === "SEC" ? "SEC EDGAR" : "Yahoo Finance"}</span>`);
   if (epsSrc) src.push(`<span>Konsens Gewinn je Aktie: ${esc(epsSrc)}</span>`);
   if (R.length) src.push(`<span>Schätzungsänderungen: Yahoo Finance</span>`);
+  if (D.capital || D.dividend) src.push(`<span>Kapitalverwendung und Dividende: Yahoo Finance</span>`);
+  if ((D.strategic_news || []).length || (D.press || []).length) src.push(`<span>Meldungen: Google News</span>`);
   if (A) src.push(`<span>Analyse der Pressemitteilung: Claude (${esc(A.model || "")})</span>`);
   const wrap = document.createElement("div");
   wrap.id = "op-wrap";
@@ -4609,7 +4628,7 @@ function erOnePager() {
       <h1 class="op-title">${esc(A?.headline || (V ? V[1] + (Q.revenue_g != null ? ` – Umsatz ${pct_(Q.revenue_g)} ggü. Vorjahresquartal` : "") : "Quartalszahlen im Überblick"))}</h1>
       <div class="op-cols"><div>
         <h4>Die wichtigsten Punkte</h4><ul>${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("")}</ul>
-        ${erOutlook(D) ? `<h4>Ausblick</h4><p>${esc(erOutlook(D))}</p>` : ""}
+        ${erOutlook(D) || A?.outlook_points?.length ? `<h4>Ausblick</h4>${erOutlook(D) ? `<p>${esc(erOutlook(D))}</p>` : ""}${A?.outlook_points?.length ? `<ul>${A.outlook_points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}` : ""}
         ${lst("Geschäftsbereiche", A?.segments)}${lst("Positiv", A?.pos)}${lst("Negativ", A?.neg)}
         ${A?.verdict ? `<h4>Fazit</h4><p>${esc(A.verdict)}</p>` : ""}
       </div><div>
@@ -4620,12 +4639,18 @@ function erOnePager() {
         ${R.length ? `<h4>Geänderte Gewinnschätzungen</h4><table class="op-tbl"><thead><tr><td></td><td>aktuell</td><td>30 Tage</td><td>90 Tage</td></tr></thead><tbody>
           ${R.map(r => `<tr><td>${esc(r.period)}</td><td>${nf(r.current)}</td><td>${pct_(r.chg30)}</td><td>${pct_(r.chg90)}</td></tr>`).join("")}</tbody></table>` : ""}
       </div></div>
-      ${D.press?.length ? `<h4>Pressestimmen</h4><ul class="op-press">${D.press.slice(0, 4).map(p => `<li><a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.title)}</a> <small>${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small></li>`).join("")}</ul>` : ""}
+      ${erStrategy(D)}
+      ${D.press?.length ? `<h4>Pressestimmen</h4><ul class="op-press">${D.press.slice(0, 3).map(p => `<li><a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.title)}</a> <small>${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small></li>`).join("")}</ul>` : ""}
       ${D.next ? `<p class="op-next">Nächste Quartalszahlen: <b>${erDate(D.next.date)}</b>${D.next.estimated ? " (geschätzt)" : ""}${D.next.detail ? ` · <span>${esc(D.next.detail)}</span>` : ""}</p>` : ""}
       <footer class="op-foot"><b>Quellen:</b> ${src.join(" · ")}<br>Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.</footer>
     </div></div>`;
   document.body.appendChild(wrap);
   document.body.classList.add("op-open");
+  // passt der Inhalt nicht auf eine A4-Seite, die Schrift schrittweise verkleinern (höchstens bis 8,4 px)
+  const sheet = wrap.querySelector(".op-sheet"), a4 = sheet.offsetWidth * 297 / 210;
+  sheet.style.minHeight = "0";
+  for (let fs = 10.5; sheet.scrollHeight > a4 && fs > 8.4; fs -= 0.3) sheet.style.fontSize = fs.toFixed(1) + "px";
+  sheet.style.minHeight = "";
   const fit = () => {  // auf schmalen Bildschirmen das ganze Blatt verkleinert zeigen (links ausgerichtet, dann zentriert)
     const sh = wrap.querySelector(".op-sheet"), w = wrap.querySelector(".op-scroll").clientWidth - 24;
     const s_ = Math.min(1, w / sh.offsetWidth);

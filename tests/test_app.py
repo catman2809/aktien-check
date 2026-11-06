@@ -1908,6 +1908,30 @@ class TestIncomeEstimatesSources(unittest.TestCase):
             self.assertEqual([x["symbol"] for x in a.search_symbols("Südzucker")], ["SZU.DE", "SZU.F", "X"])
             self.assertEqual(s1.call_count, 3)
 
+    def test_earnings_strategy_data(self):
+        import pandas as pd
+        cols = pd.to_datetime(["2026-09-30", "2026-06-30", "2025-09-30"])
+        cf = pd.DataFrame({cols[0]: [25.9e9, -24.3e9, -3.9e9, None], cols[1]: [20e9, -20e9, -3.9e9, None],
+                           cols[2]: [26.5e9, -20.1e9, -3.86e9, None]},
+                          index=["Free Cash Flow", "Repurchase Of Capital Stock", "Cash Dividends Paid", "Purchase Of Business"])
+        C = a.capital_allocation(type("T", (), {"quarterly_cashflow": cf})())
+        self.assertEqual(C["end"], "2026-09-30")
+        self.assertEqual([r["key"] for r in C["rows"]], ["fcf", "buyback", "dividends"])   # ohne Wert keine Zeile
+        self.assertEqual(C["rows"][1]["ago"], -20.1e9)                                       # Vorjahresquartal, nicht Vorquartal
+        idx = pd.to_datetime(["2025-05-12", "2025-08-11", "2025-11-10", "2026-02-09", "2026-05-11", "2026-08-10"])
+        divs = pd.Series([0.26, 0.26, 0.26, 0.26, 0.27, 0.27], index=idx)
+        orig = a.datetime
+        D = a.dividend_change(type("T", (), {"dividends": divs})())
+        self.assertEqual(D["per_year"], 4)
+        self.assertEqual((D["amount"], D["prev"]), (0.27, 0.26))                             # ggü. vier Zahlungen zuvor
+        self.assertAlmostEqual(D["change"], 0.27 / 0.26 - 1)
+        self.assertIs(a.datetime, orig)
+        self.assertEqual(a.SEC_8K_ITEMS["5.02"], "Wechsel im Vorstand oder Aufsichtsrat")
+        self.assertNotIn("2.02", a.SEC_8K_ITEMS)                                              # Quartalszahlen selbst nicht
+        self.assertTrue(a.STRAT_WORDS.search("Apple übernimmt KI-Start-up Ascend.io"))
+        self.assertTrue(a.STRAT_NOISE.search("SAP SE Shares Purchased by Pzena Investment Management LLC"))
+        self.assertTrue(a.STRAT_NOISE.search("Allianz Strategy Select 30 IT EUR Fonds"))
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

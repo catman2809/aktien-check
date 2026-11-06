@@ -6423,6 +6423,15 @@ def _sum_by(hs, key):
 # ---------------------------------------------------------------------------
 SEC_FORMS = {"10-K": "Jahresbericht", "10-Q": "Quartalsbericht", "8-K": "Wichtiges Ereignis", "20-F": "Jahresbericht (Ausland)",
              "6-K": "Zwischenmeldung (Ausland)", "DEF 14A": "Einladung Hauptversammlung", "S-1": "Börsenprospekt"}
+# Punkte einer 8-K-Meldung, die eine Unternehmensentscheidung anzeigen (2.02 Zahlen und 9.01 Anlagen bewusst nicht)
+SEC_8K_ITEMS = {"1.01": "Wesentlicher Vertrag abgeschlossen", "1.02": "Wesentlicher Vertrag beendet",
+                "1.05": "Cybersicherheitsvorfall", "2.01": "Kauf oder Verkauf von Unternehmensteilen abgeschlossen",
+                "2.03": "Neue Finanzierung (Anleihe oder Kredit)", "2.05": "Umbau mit Restrukturierungskosten",
+                "2.06": "Wertminderung von Vermögenswerten", "3.02": "Ausgabe neuer Aktien",
+                "3.03": "Änderung von Aktionärsrechten", "4.01": "Wechsel des Wirtschaftsprüfers",
+                "5.01": "Wechsel der Kontrolle", "5.02": "Wechsel im Vorstand oder Aufsichtsrat", "5.03": "Satzungsänderung",
+                "5.07": "Abstimmungen der Hauptversammlung", "7.01": "Information an Investoren",
+                "8.01": "Sonstiges wichtiges Ereignis"}
 SEC_REVENUE = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
                "RevenueFromContractWithCustomerIncludingAssessedTax", "RevenuesNetOfInterestExpense")
 # Jahresabschlüsse aus SEC-XBRL (us-gaap) mit den Zeilennamen von yfinance; je Periode zählt die erste vorhandene Kennzahl
@@ -7602,6 +7611,18 @@ def sec_company(symbol, alternatives=(), name=""):
             break
     earn = next(({"acc": a_, "date": d_, "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/"}
                  for f_, d_, a_, i_ in zip(forms, dates, accs, items_) if f_ in ("8-K", "6-K") and "2.02" in (i_ or "")), None)
+    # wichtige Unternehmensentscheidungen der letzten 6 Monate aus den 8-K-Meldungen (Earnings Reviewer)
+    since_ev = (datetime.now() - timedelta(days=183)).strftime("%Y-%m-%d")
+    events_8k = []
+    for f_, d_, a_, i_, p_ in zip(forms, dates, accs, items_, docs):
+        if f_ != "8-K" or d_ < since_ev:
+            continue
+        labs = [SEC_8K_ITEMS[c] for c in re.findall(r"\d\.\d\d", i_ or "") if c in SEC_8K_ITEMS]
+        if labs:
+            events_8k.append({"date": d_, "items": labs,
+                              "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{a_.replace('-', '')}/{p_}"})
+        if len(events_8k) >= 8:
+            break
     del sub
     filings, seen, since = [], {}, (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
     form4 = sum(1 for f_, d_ in zip(forms, dates) if f_ == "4" and d_ >= since)
@@ -7622,7 +7643,7 @@ def sec_company(symbol, alternatives=(), name=""):
         annual, quarters = (safe(lambda: ffin.result(timeout=45)) or ([], [])) if ffin else ([], [])
     out = {"cik": cik, "name": title, "filings": filings, "form4_90d": form4, "domestic": domestic, "us_symbol": us_sym,
            "country": sec_country,
-           "earnings_8k": earn,
+           "earnings_8k": earn, "events_8k": events_8k,
            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=&dateb=&owner=include&count=40",
            "annual": annual, "segments": segs,
            "crosscheck": safe(lambda: sec_crosscheck(symbol, quarters)) if domestic and symbol == us_sym else None}
@@ -8414,6 +8435,67 @@ def est_revisions(t):
     return out or None
 
 
+STRAT_WORDS = re.compile(r"übernahme|übernimmt|übernehmen|übernahm|verkauft|verkauf von|abspaltung|aktienrückkauf|rückkaufprogramm|"
+                         r"dividende (erhöht|angehoben|gesenkt)|investiert|investitionen? in|stellenabbau|umbau|restruktur|"
+                         r"sparprogramm|partnerschaft|kooperation|joint venture|neue[rn]? (chef|ceo|vorstand|finanzchef)|"
+                         r"rücktritt|tritt ab|neues werk|fabrik|strategie|anleihe|"
+                         r"acqui|merger|divest|spin-?off|buyback|repurchase|raises dividend|dividend (increase|hike)|layoff|"
+                         r"job cuts|restructur|partnership|partners with|new ceo|steps down|appoints|to invest|invests|"
+                         r"billion investment|new plant|factory|strategy|debt offering|bond sale", re.I)
+# Kurs-, Fonds- und Anlegermeldungen sind keine Unternehmensentscheidungen
+STRAT_NOISE = re.compile(r"\bllc\b|investment management|shares (purchased|sold|acquired|bought)|stake in|position in|holdings|"
+                         r"so viel gewinn|hätte|fonds|\bfunds?\b|\betf\b|seasonal|aktueller kurs|kursziel|price target|analyst|"
+                         r"rating|upgrade|downgrade|stock forecast|aktie prognose|prognose 20\d\d|should you|buy or sell|"
+                         r"kaufen oder verkaufen", re.I)
+
+
+def capital_allocation(t):
+    """Kapitalverwendung im letzten Quartal aus der Kapitalflussrechnung (Vorzeichen: Abfluss negativ): Aktienrückkäufe,
+    Dividenden, Investitionen, Zukäufe, neue/zurückgezahlte Schulden, Free Cashflow – mit Vorjahresquartal."""
+    cf = safe(lambda: t.quarterly_cashflow)
+    if cf is None or getattr(cf, "empty", True):
+        return None
+    cols = sorted(cf.columns, reverse=True)
+    q0 = cols[0]
+    end0 = q0.to_pydatetime().replace(tzinfo=None)
+    q4 = next((c for c in cols if 330 <= (end0 - c.to_pydatetime().replace(tzinfo=None)).days <= 400), None)
+
+    def val(col, *names):
+        for nm in names:
+            if col is not None and nm in cf.index and num(cf.loc[nm].get(col)) is not None:
+                return num(cf.loc[nm].get(col))
+        return None
+    rows = []
+    for key, lab, names in (("fcf", "Free Cashflow", ("Free Cash Flow",)),
+                            ("buyback", "Aktienrückkäufe", ("Repurchase Of Capital Stock", "Common Stock Payments")),
+                            ("dividends", "Dividenden gezahlt", ("Cash Dividends Paid", "Common Stock Dividend Paid")),
+                            ("capex", "Investitionen (Sachanlagen)", ("Capital Expenditure",)),
+                            ("acq", "Zukäufe von Unternehmen (netto)", ("Net Business Purchase And Sale", "Purchase Of Business")),
+                            ("debt", "Schulden aufgenommen (+) / getilgt (−)", ("Net Issuance Payments Of Debt",))):
+        v0 = val(q0, *names)
+        if v0 is None or abs(v0) < 1:
+            continue
+        rows.append({"key": key, "label": lab, "q": v0, "ago": val(q4, *names)})
+    return {"end": end0.strftime("%Y-%m-%d"), "rows": rows} if rows else None
+
+
+def dividend_change(t):
+    """Letzte Dividende ggü. der vorherigen gleichartigen Zahlung (bei Quartalsdividenden vier Zahlungen zurück)."""
+    d = safe(lambda: t.dividends)
+    if d is None or len(d) < 2:
+        return None
+    vals = [(str(i_)[:10], float(v)) for i_, v in d.items() if v and v > 0][-9:]
+    if len(vals) < 2:
+        return None
+    gaps = [(datetime.fromisoformat(b[0]) - datetime.fromisoformat(a_[0])).days for a_, b in zip(vals, vals[1:])]
+    per_year = 4 if gaps and sorted(gaps)[len(gaps) // 2] < 120 else 2 if gaps and sorted(gaps)[len(gaps) // 2] < 250 else 1
+    last, prev = vals[-1], (vals[-1 - per_year] if len(vals) > per_year else vals[-2])
+    if (datetime.now() - datetime.fromisoformat(last[0])).days > 400:
+        return None
+    return {"date": last[0], "amount": last[1], "prev_date": prev[0], "prev": prev[1], "change": last[1] / prev[1] - 1,
+            "per_year": per_year}
+
+
 def earnings_ai(cik, acc, name, facts):
     """Tiefenanalyse der Ergebnis-Pressemitteilung (8-K, Anlage 99.1) durch Claude – nach dem Raster eines
     Earnings-Updates: Schlagzeile, Kernaussagen, Bereiche, Ausblick/Prognose, Positives, Negatives, Fazit.
@@ -8441,10 +8523,15 @@ def earnings_ai(cik, acc, name, facts):
               "6. positiv: 2–3 Punkte, negativ: 2–3 Punkte (je höchstens 16 Wörter)\n"
               "7. fazit: 1–2 Sätze, was das Quartal für die weitere Entwicklung bedeutet\n"
               "8. ton: positiv, gemischt oder negativ\n"
+              "9. strategie: bis zu 5 Punkte (je höchstens 22 Wörter) zu strategischen Entscheidungen und wichtigen "
+              "Beschlüssen – Übernahmen oder Verkäufe, große Investitionen, Aktienrückkäufe, Dividende, Umbau oder Sparprogramme, "
+              "Wechsel im Management, Partnerschaften, neue Produkte oder Märkte; leer, wenn die Mitteilung keine nennt\n"
+              "10. ausblick_details: bis zu 4 Punkte mit konkreten Zielen des Managements (Umsatz, Marge, Gewinn, "
+              "Investitionen, Zeitpunkt); leer, wenn keine genannt\n"
               'Antworte nur mit JSON: {"schlagzeile": "", "kernaussagen": [], "segmente": [], "ausblick": "", "prognose": "", '
-              '"positiv": [], "negativ": [], "fazit": "", "ton": ""}')
+              '"positiv": [], "negativ": [], "fazit": "", "ton": "", "strategie": [], "ausblick_details": []}')
     model = os.environ.get("EARNINGS_AI_MODEL") or os.environ.get("BIZ_AI_MODEL") or "claude-haiku-5-5"
-    body = json.dumps({"model": model, "max_tokens": 1800, "messages": [{"role": "user", "content": prompt}]}).encode()
+    body = json.dumps({"model": model, "max_tokens": 2600, "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
         "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=90) as r:
@@ -8456,7 +8543,8 @@ def earnings_ai(cik, acc, name, facts):
            "segments": lst("segmente", 4, 200), "outlook": str(js.get("ausblick") or "").strip()[:500],
            "guidance": str(js.get("prognose") or "").strip().lower()[:12], "pos": lst("positiv", 3, 180),
            "neg": lst("negativ", 3, 180), "verdict": str(js.get("fazit") or "").strip()[:400],
-           "tone": str(js.get("ton") or "").strip().lower()[:12], "url": url, "model": model, "t": int(time.time())}
+           "tone": str(js.get("ton") or "").strip().lower()[:12], "strategy": lst("strategie", 5, 220),
+           "outlook_points": lst("ausblick_details", 4, 200), "url": url, "model": model, "t": int(time.time())}
     if not out["points"]:
         return None
     with STORE.lock:
@@ -8488,8 +8576,17 @@ def earnings_review(query):
         f_ev = ex.submit(lambda: safe(lambda: company_events(symbol, alts, info.get("currency") or ""), []))
         f_news = ex.submit(lambda: (safe(lambda: google_news(f'"{name}" Quartalszahlen', "de", days=45), []) or [])
                            + (safe(lambda: google_news(f'"{name}" quarterly results', "en", days=45), []) or []))
+        # strategische Meldungen der letzten vier Monate (Übernahmen, Rückkäufe, Umbau, Management, Partnerschaften …)
+        f_strat = ex.submit(lambda: (safe(lambda: google_news(
+            f'"{name}" (Übernahme OR Aktienrückkauf OR Strategie OR Investition OR Stellenabbau OR Partnerschaft OR Vorstand)',
+            "de", days=120), []) or []) + (safe(lambda: google_news(
+            f'"{name}" (acquisition OR buyback OR strategy OR restructuring OR partnership OR CEO OR investment)', "en", days=120), [])
+            or []))
+        f_cap = ex.submit(lambda: safe(lambda: capital_allocation(t)))
+        f_div = ex.submit(lambda: safe(lambda: dividend_change(t)))
         qd, eps_h, sec_, revs, events, news = (f_q.result(), f_eps.result(), f_sec.result(), f_rev.result(), f_ev.result(),
                                                f_news.result())
+        strat_news, cap, div = f_strat.result(), f_cap.result(), f_div.result()
     m = {"name": name, "currency": info.get("currency"), "fin_currency": financial_currency(symbol, info),
          "eps_quarters": [{"q": e["q"] if len(e["q"]) > 7 else e["q"] + "-28", "est": e["est"], "act": e["act"]} for e in eps_h]}
     qr = safe(lambda: quarter_report(t, m, sec_)) or {}
@@ -8519,6 +8616,16 @@ def earnings_review(query):
                       "date": it["date"].date().isoformat() if it.get("date") else None})
         if len(press) >= 6:
             break
+    strategic = []
+    for it in sorted(strat_news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
+        k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
+        if k_ in seen or not STRAT_WORDS.search(it["title"]) or STRAT_NOISE.search(it["title"])                 or name.split()[0].lower() not in it["title"].lower():
+            continue
+        seen.add(k_)
+        strategic.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
+                          "date": it["date"].date().isoformat() if it.get("date") else None})
+        if len(strategic) >= 6:
+            break
     filings = [f for f in ((sec_ or {}).get("filings") or []) if f["form"] in ("10-Q", "10-K", "8-K", "6-K", "20-F")][:4]
     P = ((qd or {}).get("periods") or [])[-6:]
     out = {
@@ -8529,6 +8636,7 @@ def earnings_review(query):
         "quarters": [{k_: p_.get(k_) for k_ in ("label", "end", "revenue", "net_income", "margin", "op_margin")} for p_ in P],
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
+        "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)
