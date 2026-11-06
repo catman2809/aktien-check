@@ -668,3 +668,4 @@ DEPOT_EXACT.update({"Ausblick des Managements": "Management outlook",
                     "Pressemitteilung öffnen": "Open press release"})
 DEPOT_EXACT.update({"Aus der Ergebnis-Pressemitteilung, maschinell übersetzt": "From the earnings press release, machine-translated",
                     "Original öffnen": "Open original"})
+DEPOT_EXACT.update({"(übersetzt)": "(translated)"})

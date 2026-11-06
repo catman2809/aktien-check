@@ -1982,6 +1982,23 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         with um.patch.object(a, "translate_de", return_value=None):
             self.assertNotIn("de", a.guidance_de("acc2", g))                  # Fehlschlag -> Original, später neu versuchen
 
+    def test_translate_press_titles(self):
+        import unittest.mock as um
+        items = [{"title": "Apple Raises $7.5 Billion From Debt Offering"}, {"title": "SAP-Aktie: Cloud-Wachstum setzt Maßstab"},
+                 {"title": "Allianz stock enters results with momentum"}]
+        with um.patch.dict(a.TITLE_DE, clear=True), \
+                um.patch.object(a, "translate_de", return_value="Apple nimmt 7,5 Mrd. $ ein\nAllianz-Aktie mit Schwung") as tr:
+            a.translate_titles(items)
+            self.assertEqual(tr.call_count, 1)                                 # ein Abruf für alle englischen Titel
+            self.assertEqual(items[0]["title_de"], "Apple nimmt 7,5 Mrd. $ ein")
+            self.assertNotIn("title_de", items[1])                            # deutsche Schlagzeile bleibt
+            self.assertEqual(items[2]["title_de"], "Allianz-Aktie mit Schwung")
+            a.translate_titles([{"title": "Apple Raises $7.5 Billion From Debt Offering"}])
+            self.assertEqual(tr.call_count, 1)                                 # aus dem Zwischenspeicher
+        with um.patch.dict(a.TITLE_DE, clear=True), um.patch.object(a, "translate_de", return_value="nur eine Zeile"):
+            x = a.translate_titles([{"title": "One headline here"}, {"title": "Another headline there"}])
+            self.assertFalse(any("title_de" in i for i in x))                  # Zeilen passen nicht -> Original
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

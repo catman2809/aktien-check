@@ -8611,6 +8611,30 @@ def translate_de(text):
     return " ".join(res).strip() or None
 
 
+TITLE_DE = {}  # englische Schlagzeile -> deutsche Übersetzung (Zwischenspeicher)
+GERMAN_HINT = re.compile(r"[äöüß]|\b(der|die|das|und|mit|für|nach|vor|aus|bei|zum|zur|nicht|auf|Aktie|Quartal|Zahlen|Gewinn|Umsatz)\b", re.I)
+
+
+def translate_titles(items):
+    """Schlagzeilen (Pressestimmen, Meldungen) auf Deutsch: englische Titel in einem Abruf übersetzen (zeilenweise),
+    deutsche bleiben unverändert. Ergebnis in „title_de“; ohne Übersetzung bleibt der Originaltitel."""
+    todo = [it for it in items if it.get("title") and not GERMAN_HINT.search(it["title"]) and it["title"] not in TITLE_DE]
+    if todo:
+        tr = translate_de("\n".join(it["title"].replace("\n", " ") for it in todo))
+        lines = [ln.strip() for ln in (tr or "").split("\n")]
+        if len(lines) == len(todo):
+            for it, ln in zip(todo, lines):
+                if ln:
+                    TITLE_DE[it["title"]] = ln
+        if len(TITLE_DE) > 2000:
+            for k_ in list(TITLE_DE)[:500]:
+                TITLE_DE.pop(k_, None)
+    for it in items:
+        if it.get("title") in TITLE_DE:
+            it["title_de"] = TITLE_DE[it["title"]]
+    return items
+
+
 def guidance_de(acc, g):
     """Deutsche Fassung der Ausblick-Zitate ergänzen (einmal je Meldung, mit dem Ausblick gespeichert)."""
     if not g or g.get("de"):
@@ -8761,6 +8785,7 @@ def earnings_review(query):
                           "date": it["date"].date().isoformat() if it.get("date") else None})
         if len(strategic) >= 6:
             break
+    safe(lambda: translate_titles(press + strategic))  # englische Schlagzeilen zusätzlich auf Deutsch
     filings = [f for f in ((sec_ or {}).get("filings") or []) if f["form"] in ("10-Q", "10-K", "8-K", "6-K", "20-F")][:4]
     P = ((qd or {}).get("periods") or [])[-6:]
     out = {

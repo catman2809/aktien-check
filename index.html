@@ -734,6 +734,7 @@ tr.u-locked td{opacity:.65}
 .er-out{margin:12px 0 4px}
 .er-quote blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:0 8px 8px 0;font-size:14px;font-style:italic}
 .er-qsrc{margin:2px 0 0}
+.er-tr{color:var(--text-3);font-style:italic} .op-sheet .er-tr{color:#888}
 .op-sheet .er-quote blockquote{font-size:1em;padding:3px 8px;border-left:2px solid #1f4e79;background:#f2f5fa;border-radius:0;margin:3px 0}
 .op-sheet .er-qsrc{font-size:.85em;color:#666}
 /* One-Pager: weißes A4-Blatt, unabhängig von Hell/Dunkel, druckfähig */
@@ -4535,6 +4536,11 @@ function erPoints(D) {
   if (fy?.chg30 != null) pts.push(`Gewinnschätzung für das laufende Geschäftsjahr in den letzten 30 Tagen ${Math.abs(fy.chg30) < 0.005 ? "kaum verändert" : (fy.chg30 > 0 ? "angehoben" : "gesenkt") + ` (${pc(fy.chg30, 1, true)})`}`);
   return pts;
 }
+// Schlagzeile verlinkt: auf Deutsch übersetzt (Original im Tooltip), in der englischen Ansicht das Original
+function erLink(n) {
+  const de = n.title_de && I18N.lang !== "en";
+  return `<a href="${esc(n.link)}" target="_blank" rel="noopener" translate="no"${de ? ` title="${esc(n.title)}"` : ""}>${esc(de ? n.title_de : n.title)}</a>${de ? ` <small class="er-tr">(übersetzt)</small>` : ""}`;
+}
 function erOutlook(D) {
   return D.ai?.outlook || D.quarter?.ai?.outlook || "";
 }
@@ -4605,7 +4611,7 @@ function erStrategyPoints(D) {
   if (!A?.strategy?.length) {
     (D.events_8k || []).filter(e => e.items.some(i => !/Information an Investoren|Abstimmungen der Hauptversammlung/.test(i))).slice(0, 2)
       .forEach(e => out.push(`<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${erDate(e.date)}: ${esc(e.items.join(", "))}</a></li>`));
-    (D.strategic_news || []).slice(0, 3).forEach(n => out.push(`<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <small class="stamp">${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`));
+    (D.strategic_news || []).slice(0, 3).forEach(n => out.push(`<li>${erLink(n)} <small class="stamp">${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`));
   }
   return out.slice(0, 7);
 }
@@ -4620,7 +4626,7 @@ function erStrategy(D) {
   const ev = (D.events_8k || []).slice(0, 4);
   if (ev.length) right.push(`<p class="op-sublab">Pflichtmeldungen an die US-Börsenaufsicht (8-K)</p><ul>${ev.map(e => `<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${erDate(e.date)}: ${esc(e.items.join(", "))}</a></li>`).join("")}</ul>`);
   const sn = (D.strategic_news || []).slice(0, A?.strategy?.length ? 2 : 4);
-  if (sn.length) right.push(`<p class="op-sublab">Meldungen der letzten Monate</p><ul class="op-press">${sn.map(n => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <small>${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`).join("")}</ul>`);
+  if (sn.length) right.push(`<p class="op-sublab">Meldungen der letzten Monate</p><ul class="op-press">${sn.map(n => `<li>${erLink(n)} <small>${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`).join("")}</ul>`);
   if (!left.length && !right.length) return "";
   return `<h4>Strategie &amp; wichtige Entscheidungen</h4><div class="op-cols"><div>${left.join("") || "<p>Keine Angaben zur Kapitalverwendung.</p>"}</div><div>${right.join("")}</div></div>`;
 }
@@ -4672,7 +4678,7 @@ function erOnePager() {
           ${R.map(r => `<tr><td>${esc(r.period)}</td><td>${nf(r.current)}</td><td>${pct_(r.chg30)}</td><td>${pct_(r.chg90)}</td></tr>`).join("")}</tbody></table>` : ""}
       </div></div>
       ${erStrategy(D)}
-      ${D.press?.length ? `<h4>Pressestimmen</h4><ul class="op-press">${D.press.slice(0, 3).map(p => `<li><a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.title)}</a> <small>${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small></li>`).join("")}</ul>` : ""}
+      ${D.press?.length ? `<h4>Pressestimmen</h4><ul class="op-press">${D.press.slice(0, 3).map(p => `<li>${erLink(p)} <small>${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small></li>`).join("")}</ul>` : ""}
       ${D.next ? `<p class="op-next">Nächste Quartalszahlen: <b>${erDate(D.next.date)}</b>${D.next.estimated ? " (geschätzt)" : ""}${D.next.detail ? ` · <span>${esc(D.next.detail)}</span>` : ""}</p>` : ""}
       <footer class="op-foot"><b>Quellen:</b> ${src.join(" · ")}<br>Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.</footer>
     </div></div>`;
