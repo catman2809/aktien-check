@@ -711,6 +711,7 @@ tr.u-locked td{opacity:.65}
 .pc-table td{padding:7px 12px;white-space:nowrap}
 .pc-table tr.pc-gap>*{border-top:6px solid transparent}
 .pc-table tr.pc-hl td.num{background:color-mix(in srgb,var(--accent) 16%,transparent);font-weight:700}
+.pc-table tr.pc-hl td.pc-none{background:none}
 .pc-edit i{font-style:normal;color:var(--text-3);margin-left:3px}
 .pc-in{width:68px;font:inherit;font-size:13.5px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2,var(--surface));color:var(--accent)}
 .pc-in:focus{outline:2px solid var(--accent);outline-offset:0}
@@ -4298,10 +4299,10 @@ function pcTable() {
     ${row("Gewinnwachstum", [td("")].concat(V.ng.map((_, i) => td(inp(V.ng, i, "ng", true) + "<i>%</i>", "pc-edit"))), "", "änderbar")}
     ${row("Nettomarge", R.m.map(v => td(pc(v, 0))), "pc-gap")}
     ${row("Gewinn je Aktie", R.eps.map(v => td(nf(v) + " " + esc(c), v < 0 ? "neg" : "")), "pc-gap")}
-    ${row("KGV konservativ", V.pl.map((_, i) => td(inp(V.pl, i, "pl", false), "pc-edit")), "pc-gap", "änderbar")}
-    ${row("KGV optimistisch", V.ph.map((_, i) => td(inp(V.ph, i, "ph", false), "pc-edit")), "", "änderbar")}
-    ${row("Kurs konservativ", R.lo.map(v => td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl pc-gap")}
-    ${row("Kurs optimistisch", R.hi.map(v => td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl")}
+    ${row("KGV konservativ", V.pl.map((_, i) => i ? td(inp(V.pl, i, "pl", false), "pc-edit") : td("")), "pc-gap", "änderbar")}
+    ${row("KGV optimistisch", V.ph.map((_, i) => i ? td(inp(V.ph, i, "ph", false), "pc-edit") : td("")), "", "änderbar")}
+    ${row("Kurs konservativ", R.lo.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl pc-gap")}
+    ${row("Kurs optimistisch", R.hi.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl")}
     ${row("Rendite p. a. konservativ", R.cl.map(cagrTd), "pc-gap", "ab heute")}
     ${row("Rendite p. a. optimistisch", R.ch.map(cagrTd), "", "ab heute")}
     </tbody></table></div>`;
@@ -4361,8 +4362,8 @@ function pcBindInputs() {
     set(2, j => pcMoney(R.ni[j], fc));
     set(4, j => pc(R.m[j], 0));
     set(5, j => nf(R.eps[j]) + " " + esc(c));
-    set(8, j => R.lo[j] == null ? "–" : nf(R.lo[j]) + " " + esc(c));
-    set(9, j => R.hi[j] == null ? "–" : nf(R.hi[j]) + " " + esc(c));
+    set(8, j => !j ? "" : R.lo[j] == null ? "–" : nf(R.lo[j]) + " " + esc(c));  // Basisjahr ohne Kurs
+    set(9, j => !j ? "" : R.hi[j] == null ? "–" : nf(R.hi[j]) + " " + esc(c));
     [[10, R.cl], [11, R.ch]].forEach(([r, a]) => [...rows[r].cells].slice(1).forEach((td, j) => {
       td.textContent = a[j] == null ? "" : pc(a[j], 0, true); td.className = "num " + (a[j] == null ? "" : a[j] >= 0 ? "pos" : "neg"); }));
     const kp = document.querySelectorAll("#pc-res .pc-kpis .adm-k b")[3];
