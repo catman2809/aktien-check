@@ -1061,13 +1061,13 @@ table.peers .neg{color:var(--neg)}
   --pos-soft:rgba(63,122,31,.10); --neu-soft:rgba(168,98,10,.10); --neg-soft:rgba(168,58,44,.10);
   --shadow:0 8px 32px rgba(60,40,20,.10);
   --glass-blur:blur(22px) saturate(150%);
-  --veil:linear-gradient(180deg,rgba(245,239,230,.58),rgba(245,239,230,.80) 55%,rgba(245,239,230,.88));
+  --veil:linear-gradient(180deg,rgba(245,239,230,.22),rgba(245,239,230,.38) 55%,rgba(245,239,230,.50));
   --radius:20px;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#120e0b; --surface:rgba(28,23,19,.58); --surface-2:rgba(255,255,255,.05); --surface-solid:#1f1915;
-    --glass-strong:rgba(26,21,17,.82);
+    --bg:#120e0b; --surface:rgba(20,16,13,.74); --surface-2:rgba(255,255,255,.05); --surface-solid:#1f1915;
+    --glass-strong:rgba(18,14,11,.88);
     --border:rgba(255,255,255,.09); --border-strong:rgba(255,255,255,.17); --track:rgba(255,255,255,.09);
     --accent-soft:rgba(118,184,172,.15);
     --pos-soft:rgba(147,196,111,.12); --neu-soft:rgba(229,165,74,.12); --neg-soft:rgba(236,138,116,.12);
@@ -1076,14 +1076,21 @@ table.peers .neg{color:var(--neg)}
   }
 }
 :root[data-theme="dark"]{
-  --bg:#120e0b; --surface:rgba(28,23,19,.58); --surface-2:rgba(255,255,255,.05); --surface-solid:#1f1915;
-  --glass-strong:rgba(26,21,17,.82);
+  --bg:#120e0b; --surface:rgba(20,16,13,.74); --surface-2:rgba(255,255,255,.05); --surface-solid:#1f1915;
+  --glass-strong:rgba(18,14,11,.88);
   --border:rgba(255,255,255,.09); --border-strong:rgba(255,255,255,.17); --track:rgba(255,255,255,.09);
   --accent-soft:rgba(118,184,172,.15);
   --pos-soft:rgba(147,196,111,.12); --neu-soft:rgba(229,165,74,.12); --neg-soft:rgba(236,138,116,.12);
   --shadow:0 8px 32px rgba(0,0,0,.28);
   --veil:linear-gradient(180deg,rgba(14,11,9,.58),rgba(14,11,9,.76) 55%,rgba(14,11,9,.86));
 }
+/* Text direkt auf dem Foto (Überschriften, Einleitungen): weicher Lichthof in Hintergrundfarbe, damit er lesbar bleibt */
+:root{--halo:0 0 3px rgba(245,239,230,1),0 0 8px rgba(245,239,230,.95),0 0 18px rgba(245,239,230,.9),0 0 32px rgba(245,239,230,.75)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--halo:0 0 2px rgba(14,11,9,.9),0 0 12px rgba(14,11,9,.8)}}
+:root[data-theme="dark"]{--halo:0 0 2px rgba(14,11,9,.9),0 0 12px rgba(14,11,9,.8)}
+.welcome>h1,.welcome>p,.welcome-kerzi,h2.section,.section-sub,.pc-page>h1,.pc-page>p,.pc-head,.wl-head,.dp-head,.mv-head,
+.loading b,.loading span,.loading li{text-shadow:var(--halo)}
+body .welcome>p,body .section-sub,body .pc-page>p,body .pc-head .stamp{color:var(--text)}
 /* fester Hintergrund (eigene Ebene statt background-attachment:fixed – das kann iOS nicht) */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:var(--veil),url(/static/bg.jpg) center/cover no-repeat}
@@ -1102,7 +1109,7 @@ input,select,textarea{background-color:var(--surface-2)}
 /* Glas ohne Unterstützung für Unschärfe (ältere Browser): deckender */
 @supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
   :root{--surface:rgba(255,251,245,.92)}
-  :root[data-theme="dark"]{--surface:rgba(28,23,19,.92)}
+  :root[data-theme="dark"]{--surface:rgba(20,16,13,.94)}
 }
 @media (prefers-reduced-transparency: reduce){
   .card,.topbar,.subnav,.suggest,.modal{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--surface-solid)}
