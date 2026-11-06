@@ -1815,6 +1815,19 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         g = a.trend_growth([32.7, 35.9, 40.0])
         self.assertAlmostEqual(est[0]["revenue"], 40.0 * (1 + g) ** 2)
 
+    def test_pricecalc_dcf(self):
+        fcfs = [100.0, 110.0, 120.0, 130.0, 140.0]
+        eq_now, eq_5 = a.pc_dcf(fcfs, 0.09, 0.025, 200.0)
+        tv = 140.0 * 1.025 / 0.065
+        pv = sum(f / 1.09 ** (i + 0.5) for i, f in enumerate(fcfs)) + tv / 1.09 ** 4.5   # Mitte-Jahr-Abzinsung
+        self.assertAlmostEqual(eq_now, pv - 200.0)
+        self.assertAlmostEqual(eq_5, tv - 200.0)
+        self.assertLess(a.pc_dcf(fcfs, 0.095, 0.02, 200.0)[0], eq_now)                # konservativ: höherer WACC, weniger g
+        self.assertGreater(a.pc_dcf(fcfs, 0.085, 0.03, 200.0)[0], eq_now)
+        self.assertTrue(a.pc_dcf(fcfs, 0.05, 0.06, 0)[0] > 0)                          # g >= WACC wird begrenzt
+        self.assertEqual(set(a.PC_SCEN), {"bear", "base", "bull"})
+        self.assertEqual([a.PC_SCEN[k]["g_term"] for k in ("bear", "base", "bull")], [0.02, 0.025, 0.03])
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

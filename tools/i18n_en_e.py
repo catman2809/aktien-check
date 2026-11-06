@@ -495,3 +495,71 @@ DEPOT_EXACT.update({"Nicht im Tarif (24 Std. ausgelassen)": "Not in plan (skippe
 DEPOT_WILD += [("Stand {0}, laut Wikidata", "as of {0}, per Wikidata")]
 DEPOT_WILD += [("Das Geschäftsjahr {0} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – die Prognosen beginnen deshalb mit {1}.",
                 "Fiscal year {0} has ended, but its figures have not been published yet – the forecasts therefore start with {1}.")]
+
+# Aktienkursrechner
+DEPOT_EXACT.update({
+    "Aktienkursrechner": "Stock price calculator",
+    "Mögliche Kursspanne der nächsten fünf Jahre aus Umsatzwachstum, Gewinnwachstum und KGV – mit Bear-, Base- und Bull-Szenario nach einem DCF-Modell. Alle Annahmen lassen sich danach selbst überschreiben.":
+        "Possible price range over the next five years from revenue growth, earnings growth and P/E – with bear, base and bull scenarios based on a DCF model. All assumptions can be overwritten afterwards.",
+    "Aktie, z. B. Apple, SAP.DE oder Allianz": "Stock, e.g. Apple, SAP.DE or Allianz",
+    "Berechnen": "Calculate",
+    "Wohin kann der Kurs in fünf Jahren laufen? Umsatz- und Gewinnwachstum mit konservativem und optimistischem KGV – Bear-, Base- und Bull-Szenario nach einem DCF-Modell, alle Annahmen selbst änderbar.":
+        "Where could the price be in five years? Revenue and earnings growth with a conservative and an optimistic P/E – bear, base and bull scenarios based on a DCF model, all assumptions editable.",
+    "Kurs berechnen": "Calculate price",
+    "Umsatzwachstum": "Revenue growth", "Gewinnwachstum": "Earnings growth", "Nettomarge": "Net margin",
+    "KGV konservativ": "P/E conservative", "KGV optimistisch": "P/E optimistic",
+    "Kurs konservativ": "Price conservative", "Kurs optimistisch": "Price optimistic",
+    "Rendite p. a. konservativ": "Return p.a. conservative", "Rendite p. a. optimistisch": "Return p.a. optimistic",
+    "änderbar": "editable", "ab heute": "from today",
+    "Werte des Szenarios wiederherstellen": "Restore scenario values",
+    "Umsatz- und Gewinnwachstum (in %) und KGV lassen sich je Jahr überschreiben – alles rechnet sofort neu.":
+        "Revenue and earnings growth (in %) and P/E can be overwritten for each year – everything recalculates instantly.",
+    "So wird gerechnet": "How it is calculated",
+    "Diskontsatz (WACC)": "Discount rate (WACC)", "KGV heute / Median 5 J.": "P/E today / 5-yr median",
+    "konservativ – optimistisch": "conservative – optimistic",
+    "nicht berechenbar (negativer Free Cashflow)": "not computable (negative free cash flow)",
+    "Ewiges Wachstum": "Terminal growth", "Anteil Endwert am Unternehmenswert": "Terminal value share of enterprise value",
+    "DCF-Wert je Aktie": "DCF value per share", "KGV konservativ / optimistisch": "P/E conservative / optimistic",
+    "Kurs = Gewinn je Aktie × KGV.": "Price = earnings per share × P/E.",
+    "Umsatz und Reinertrag wachsen vom letzten abgeschlossenen Geschäftsjahr aus mit den Raten der Tabelle; Gewinn je Aktie = Reinertrag ÷ heutige Aktienzahl.":
+        "Revenue and net income grow from the last completed fiscal year at the rates in the table; earnings per share = net income ÷ today's share count.",
+    "Die Rendite p. a. vergleicht den Kurs am jeweiligen Geschäftsjahresende mit dem heutigen Kurs (ohne Dividenden).":
+        "The return p.a. compares the price at the respective fiscal year end with today's price (excluding dividends).",
+    "Szenarien nach dem DCF-Modell": "Scenarios based on the DCF model",
+    "Umsatzwachstum im Basisfall:": "Revenue growth in the base case:",
+    "KGV:": "P/E:",
+    "Bank/Versicherer: Eigenkapital-DCF mit dem Reinertrag statt Free Cashflow.": "Bank/insurer: equity DCF using net income instead of free cash flow.",
+    "Keine Anlageberatung – eine Modellrechnung mit den angezeigten Annahmen.": "Not investment advice – a model calculation using the assumptions shown.",
+    "Der Kursrechner ist nur für Aktien – ETFs haben keinen eigenen Gewinn.": "The price calculator is for stocks only – ETFs have no earnings of their own.",
+    "Zu wenige Geschäftsjahre für eine Berechnung.": "Too few fiscal years for a calculation.",
+    "Kein aktueller Kurs bzw. Börsenwert verfügbar.": "No current price or market value available.",
+    "Wechselkurs nicht verfügbar.": "Exchange rate not available.",
+    "Konsens": "consensus", "fortgeschrieben": "extrapolated",
+})
+DEPOT_WILD += [
+    ("DCF-Wert je Aktie ({*})", "DCF value per share ({*})"),
+    ("ewiges Wachstum {0}", "terminal growth {0}"),
+    ("DCF-KGV Jahr {0}: {1}", "DCF P/E year {0}: {1}"), ("DCF-KGV Jahr {0}: {*}", "DCF P/E year {0}: {*}"),
+    ("Kursspanne {0}", "Price range {0}"), ("{0} ggü. Kurs", "{0} vs. price"),
+    ("Aktueller Kurs {0} {1} · Basisjahr {2} (letztes abgeschlossenes Geschäftsjahr)",
+     "Current price {0} {1} · base year {2} (last completed fiscal year)"),
+    ("Umsatzwachstum Jahr {0} / {1}", "Revenue growth year {0} / {1}"), ("Nettomarge Jahr {0}", "Net margin year {0}"),
+    ("Berechne Szenarien für {*} …", "Calculating scenarios for {*} …"), ("Kann bis zu {0} Sekunden dauern", "Can take up to {0} seconds"),
+    ("Berechnung nicht möglich: {*}", "Calculation not possible: {*}"),
+    ("Umgerechnet von {0} in {1}.", "Converted from {0} to {1}."),
+    ("{0}: Konsens", "{0}: consensus"), ("{0}: fortgeschrieben", "{0}: extrapolated"),
+    ("({0} Jahre, Diskontsatz nach CAPM, Abzinsung zur Jahresmitte, ewiges Wachstum danach). Base: Analystenkonsens, danach schrittweise Richtung langfristiges Wachstum. Bear/Bull: Umsatzwachstum {1} niedriger/höher (mindestens {2} Prozentpunkte), Nettomarge bis Jahr {3} um {4} niedriger/höher, Diskontsatz ±{5} Prozentpunkte, ewiges Wachstum {6} / {7} / {8}.",
+     "({0} years, discount rate via CAPM, mid-year discounting, perpetual growth thereafter). Base: analyst consensus, then gradually towards long-term growth. Bear/Bull: revenue growth {1} lower/higher (at least {2} percentage points), net margin by year {3} {4} lower/higher, discount rate ±{5} percentage points, terminal growth {6} / {7} / {8}."),
+    ("konservativ = niedrigeres, optimistisch = höheres aus aktuellem KGV und Median der letzten fünf Jahre; für Bear/Bull im Verhältnis der DCF-Werte zum Basisfall angepasst. Das reine DCF-KGV (Endwert ÷ Reinertrag in Jahr {0}) ist meist deutlich niedriger, weil es nach Jahr {1} nur noch {2} Wachstum unterstellt.",
+     "conservative = the lower, optimistic = the higher of the current P/E and the five-year median; adjusted for bear/bull in proportion to the DCF values versus the base case. The pure DCF P/E (terminal value ÷ net income in year {0}) is usually much lower because it assumes only {2} growth after year {1}."),
+    ("Eigenkapitalkosten {0} = risikoloser Zins {1} + Beta {2} (angepasst {3}) × Marktrisikoprämie {4}",
+     "Cost of equity {0} = risk-free rate {1} + beta {2} (adjusted {3}) × equity risk premium {4}"),
+    ("Eigenkapitalkosten {0} = risikoloser Zins {1} + Beta – (angepasst {2}) × Marktrisikoprämie {3}",
+     "Cost of equity {0} = risk-free rate {1} + beta – (adjusted {2}) × equity risk premium {3}"),
+    ("+ Länderrisiko {0}", "+ country risk {0}"),
+    ("Free-Cashflow-Marge zuletzt {0}.", "Most recent free cash flow margin {0}."),
+    ("Kein aussagekräftiges KGV (Verluste oder zu kurze Historie) – Startwerte {0} bzw. {1}, bitte anpassen.",
+     "No meaningful P/E (losses or too short a history) – starting values {0} and {1}, please adjust."),
+    ("Das Geschäftsjahr {0} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – Basisjahr ist deshalb {1}.",
+     "Fiscal year {0} has ended, but its figures have not been published yet – the base year is therefore {1}."),
+]

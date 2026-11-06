@@ -8028,6 +8028,202 @@ def business_model(m):
     return rules
 
 
+# ---------------------------------------------------------------------------
+# Aktienkursrechner: Kursspanne für die nächsten fünf Jahre aus Umsatzwachstum, Gewinnwachstum und KGV.
+# Die Szenarien (Bear/Base/Bull) folgen dem DCF-Modell (financial-analysis:dcf-model) mit dessen Standardauswahl:
+# 5 Prognosejahre, Diskontsatz nach CAPM (Marktrisikoprämie 5,5 %), Mitte-Jahr-Abzinsung, ewiges Wachstum
+# 2,0 / 2,5 / 3,0 %, Bear mit höherem und Bull mit niedrigerem Diskontsatz. KGV: konservativ = niedrigeres, optimistisch
+# = höheres aus historischem Median-KGV (5 Jahre) und aktuellem KGV – für Bear/Bull im Verhältnis der DCF-Werte zum
+# Basisfall angepasst (gedämpft). Das reine DCF-KGV (Endwert ÷ Reinertrag in Jahr 5) liegt mit ewigem Wachstum von
+# 2,5 % fast immer bei 10–15 und wird nur als Vergleichswert gezeigt.
+# ---------------------------------------------------------------------------
+PRICECALC_CACHE = {}
+PC_YEARS = 5
+PC_ERP = 0.055
+PC_SCEN = {"bear": {"label": "Bear", "g_term": 0.020, "wacc_adj": 0.005, "growth_adj": -1, "margin_end": 0.90},
+           "base": {"label": "Base", "g_term": 0.025, "wacc_adj": 0.0, "growth_adj": 0, "margin_end": 1.00},
+           "bull": {"label": "Bull", "g_term": 0.030, "wacc_adj": -0.005, "growth_adj": 1, "margin_end": 1.10}}
+
+
+def _pc_med(xs):
+    xs = sorted(x for x in xs if x is not None)
+    return (xs[(len(xs) - 1) // 2] + xs[len(xs) // 2]) / 2 if xs else None
+
+
+def pc_dcf(fcfs, wacc, g, net_debt):
+    """Eigenkapitalwert heute (Mitte-Jahr-Abzinsung, ewige Rente nach dem letzten Jahr) und am Ende des letzten Jahres:
+    Endwert = FCF × (1 + g) / (WACC − g), jeweils abzüglich Nettoverschuldung – wie im DCF-Modell."""
+    g = min(g, wacc - 0.01)
+    tv = fcfs[-1] * (1 + g) / (wacc - g)
+    pv = sum(f / (1 + wacc) ** (i + 0.5) for i, f in enumerate(fcfs)) + tv / (1 + wacc) ** (len(fcfs) - 0.5)
+    return pv - net_debt, tv - net_debt
+
+
+def price_calc(query):
+    """Daten für den Kursrechner: letztes abgeschlossenes Geschäftsjahr plus fünf Prognosejahre je Szenario
+    (Umsatzwachstum, Gewinnwachstum, KGV konservativ/optimistisch) und die DCF-Kennzahlen dahinter. Gerechnet wird in
+    Berichtswährung; Gewinn je Papier und Kurse in der Währung der Notierung (bei ADRs je ADR)."""
+    symbol, t, info, _alt = resolve(query)
+    if info.get("quoteType") == "ETF":
+        raise ValueError("Der Kursrechner ist nur für Aktien – ETFs haben keinen eigenen Gewinn.")
+    hit = PRICECALC_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    d = income_data(symbol, "annual")
+    P, E = d["periods"], d.get("estimates") or []
+    if len(P) < 2:
+        raise ValueError("Zu wenige Geschäftsjahre für eine Berechnung.")
+    last = P[-1]
+    fi = t.fast_info
+    px = num(safe(lambda: fi.last_price)) or current_price(info)
+    pcur = safe(lambda: fi.currency) or info.get("currency")
+    mcap = num(safe(lambda: fi.market_cap)) or num(info.get("marketCap"))
+    if not px or not mcap:
+        raise ValueError("Kein aktueller Kurs bzw. Börsenwert verfügbar.")
+    fcur = d.get("currency") or pcur
+    k = fx_rate(fcur, pcur) if fcur and pcur and fcur != pcur else 1.0
+    if pcur == "GBp":
+        k = (fx_rate(fcur, "GBP") if fcur != "GBP" else 1.0) * 100
+    if not k:
+        raise ValueError("Wechselkurs nicht verfügbar.")
+    shares = mcap / px  # Papiere dieser Notierung (bei ADRs die Zahl der ADRs) -> Gewinn je Papier passt zum Kurs
+    revs = [p_["revenue"] for p_ in P]
+    ly = int(last["end"][:4])
+
+    # Konsens je Geschäftsjahr (nur echte Analystenschätzungen, keine Fortschreibung)
+    cons = {}
+    for e in E:
+        y = int(str(e["label"])[:4])
+        cons[y] = {"rev": e["revenue"] if e.get("revenue") and not e.get("rev_trend") and e.get("est") == "consensus" else None,
+                   "ni": e["net_income"] if e.get("net_income") is not None and e.get("est") == "consensus" else None}
+    hist_g = trend_growth(revs, cap=0.40)
+    hist_m = [p_["margin"] for p_ in P[-3:] if p_.get("margin") is not None]
+    m0 = _pc_med(hist_m) if hist_m else 0.0
+    fcf_ms = [p_["fcf"] / p_["revenue"] for p_ in P[-4:] if p_.get("fcf") is not None and p_.get("revenue")]
+    fcf_m0 = _pc_med(fcf_ms)
+
+    # Basisfall: Umsatz- und Margenpfad (Konsens, danach schrittweise Richtung langfristiges Wachstum)
+    base_g, base_m, src_g, src_m = [], [], [], []
+    rev_prev = last["revenue"]
+    for i in range(1, PC_YEARS + 1):
+        c = cons.get(ly + i) or {}
+        if c.get("rev") and rev_prev:
+            g_ = c["rev"] / rev_prev - 1
+            src_g.append("Konsens")
+        else:
+            prev_g = base_g[-1] if base_g else (hist_g if hist_g is not None else 0.03)
+            g_ = prev_g + (PC_SCEN["base"]["g_term"] + 0.01 - prev_g) * 0.35
+            src_g.append("fortgeschrieben")
+        g_ = clamp(g_, -0.3, 0.8)
+        base_g.append(g_)
+        rev_i = rev_prev * (1 + g_)
+        if c.get("ni") is not None and rev_i:
+            base_m.append(clamp(c["ni"] / rev_i, -1.0, 0.7))
+            src_m.append("Konsens")
+        else:
+            base_m.append(base_m[-1] if base_m else m0)
+            src_m.append("fortgeschrieben")
+        rev_prev = rev_i
+
+    # Banken und Versicherer: Free Cashflow nicht aussagekräftig -> Eigenkapital-DCF mit dem Reinertrag
+    ind, sec_ = (info.get("industry") or "").lower(), (info.get("sector") or "").lower()
+    financial = "financial" in sec_ and any(w in ind for w in ("bank", "insurance", "capital markets", "asset management"))
+    # Diskontsatz nach CAPM (wie im DCF-Modell), Länderrisiko obendrauf, Fremdkapital nach Nettoverschuldung gewichtet
+    rf = (safe(lambda: gather_macro(pcur or "USD")["rf"]) or 4.0) / 100
+    beta = num(info.get("beta"))
+    beta_adj = 0.67 * clamp(beta if beta is not None else 1.0, 0.3, 2.5) + 0.33
+    crp = ((safe(lambda: country_risk({"symbol": symbol, "country": info.get("country"), "fin_currency": fcur})) or {})
+           .get("premium") or 0.0)
+    ke = rf + beta_adj * PC_ERP + crp
+    bs = safe(lambda: t.balance_sheet)
+
+    def bs_val(*names):
+        if bs is None or getattr(bs, "empty", True):
+            return None
+        for nm in names:
+            if nm in bs.index:
+                v = num(bs.loc[nm].iloc[0])
+                if v is not None:
+                    return v
+        return None
+    debt = 0.0 if financial else (bs_val("Total Debt") or 0.0)
+    cash = 0.0 if financial else (bs_val("Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents") or 0.0)
+    net_debt = debt - cash  # Berichtswährung
+    mcap_f = mcap / k
+    kd = (rf + 0.015) * (1 - 0.25)
+    w_d = max(net_debt, 0) / (mcap_f + max(net_debt, 0)) if mcap_f > 0 else 0
+    wacc0 = clamp(ke * (1 - w_d) + kd * w_d, 0.06, 0.14)
+
+    scen = {}
+    for key, S in PC_SCEN.items():
+        sgn = S["growth_adj"]
+        g_path = [g_ + sgn * max(0.02, 0.3 * abs(g_)) for g_ in base_g]
+        m_path = []
+        for i, m_ in enumerate(base_m):
+            f_ = 1 + (S["margin_end"] - 1) * (i + 1) / PC_YEARS  # Marge schrittweise bis zum Faktor in Jahr 5
+            m_path.append(m_ * f_ if m_ > 0 else m_ * (2 - f_))
+        rev_, rv, ni_, fcf_ = last["revenue"], [], [], []
+        for g_, m_ in zip(g_path, m_path):
+            rev_ *= 1 + g_
+            rv.append(rev_)
+            ni_.append(rev_ * m_)
+            if financial or fcf_m0 is None:
+                fcf_.append(rev_ * m_)
+            else:  # Free-Cashflow-Marge bewegt sich um so viele Prozentpunkte wie die Nettomarge (nach einem schwachen
+                # Basisjahr wie Shell 2025 sonst über 20 %), höchstens 1,2-mal die bessere der beiden Margen
+                fcf_.append(rev_ * min(fcf_m0 + (m_ - m0), 1.2 * max(fcf_m0, m_)))
+        wacc = clamp((ke if financial else wacc0) + S["wacc_adj"], 0.06, 0.15)
+        g_t = min(S["g_term"], wacc - 0.02)
+        eq_now, _eq5 = pc_dcf(fcf_, wacc, g_t, net_debt)
+
+        def pe_of(w_, g2):
+            return pc_dcf(fcf_, w_, g2, net_debt)[1] / ni_[-1] if ni_[-1] > 0 else None
+        pe_lo, pe_mid, pe_hi = pe_of(wacc + 0.005, g_t - 0.005), pe_of(wacc, g_t), pe_of(wacc - 0.005, g_t + 0.005)
+        ni_g, prev = [], last["net_income"]
+        for v in ni_:
+            ni_g.append(v / prev - 1 if prev and prev > 0 and v > 0 else None)
+            prev = v
+        ev_now = eq_now + net_debt
+        pv_tv = fcf_[-1] * (1 + g_t) / (wacc - g_t) / (1 + wacc) ** (PC_YEARS - 0.5)
+        scen[key] = {
+            "label": S["label"], "rev_growth": g_path, "ni_growth": ni_g, "net_income": ni_, "revenue": rv,
+            "margins": m_path, "fcf": fcf_,
+            "pe_dcf": round(pe_mid, 1) if pe_mid and pe_mid > 0 else None,
+            "pe_dcf_range": [round(x, 1) if x and x > 0 else None for x in (pe_lo, pe_hi)],
+            "wacc": wacc, "g_term": g_t,
+            "dcf_value": eq_now * k / shares if eq_now > 0 else None,
+            "tv_share": pv_tv / ev_now if ev_now > 0 else None,
+        }
+    pe_hist = [p_["pe"] for p_ in P if isinstance(p_.get("pe"), (int, float)) and p_["pe"] > 0]
+    pe_med = _pc_med(pe_hist[-5:])
+    pe_now = px / (last["net_income"] * k / shares) if last["net_income"] > 0 else None
+    mk = [x for x in (pe_med, pe_now) if x and 3 < x < 150]
+    pe_note = None
+    if not mk:  # Verluste / keine Historie -> marktübliche Spanne als Ausgangspunkt (überschreibbar)
+        mk, pe_note = [15.0, 20.0], "Kein aussagekräftiges KGV (Verluste oder zu kurze Historie) – Startwerte 15 bzw. 20, bitte anpassen."
+    base_dcf = scen["base"]["dcf_value"]
+    for key, S_ in scen.items():
+        f_ = clamp((S_["dcf_value"] / base_dcf) ** 0.5, 0.7, 1.3) if S_["dcf_value"] and base_dcf else             {"bear": 0.85, "base": 1.0, "bull": 1.15}[key]
+        lo, hi = clamp(min(mk) * f_, 4, 60), clamp(max(mk) * f_, 4, 80)
+        S_["pe_low"], S_["pe_high"] = round(lo, 1), round(max(hi, lo), 1)
+    end0 = datetime.fromisoformat(last["end"])
+    out = {
+        "symbol": symbol, "name": clean_company_name(info.get("longName") or info.get("shortName") or symbol),
+        "currency": pcur, "fin_currency": fcur, "price": px, "shares": shares, "k": k,
+        "years": [ly + i for i in range(PC_YEARS + 1)],
+        "ends": [end0.replace(year=end0.year + i, day=min(end0.day, 28)).date().isoformat() for i in range(PC_YEARS + 1)],
+        "last": {"revenue": last["revenue"], "net_income": last["net_income"], "label": last["label"]},
+        "scenarios": scen, "src_growth": src_g, "src_margin": src_m,
+        "pe_hist_median": round(pe_med, 1) if pe_med else None, "pe_now": round(pe_now, 1) if pe_now else None,
+        "pe_note": pe_note,
+        "inputs": {"rf": rf, "beta": beta, "beta_adj": beta_adj, "erp": PC_ERP, "crp": crp, "ke": ke, "net_debt": net_debt,
+                   "wacc": wacc0, "fcf_margin": fcf_m0, "net_margin": m0, "financial": financial, "hist_growth": hist_g},
+        "fy_missing": next((e.get("fy_missing") for e in E if e.get("fy_missing")), None),
+    }
+    PRICECALC_CACHE[symbol] = (time.time(), out)
+    return out
+
+
 def analyze(query):
     key = query.strip().lower()
     if key in CACHE and time.time() - CACHE[key][0] < 900:
@@ -10153,7 +10349,7 @@ def maintenance():
 
 FEATURES_GET = {"/api/analyze": "Aktienanalyse", "/api/depot": "Depot", "/api/me/summary": "Mein Bereich",
                 "/api/track": "Trefferquote", "/api/screener": "Screener", "/api/ics": "Kalender-Export",
-                "/api/income": "Erfolgsrechnung", "/api/derivatives": "Derivate"}
+                "/api/income": "Erfolgsrechnung", "/api/derivatives": "Derivate", "/api/pricecalc": "Kursrechner"}
 FEATURES_POST = {"/api/depot": "Depot-Upload", "/api/watchlist": "Watchlist", "/api/alerts": "Preisalarme",
                  "/api/prefs": "Einstellungen", "/api/messages": "Nachrichten", "/api/subscription": "Abo",
                  "/api/report": "Bericht"}
@@ -11266,6 +11462,7 @@ def cache_rules():
             ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300), ("Fondskosten (onvista)", ONVISTA_TER, 7 * 86400, 500),
             ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
             ("stockanalysis-Kursziele", STOCKANALYSIS_TARGET_CACHE, 12 * 3600, 300),
+            ("Kursrechner", PRICECALC_CACHE, 3600, 100),
             ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
@@ -12726,6 +12923,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self.send(200, json.dumps(json_safe(income_data(q, (qs.get("freq") or ["annual"])[0]))),
                                  "application/json; charset=utf-8")
+            except ValueError as e:
+                return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+        if u.path == "/api/pricecalc":
+            if not q:
+                return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")
+            try:
+                return self.send(200, json.dumps(json_safe(price_calc(q))), "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
         if u.path == "/api/search":
