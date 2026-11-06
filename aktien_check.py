@@ -12160,22 +12160,27 @@ LOGIN_PAGE = """<!doctype html>
 <meta name="theme-color" content="#f5efe6">
 <title>Anmelden · Stocky</title>
 <style>
-:root{--bg:#f5efe6;--surface:#fffcf7;--border:#d8cab6;--text:#2b2521;--text-2:#5f554d;--accent:#1f5e5b;--accent-soft:#e4efeb;--neg:#a83a2c;--neg-soft:#fbece8}
-@media (prefers-color-scheme:dark){:root{--bg:#1a1613;--surface:#231e1a;--border:#4d4239;--text:#f2ebe1;--text-2:#cbbfb1;--accent:#76b8ac;--accent-soft:#1e322f;--neg:#ec8a74;--neg-soft:#331d18}}
+:root{--bg:#efe7dc;--surface:rgba(255,251,245,.66);--field:rgba(255,255,255,.55);--border:rgba(90,66,42,.16);--text:#2b2521;--text-2:#5f554d;--accent:#1f5e5b;--accent-soft:rgba(31,94,91,.14);--neg:#a83a2c;--neg-soft:rgba(168,58,44,.10);--on-accent:#fffcf7;
+  --veil:linear-gradient(180deg,rgba(245,239,230,.55),rgba(245,239,230,.82))}
+@media (prefers-color-scheme:dark){:root{--bg:#120e0b;--surface:rgba(28,23,19,.60);--field:rgba(255,255,255,.06);--border:rgba(255,255,255,.10);--text:#f2ebe1;--text-2:#cbbfb1;--accent:#76b8ac;--accent-soft:rgba(118,184,172,.16);--neg:#ec8a74;--neg-soft:rgba(236,138,116,.12);--on-accent:#14211f;
+  --veil:linear-gradient(180deg,rgba(14,11,9,.55),rgba(14,11,9,.82))}}
 @font-face{font-family:"Source Sans 3";src:url(/static/source-sans-3.woff2) format("woff2");font-weight:200 900;font-display:swap}
 @font-face{font-family:"Fraunces";src:url(/static/fraunces.woff2) format("woff2");font-weight:100 900;font-display:swap}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
   font:16px/1.5 "Source Sans 3",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
-.box{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:var(--veil),url(/static/bg.jpg) center/cover no-repeat}
+@media (max-width:700px) and (orientation:portrait){body::before{background:var(--veil),url(/static/bg-m.jpg) 60% center/cover no-repeat}}
+.box{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px;
+  -webkit-backdrop-filter:blur(22px) saturate(150%);backdrop-filter:blur(22px) saturate(150%);box-shadow:0 8px 32px rgba(0,0,0,.22)}
 .logo{width:40px;height:40px;border-radius:10px;background:var(--accent);display:grid;place-items:center;margin-bottom:16px}
 h1{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
 p{margin:0 0 20px;color:var(--text-2);font-size:14px}
 label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
-input{width:100%;height:46px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);
+input{width:100%;height:46px;padding:0 14px;border:1px solid var(--border);border-radius:10px;background:var(--field);
   color:var(--text);font:inherit;font-size:16px}
 input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;background:var(--accent);color:var(--surface);
+button{width:100%;height:46px;margin-top:14px;border:0;border-radius:10px;background:var(--accent);color:var(--on-accent);
   font:inherit;font-weight:600;font-size:15px;cursor:pointer}
 .err{background:var(--neg-soft);color:var(--neg);font-size:13.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px}
 small{display:block;margin-top:16px;color:var(--text-2);font-size:12.5px;text-align:center}
@@ -12724,10 +12729,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(WEB_MANIFEST, ensure_ascii=False), "application/manifest+json; charset=utf-8")
         if u.path.startswith("/static/"):
             f = STATIC_DIR / Path(u.path).name  # nur Dateien direkt im Ordner, kein Pfad-Ausbruch
-            if f.suffix in (".png", ".json", ".woff2") and f.is_file():
+            if f.suffix in (".png", ".jpg", ".json", ".woff2") and f.is_file():
                 data = f.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", {".png": "image/png", ".woff2": "font/woff2"}.get(f.suffix, "application/json; charset=utf-8"))
+                self.send_header("Content-Type", {".png": "image/png", ".jpg": "image/jpeg", ".woff2": "font/woff2"}.get(f.suffix, "application/json; charset=utf-8"))
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "public, max-age=604800")
                 self.end_headers()
