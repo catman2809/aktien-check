@@ -703,6 +703,8 @@ tr.u-locked td{opacity:.65}
 .pc-page .quick{justify-content:flex-start;margin-bottom:18px}
 .pc-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 0 12px}
 .pc-head h2{margin:0;font-size:21px}
+.pc-head .co-logo{width:48px;height:48px;padding:6px;margin-top:0}
+.pc-head .co-id{align-items:center}
 .pc-table{min-width:760px}
 .pc-table th small{display:block;font-weight:400;color:var(--text-3);font-size:11px}
 .pc-table tbody th{text-align:left;font-size:12.5px;font-weight:600;color:var(--text-2);padding:7px 12px;white-space:nowrap}
@@ -4311,8 +4313,8 @@ function pcRender() {
   const srcG = D.src_growth.map((s_, i) => `<span>${D.years[i + 1]}: ${s_}</span>`).join(" · ");
   const sc = (k_, l_) => `<button type="button" data-s="${k_}" class="${PC.scen === k_ ? "on" : ""}">${l_}</button>`;
   $("#pc-res").innerHTML = `
-    <div class="pc-head"><div><h2>${esc(D.name)} <small class="stamp">${esc(D.symbol)}</small></h2>
-      <span class="stamp">Aktueller Kurs ${nf(D.price)} ${esc(D.currency)} · Basisjahr ${D.years[0]} (letztes abgeschlossenes Geschäftsjahr)</span></div>
+    <div class="pc-head"><div class="co-id">${logoImg(D.symbol, "co-logo")}<div><h2>${esc(D.name)} <small class="stamp">${esc(D.symbol)}</small></h2>
+      <span class="stamp">Aktueller Kurs ${nf(D.price)} ${esc(D.currency)} · Basisjahr ${D.years[0]} (letztes abgeschlossenes Geschäftsjahr)</span></div></div>
       <div class="seg" id="pc-scen" role="tablist">${sc("bear", "Bear")}${sc("base", "Base")}${sc("bull", "Bull")}</div></div>
     <div class="adm-kpis pc-kpis">
       ${kpi("DCF-Wert je Aktie (" + S.label + ")", S.dcf_value ? nf(S.dcf_value) + " " + esc(D.currency) : "–", up == null ? "nicht berechenbar (negativer Free Cashflow)" : pc(up, 0, true) + " ggü. Kurs")}
@@ -4372,7 +4374,7 @@ async function pcRun(q) {
   if (!q) return;
   navTo("?view=kursrechner&q=" + encodeURIComponent(q));
   const my = ++runId;
-  $("#pc-res").innerHTML = `<div class="loading">${KERZI_LOAD()}<b>Berechne Szenarien für ${esc(q)} …</b><span>Kann bis zu 30 Sekunden dauern</span></div>`;
+  $("#pc-res").innerHTML = `<div class="loading">${KERZI_LOAD()}<img class="load-logo" src="/api/logo?q=${encodeURIComponent(q)}" alt="" onload="this.classList.add('on')" onerror="this.remove()"><b>Berechne Szenarien für ${esc(q)} …</b><span>Kann bis zu 30 Sekunden dauern</span></div>`;
   try {
     const d = await api("/api/pricecalc?q=" + encodeURIComponent(q));
     if (my !== runId) return;
