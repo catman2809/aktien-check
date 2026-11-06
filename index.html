@@ -722,6 +722,52 @@ tr.u-locked td{opacity:.65}
 .pc-method{margin-top:14px;font-size:14px}
 .pc-method p{color:var(--text-2);margin:8px 0}
 .pc-dcf{min-width:480px;margin:10px 0}
+.er-card h3{margin:14px 0 6px;font-size:16px}
+.er-badges{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.er-badge{font-size:13px;font-weight:700;padding:4px 10px;border-radius:999px;border:1px solid}
+.er-badge.pos{color:var(--pos);background:var(--pos-soft);border-color:var(--pos-line)}
+.er-badge.neg{color:var(--neg);background:var(--neg-soft);border-color:var(--neg-line)}
+.er-badge.neu{color:var(--neu);background:var(--neu-soft);border-color:var(--neu-line)}
+.er-headline{font-family:var(--serif);font-size:19px;font-weight:600;margin:12px 0 0}
+.er-list{margin:0;padding-left:20px} .er-list li{margin:4px 0}
+.er-out{margin:12px 0 4px}
+/* One-Pager: weißes A4-Blatt, unabhängig von Hell/Dunkel, druckfähig */
+#op-wrap{position:fixed;inset:0;z-index:90;background:rgba(10,8,6,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;flex-direction:column}
+body.op-open{overflow:hidden}
+.op-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--glass-strong);color:var(--text)}
+.op-scroll{flex:1;overflow:auto;padding:16px 12px 40px}
+.op-sheet{width:210mm;min-height:297mm;margin:0 auto;background:#fff;color:#1b1b1b;padding:12mm 13mm;box-shadow:0 10px 40px rgba(0,0,0,.4);
+  font:10.5px/1.42 "Times New Roman",Times,Georgia,serif;transform-origin:top center;text-shadow:none}
+.op-sheet a{color:#1f4e79}
+.op-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #1f4e79;padding-bottom:8px}
+.op-id{display:flex;gap:10px;align-items:center}
+.op-logo{width:40px;height:40px;object-fit:contain}
+.op-name{font-size:20px;font-weight:700;color:#1f4e79}
+.op-sub,.op-meta{font-size:10px;color:#555} .op-meta{text-align:right}
+.op-verdict{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 4px;font-size:10px;color:#444}
+.op-tag{font-weight:700;padding:2px 8px;border-radius:3px;color:#fff}
+.op-tag.pos{background:#2e7d32} .op-tag.neg{background:#c62828} .op-tag.neu{background:#8a6d1f}
+.op-title{font-size:17px;line-height:1.25;margin:6px 0 8px;color:#111}
+.op-cols{display:grid;grid-template-columns:1fr 1fr;gap:6mm}
+.op-sheet h4{font-size:11.5px;color:#1f4e79;margin:9px 0 3px;border-bottom:1px solid #d9e1f2;padding-bottom:2px}
+.op-sheet h4 small{font-weight:400;color:#666}
+.op-sheet ul{margin:0;padding-left:15px} .op-sheet li{margin:2px 0} .op-sheet p{margin:2px 0}
+.op-tbl{width:100%;border-collapse:collapse;font-size:10px}
+.op-tbl td{padding:2px 4px;border-bottom:1px solid #e3e3e3} .op-tbl td:not(:first-child){text-align:right}
+.op-tbl thead td{font-weight:700;color:#555}
+.op-chart{width:100%;height:auto;display:block;color:#222}
+.op-chart text{fill:#333;font-family:inherit}
+.op-press small{color:#666}
+.op-next{margin-top:8px}
+.op-foot{margin-top:10px;padding-top:6px;border-top:1px solid #ccc;font-size:8.5px;color:#555;word-break:break-word}
+@media print{
+  body.op-open>*:not(#op-wrap){display:none !important}
+  body.op-open::before{display:none}
+  #op-wrap{position:static;background:none;display:block;-webkit-backdrop-filter:none;backdrop-filter:none}
+  #op-wrap .op-bar{display:none}
+  #op-wrap .op-scroll{overflow:visible;padding:0}
+  #op-wrap .op-sheet{width:auto;min-height:0;box-shadow:none;padding:0;transform:none !important;margin:0 !important}
+}
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
@@ -2370,6 +2416,11 @@ function welcome() {
       <button class="btn primary" id="scropen">Screener öffnen</button>
     </div>` : ""}
     <div class="trk-teaser card">
+      <div><b>Earnings Reviewer</b>
+        <span>Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein One-Pager (A4) zum Ansehen und Drucken.</span></div>
+      <button class="btn primary" id="eropen">Quartal auswerten</button>
+    </div>
+    <div class="trk-teaser card">
       <div><b>Aktienkursrechner</b>
         <span>Wohin kann der Kurs in fünf Jahren laufen? Umsatz- und Gewinnwachstum mit konservativem und optimistischem KGV – Bear-, Base- und Bull-Szenario nach einem DCF-Modell, alle Annahmen selbst änderbar.</span></div>
       <button class="btn primary" id="pcopen">Kurs berechnen</button>
@@ -2390,6 +2441,7 @@ function welcome() {
   const ad_ = $("#admopen"); if (ad_) ad_.onclick = () => showAdmin();
   $("#trkopen").onclick = () => showTrack();
   $("#pcopen").onclick = () => showPriceCalc("");
+  $("#eropen").onclick = () => showEarnings("");
   $("#dpopen").onclick = () => showDepot();
   const so_ = $("#scropen"); if (so_) so_.onclick = () => showScreener();
   $("#glopen").onclick = () => showGlossary();
@@ -4419,6 +4471,169 @@ function showPriceCalc(q) {
   document.querySelectorAll("[data-pq]").forEach(b => b.onclick = () => { $("#pc-q").value = b.dataset.pq; pcRun(b.dataset.pq); });
   if (q) pcRun(q);
 }
+// Earnings Reviewer: letztes Quartal kurz in Stichpunkten, ausführlich als One-Pager (A4) zum Ansehen und Drucken
+const ER = {data: null};
+const erDate = s => s ? new Date(s.length <= 7 ? s + "-28" : s).toLocaleDateString("de-DE", {day: "2-digit", month: "2-digit", year: "numeric"}) : "–";
+const ER_VERDICT = {beat: ["pos", "Über den Erwartungen"], miss: ["neg", "Unter den Erwartungen"], inline: ["neu", "Im Rahmen der Erwartungen"]};
+const ER_GUIDE = {angehoben: ["pos", "Prognose angehoben"], "bestätigt": ["neu", "Prognose bestätigt"], gesenkt: ["neg", "Prognose gesenkt"], neu: ["neu", "Neue Prognose"]};
+function erPoints(D) {
+  const Q = D.quarter || {}, A = D.ai;
+  if (A?.points?.length) return A.points;
+  if (Q.ai?.points?.length) return Q.ai.points;
+  // ohne Analyse der Pressemitteilung: Kennzahlen plus Erwartung fürs nächste Quartal und geänderte Schätzungen
+  const pts = [...(Q.points || [])], c = Q.currency || D.fin_currency || "";
+  const nq = (D.q_estimates || [])[0], P = D.quarters || [];
+  if (nq?.revenue) {
+    const ago = P.find(p => Math.abs((new Date(nq.end) - new Date(p.end)) / 864e5 - 365) <= 20);
+    pts.push(`Analysten erwarten für das Quartal bis ${erDate(nq.end)} einen Umsatz von ${pcMoney(nq.revenue, c)}`
+      + (ago?.revenue ? ` (${pc(nq.revenue / ago.revenue - 1, 1, true)} ggü. Vorjahresquartal)` : ""));
+  }
+  const fy = (D.revisions || []).find(r => r.period === "laufendes Geschäftsjahr");
+  if (fy?.chg30 != null) pts.push(`Gewinnschätzung für das laufende Geschäftsjahr in den letzten 30 Tagen ${Math.abs(fy.chg30) < 0.005 ? "kaum verändert" : (fy.chg30 > 0 ? "angehoben" : "gesenkt") + ` (${pc(fy.chg30, 1, true)})`}`);
+  return pts;
+}
+function erOutlook(D) {
+  return D.ai?.outlook || D.quarter?.ai?.outlook || "";
+}
+function erRender() {
+  const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict];
+  const G = A && ER_GUIDE[A.guidance];
+  const rel = Q.release;
+  $("#er-res").innerHTML = `
+    <div class="pc-head"><div class="co-id">${logoImg(D.symbol, "co-logo")}<div><h2>${esc(D.name)} <small class="stamp">${esc(D.symbol)}</small></h2>
+      <span class="stamp">Quartal bis ${erDate(Q.end)}${rel ? ` · veröffentlicht am ${erDate(rel.date)}` : ""}</span></div></div></div>
+    <div class="card pad er-card">
+      <div class="er-badges">${V ? `<span class="er-badge ${V[0]}">${V[1]}</span>` : ""}${G ? `<span class="er-badge ${G[0]}">${G[1]}</span>` : ""}
+        ${D.beats.n ? `<span class="stamp">${D.beats.beat} von ${D.beats.n} Quartalen über dem Konsens</span>` : ""}</div>
+      ${A?.headline ? `<p class="er-headline">${esc(A.headline)}</p>` : ""}
+      <h3>Die wichtigsten Punkte</h3>
+      <ul class="er-list">${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("") || "<li>Keine Kennzahlen zum letzten Quartal verfügbar.</li>"}</ul>
+      ${erOutlook(D) ? `<p class="er-out"><b>Ausblick:</b> ${esc(erOutlook(D))}</p>` : ""}
+      ${D.next ? `<p class="stamp">Nächste Quartalszahlen: ${erDate(D.next.date)}${D.next.estimated ? " (geschätzt)" : ""}</p>` : ""}
+      <div class="pc-actions"><button class="btn primary" id="er-op">One-Pager ansehen (A4)</button>
+        ${!A ? `<span class="stamp">${rel ? "Die Tiefenanalyse der Pressemitteilung braucht einen Claude-Schlüssel auf dem Server." : "Ausführliche Analyse der Pressemitteilung nur für Werte mit US-Börsenmeldung (8-K)."}</span>` : ""}</div>
+    </div>`;
+  $("#er-op").onclick = () => erOnePager();
+}
+// kleine Diagramme für den One-Pager (SVG, druckfähig)
+function erBars(D) {
+  const P = (D.quarters || []).map(q => ({l: q.label, v: q.revenue, e: false})).concat((D.q_estimates || []).map(q => ({l: q.label, v: q.revenue, e: true})))
+    .filter(x => x.v);
+  if (P.length < 2) return "";
+  const W = 330, H = 130, mx = Math.max(...P.map(x => x.v)), bw = W / P.length;
+  return `<svg viewBox="0 0 ${W} ${H + 18}" class="op-chart">${P.map((x, i) => {
+    const h = x.v / mx * (H - 16), y = H - h;
+    return `<rect x="${i * bw + 5}" y="${y}" width="${bw - 10}" height="${h}" rx="2" fill="${x.e ? "#9db7d6" : "#1f4e79"}"/>
+      <text x="${i * bw + bw / 2}" y="${y - 3}" text-anchor="middle" font-size="8.5">${big(x.v)[0]}</text>
+      <text x="${i * bw + bw / 2}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(x.l)}</text>`; }).join("")}</svg>`;
+}
+function erEps(D) {
+  const E = (D.eps_history || []).filter(e => e.act != null);
+  if (E.length < 2) return "";
+  const W = 330, H = 120, vals = E.flatMap(e => [e.act, e.est]).filter(v => v != null);
+  const lo = Math.min(0, ...vals), hi = Math.max(...vals), sy = v => H - 10 - (v - lo) / ((hi - lo) || 1) * (H - 28), bw = W / E.length;
+  return `<svg viewBox="0 0 ${W} ${H + 18}" class="op-chart">${E.map((e, i) => {
+    const x = i * bw + bw / 2, beat = e.est != null && e.act >= e.est;
+    return `${e.est != null ? `<line x1="${x - bw * 0.32}" x2="${x + bw * 0.32}" y1="${sy(e.est)}" y2="${sy(e.est)}" stroke="#7a7a7a" stroke-width="2"/>` : ""}
+      <circle cx="${x}" cy="${sy(e.act)}" r="4.5" fill="${beat ? "#2e7d32" : "#c62828"}"/>
+      <text x="${x}" y="${sy(e.act) - 8}" text-anchor="middle" font-size="8.5">${nf(e.act)}</text>
+      <text x="${x}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(String(e.q).slice(0, 7))}</text>`; }).join("")}</svg>`;
+}
+function erOnePager() {
+  const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict], G = A && ER_GUIDE[A.guidance];
+  const c = Q.currency || D.fin_currency || "";
+  const pct_ = (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + nf(v * 100, d) + " %";
+  const kpi = [["Umsatz", Q.revenue != null ? pcMoney(Q.revenue, c) : "–", pct_(Q.revenue_g)],
+    ["Operative Marge", Q.op_margin != null ? nf(Q.op_margin * 100, 1) + " %" : "–", Q.op_margin_chg != null ? (Q.op_margin_chg > 0 ? "+" : "") + nf(Q.op_margin_chg * 100, 1) + " Pp." : "–"],
+    ["Reinertrag", Q.net_income != null ? pcMoney(Q.net_income, c) : "–", pct_(Q.net_income_g)],
+    ["Gewinn je Aktie", (Q.eps_act ?? Q.eps) != null ? nf(Q.eps_act ?? Q.eps) : "–", pct_(Q.eps_g)],
+    ["Konsens Gewinn je Aktie", Q.eps_est != null ? nf(Q.eps_est) : "–", Q.eps_surprise != null ? pct_(Q.eps_surprise) + " Überraschung" : ""]];
+  const lst = (t, arr) => arr?.length ? `<h4>${t}</h4><ul>${arr.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const R = D.revisions || [];
+  const src = [];
+  if (A?.url || Q.ai?.url) src.push(`<a href="${esc(A?.url || Q.ai.url)}" target="_blank" rel="noopener">Ergebnis-Pressemitteilung (SEC, Anlage 99.1${Q.release ? ", " + erDate(Q.release.date) : ""})</a>`);
+  (D.filings || []).forEach(f => src.push(`<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.form)} – ${esc(f.label)} (${erDate(f.date)})</a>`));
+  if (D.sec_url) src.push(`<a href="${esc(D.sec_url)}" target="_blank" rel="noopener">Alle Pflichtmeldungen bei SEC EDGAR</a>`);
+  const epsSrc = D.eps_history?.length ? D.eps_history[D.eps_history.length - 1].src : null;
+  src.push(`<span>Kennzahlen: ${Q.source === "SEC" ? "SEC EDGAR" : "Yahoo Finance"}</span>`);
+  if (epsSrc) src.push(`<span>Konsens Gewinn je Aktie: ${esc(epsSrc)}</span>`);
+  if (R.length) src.push(`<span>Schätzungsänderungen: Yahoo Finance</span>`);
+  if (A) src.push(`<span>Analyse der Pressemitteilung: Claude (${esc(A.model || "")})</span>`);
+  const wrap = document.createElement("div");
+  wrap.id = "op-wrap";
+  wrap.innerHTML = `<div class="op-bar"><b>One-Pager ${esc(D.name)}</b><span>
+      <button class="btn primary" id="op-print">Drucken / als PDF speichern</button> <button class="btn" id="op-close">Schließen</button></span></div>
+    <div class="op-scroll"><div class="op-sheet">
+      <header class="op-head"><div class="op-id">${logoImg(D.symbol, "op-logo")}<div><div class="op-name" translate="no">${esc(D.name)}</div>
+        <div class="op-sub">${esc(D.symbol)} · Earnings Update · Quartal bis ${erDate(Q.end)}${Q.release ? ` · veröffentlicht ${erDate(Q.release.date)}` : ""}</div></div></div>
+        <div class="op-meta">${D.price ? `Kurs ${nf(D.price)} ${esc(D.currency || "")}<br>` : ""}Stand ${esc(D.generated)}<br>Stocky</div></header>
+      <div class="op-verdict">${V ? `<span class="op-tag ${V[0]}">${V[1]}</span>` : ""}${G ? `<span class="op-tag ${G[0]}">${G[1]}</span>` : ""}
+        ${D.beats.n ? `<span>${D.beats.beat} von ${D.beats.n} Quartalen über dem Konsens</span>` : ""}</div>
+      <h1 class="op-title">${esc(A?.headline || (V ? V[1] + (Q.revenue_g != null ? ` – Umsatz ${pct_(Q.revenue_g)} ggü. Vorjahresquartal` : "") : "Quartalszahlen im Überblick"))}</h1>
+      <div class="op-cols"><div>
+        <h4>Die wichtigsten Punkte</h4><ul>${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("")}</ul>
+        ${erOutlook(D) ? `<h4>Ausblick</h4><p>${esc(erOutlook(D))}</p>` : ""}
+        ${lst("Geschäftsbereiche", A?.segments)}${lst("Positiv", A?.pos)}${lst("Negativ", A?.neg)}
+        ${A?.verdict ? `<h4>Fazit</h4><p>${esc(A.verdict)}</p>` : ""}
+      </div><div>
+        <h4>Kennzahlen ggü. Vorjahresquartal</h4>
+        <table class="op-tbl"><tbody>${kpi.map(([l, v, g]) => `<tr><td>${l}</td><td>${v}</td><td>${g}</td></tr>`).join("")}</tbody></table>
+        ${erBars(D) ? `<h4>Umsatz je Quartal <small>(hell = Analystenprognose)</small></h4>${erBars(D)}` : ""}
+        ${erEps(D) ? `<h4>Gewinn je Aktie: Ist (Punkt) ggü. Konsens (Strich)</h4>${erEps(D)}` : ""}
+        ${R.length ? `<h4>Geänderte Gewinnschätzungen</h4><table class="op-tbl"><thead><tr><td></td><td>aktuell</td><td>30 Tage</td><td>90 Tage</td></tr></thead><tbody>
+          ${R.map(r => `<tr><td>${esc(r.period)}</td><td>${nf(r.current)}</td><td>${pct_(r.chg30)}</td><td>${pct_(r.chg90)}</td></tr>`).join("")}</tbody></table>` : ""}
+      </div></div>
+      ${D.press?.length ? `<h4>Pressestimmen</h4><ul class="op-press">${D.press.slice(0, 4).map(p => `<li><a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.title)}</a> <small>${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small></li>`).join("")}</ul>` : ""}
+      ${D.next ? `<p class="op-next">Nächste Quartalszahlen: <b>${erDate(D.next.date)}</b>${D.next.estimated ? " (geschätzt)" : ""}${D.next.detail ? ` · <span>${esc(D.next.detail)}</span>` : ""}</p>` : ""}
+      <footer class="op-foot"><b>Quellen:</b> ${src.join(" · ")}<br>Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.</footer>
+    </div></div>`;
+  document.body.appendChild(wrap);
+  document.body.classList.add("op-open");
+  const fit = () => {  // auf schmalen Bildschirmen das ganze Blatt verkleinert zeigen (links ausgerichtet, dann zentriert)
+    const sh = wrap.querySelector(".op-sheet"), w = wrap.querySelector(".op-scroll").clientWidth - 24;
+    const s_ = Math.min(1, w / sh.offsetWidth);
+    sh.style.transform = s_ < 1 ? `scale(${s_})` : "";
+    sh.style.transformOrigin = "top left";
+    sh.style.marginLeft = s_ < 1 ? `${(w - sh.offsetWidth * s_) / 2}px` : "auto";
+    sh.style.marginRight = s_ < 1 ? `${-(sh.offsetWidth * (1 - s_))}px` : "auto";
+    sh.style.marginBottom = s_ < 1 ? `${-(1 - s_) * sh.offsetHeight}px` : "";
+  };
+  fit(); window.addEventListener("resize", fit);
+  const close = () => { window.removeEventListener("resize", fit); wrap.remove(); document.body.classList.remove("op-open"); };
+  wrap.querySelector("#op-close").onclick = close;
+  wrap.querySelector("#op-print").onclick = () => window.print();
+  wrap.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+}
+async function erRun(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  navTo("?view=earnings&q=" + encodeURIComponent(q));
+  const my = ++runId;
+  $("#er-res").innerHTML = `<div class="loading">${KERZI_LOAD()}<img class="load-logo" src="/api/logo?q=${encodeURIComponent(q)}" alt="" onload="this.classList.add('on')" onerror="this.remove()"><b>Werte die Quartalszahlen von ${esc(q)} aus …</b><span>Kann bis zu 60 Sekunden dauern</span></div>`;
+  try {
+    const d = await api("/api/earnings?q=" + encodeURIComponent(q));
+    if (my !== runId) return;
+    ER.data = d; erRender();
+  } catch (e) {
+    if (my === runId && e.message !== "login") $("#er-res").innerHTML = `<div class="card pad">Auswertung nicht möglich: ${esc(e.message)}</div>`;
+  }
+}
+function showEarnings(q) {
+  runId++; wlView = false; depotView = false;
+  $("#subnav").style.display = "none";
+  if (!q) navTo("?view=earnings");
+  window.scrollTo({top: 0});
+  $("#out").innerHTML = `<section class="pc-page">
+    <h1>Earnings Reviewer</h1>
+    <p class="stamp">Das letzte Quartal auf einen Blick: Ergebnis ggü. den Erwartungen der Analysten, die wichtigsten Kennzahlen, der Ausblick des Managements und geänderte Schätzungen – kurz als Stichpunkte und ausführlich als One-Pager (A4).</p>
+    <form class="pc-form" id="er-form"><input id="er-q" type="text" placeholder="Aktie, z. B. Apple, SAP.DE oder Allianz" autocomplete="off" value="${esc(q || "")}">
+      <button class="btn primary" type="submit">Auswerten</button></form>
+    <div class="quick">${["Apple", "Microsoft", "NVIDIA", "SAP.DE", "Allianz", "Siemens"].map(x => `<button type="button" data-eq="${x}">${x}</button>`).join("")}</div>
+    <div id="er-res"></div></section>`;
+  $("#er-form").onsubmit = e => { e.preventDefault(); erRun($("#er-q").value); };
+  document.querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { $("#er-q").value = b.dataset.eq; erRun(b.dataset.eq); });
+  if (q) erRun(q);
+}
 function route() {
   ROUTED = location.search;
   const ps = new URLSearchParams(location.search);
@@ -4430,6 +4645,7 @@ function route() {
   else if (ps.get("view") === "depot") showDepot();
   else if (ps.get("view") === "screener") showScreener();
   else if (ps.get("view") === "kursrechner") showPriceCalc(pre || "");
+  else if (ps.get("view") === "earnings") showEarnings(pre || "");
   else if (ps.get("view") === "admin") showAdmin();
   else if (ps.get("view") === "mein") showMine(ps.get("tab") || "start");
   else if (pre) { $("#q").value = pre; run(pre); }

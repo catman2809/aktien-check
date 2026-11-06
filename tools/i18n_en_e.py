@@ -571,3 +571,64 @@ DEPOT_EXACT.update({"Aktienrückkäufe berücksichtigen": "Include share buyback
                         "With share buybacks the share count falls each year by the rate entered – the same net income is spread over fewer shares. A negative value means more shares (dilution, e.g. from stock-based compensation)."})
 DEPOT_WILD += [("Prognose: {0} weniger Aktien pro Jahr – Durchschnitt {1}–{2}", "Forecast: {0} fewer shares per year – average {1}–{2}"),
                ("Prognose: {0} mehr Aktien pro Jahr (Verwässerung) – Durchschnitt {1}–{2}", "Forecast: {0} more shares per year (dilution) – average {1}–{2}")]
+
+# Earnings Reviewer
+DEPOT_EXACT.update({
+    "Earnings Reviewer": "Earnings Reviewer",
+    "Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein One-Pager (A4) zum Ansehen und Drucken.":
+        "A stock's latest quarter at a glance: above or below expectations, the key figures and the outlook as bullet points – plus a one-pager (A4) to view and print.",
+    "Quartal auswerten": "Review quarter",
+    "Das letzte Quartal auf einen Blick: Ergebnis ggü. den Erwartungen der Analysten, die wichtigsten Kennzahlen, der Ausblick des Managements und geänderte Schätzungen – kurz als Stichpunkte und ausführlich als One-Pager (A4).":
+        "The latest quarter at a glance: results versus analyst expectations, the key figures, management's outlook and revised estimates – briefly as bullet points and in detail as a one-pager (A4).",
+    "Auswerten": "Review",
+    "Über den Erwartungen": "Above expectations", "Unter den Erwartungen": "Below expectations", "Im Rahmen der Erwartungen": "In line with expectations",
+    "Prognose angehoben": "Guidance raised", "Prognose bestätigt": "Guidance confirmed", "Prognose gesenkt": "Guidance lowered", "Neue Prognose": "New guidance",
+    "Die wichtigsten Punkte": "Key points", "Ausblick:": "Outlook:", "Ausblick": "Outlook",
+    "One-Pager ansehen (A4)": "View one-pager (A4)",
+    "Die Tiefenanalyse der Pressemitteilung braucht einen Claude-Schlüssel auf dem Server.": "The in-depth analysis of the press release requires a Claude key on the server.",
+    "Ausführliche Analyse der Pressemitteilung nur für Werte mit US-Börsenmeldung (8-K).": "Detailed press release analysis only for stocks with a US filing (8-K).",
+    "Keine Kennzahlen zum letzten Quartal verfügbar.": "No figures available for the latest quarter.",
+    "Drucken / als PDF speichern": "Print / save as PDF", "Schließen": "Close",
+    "Kennzahlen ggü. Vorjahresquartal": "Key figures vs. prior-year quarter", "Operative Marge": "Operating margin",
+    "Konsens Gewinn je Aktie": "Consensus EPS", "Gewinn je Aktie: Ist (Punkt) ggü. Konsens (Strich)": "EPS: actual (dot) vs. consensus (line)",
+    "Umsatz je Quartal": "Revenue per quarter", "(hell = Analystenprognose)": "(light = analyst forecast)",
+    "Geänderte Gewinnschätzungen": "Revised earnings estimates", "aktuell": "current",
+    "laufendes Quartal": "current quarter", "nächstes Quartal": "next quarter", "laufendes Geschäftsjahr": "current fiscal year", "nächstes Geschäftsjahr": "next fiscal year",
+    "Geschäftsbereiche": "Business segments", "Positiv": "Positive", "Negativ": "Negative", "Fazit": "Conclusion",
+    "Pressestimmen": "Press coverage", "Quellen:": "Sources:", "Quartalszahlen im Überblick": "Quarterly results at a glance",
+    "Alle Pflichtmeldungen bei SEC EDGAR": "All filings at SEC EDGAR",
+    "Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.": "Not investment advice – automatically generated summary from public data.",
+    "Der Earnings Reviewer ist nur für Aktien – ETFs veröffentlichen keine Quartalszahlen.": "The Earnings Reviewer is for stocks only – ETFs do not publish quarterly results.",
+    "Keine Quartalszahlen verfügbar.": "No quarterly figures available.",
+})
+DEPOT_WILD += [
+    ("Quartal bis {0} · veröffentlicht am {1}", "Quarter ended {0} · published {1}"), ("Quartal bis {0}", "Quarter ended {0}"),
+    ("{0} von {1} Quartalen über dem Konsens", "{0} of {1} quarters above consensus"),
+    ("Nächste Quartalszahlen: {0} (geschätzt)", "Next quarterly results: {0} (estimated)"), ("Nächste Quartalszahlen: {0}", "Next quarterly results: {0}"),
+    ("Nächste Quartalszahlen:", "Next quarterly results:"),
+    ("Werte die Quartalszahlen von {*} aus …", "Reviewing the quarterly results of {*} …"),
+    ("Auswertung nicht möglich: {*}", "Review not possible: {*}"),
+    ("One-Pager {*}", "One-pager {*}"),
+    ("{*} · Earnings Update · Quartal bis {0} · veröffentlicht {1}", "{*} · Earnings Update · quarter ended {0} · published {1}"),
+    ("{*} · Earnings Update · Quartal bis {0}", "{*} · Earnings Update · quarter ended {0}"),
+    ("Kurs {0} {1}", "Price {0} {1}"), ("Stand {0} {1}", "As of {0} {1}"),
+    ("Analysten erwarten für das Quartal bis {0} einen Umsatz von {1} {2} ({3} ggü. Vorjahresquartal)",
+     "Analysts expect revenue of {1} {2} for the quarter ending {0} ({3} vs. prior-year quarter)"),
+    ("Analysten erwarten für das Quartal bis {0} einen Umsatz von {1} {2}", "Analysts expect revenue of {1} {2} for the quarter ending {0}"),
+    ("Gewinnschätzung für das laufende Geschäftsjahr in den letzten {0} Tagen kaum verändert", "Earnings estimate for the current fiscal year barely changed over the last {0} days"),
+    ("Gewinnschätzung für das laufende Geschäftsjahr in den letzten {0} Tagen angehoben ({1})", "Earnings estimate for the current fiscal year raised over the last {0} days ({1})"),
+    ("Gewinnschätzung für das laufende Geschäftsjahr in den letzten {0} Tagen gesenkt ({1})", "Earnings estimate for the current fiscal year lowered over the last {0} days ({1})"),
+    ("{*} – Umsatz {0} ggü. Vorjahresquartal", "{*} – revenue {0} vs. prior-year quarter"),
+    ("{0} Überraschung", "{0} surprise"), ("{0} Tage", "{0} days"),
+    ("Ergebnis-Pressemitteilung (SEC, Anlage {0}, {1})", "Earnings press release (SEC, exhibit {0}, {1})"),
+    ("Ergebnis-Pressemitteilung (SEC, Anlage {0})", "Earnings press release (SEC, exhibit {0})"),
+    ("Kennzahlen: {*}", "Figures: {*}"),
+]
+DEPOT_WILD += [
+    ("Gewinn je Aktie {0} statt erwartet {1} – {2} über der Erwartung", "EPS {0} vs. {1} expected – {2} above expectations"),
+    ("Gewinn je Aktie {0} statt erwartet {1} – {2} unter der Erwartung", "EPS {0} vs. {1} expected – {2} below expectations"),
+    ("Gewinn je Aktie {0} statt erwartet {1} – im Rahmen der Erwartung", "EPS {0} vs. {1} expected – in line with expectations"),
+    ("Stand {0} {1}:{2}", "As of {0} {1}:{2}"), ("Erwarteter Gewinn je Aktie: {0}", "Expected EPS: {0}"),
+    ("Kennzahlen: {*}", "Figures: {*}"), ("Konsens Gewinn je Aktie: {*}", "EPS consensus: {*}"),
+    ("Schätzungsänderungen: {*}", "Estimate revisions: {*}"), ("Analyse der Pressemitteilung: Claude ({*})", "Press release analysis: Claude ({*})"),
+]

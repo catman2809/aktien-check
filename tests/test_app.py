@@ -1875,6 +1875,27 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertIsNone(r)
         self.assertIsNone(a.pc_buyback_rate(type("T", (), {"income_stmt": pd.DataFrame()})()))
 
+    def test_earnings_eps_history_and_revisions(self):
+        import json
+        import unittest.mock as um
+        import pandas as pd
+        t = type("T", (), {"earnings_history": None, "eps_trend": pd.DataFrame(
+            {"current": [2.91, 8.84], "30daysAgo": [2.90, 8.83], "90daysAgo": [2.90, 8.80]}, index=["0q", "0y"])})()
+        rows = {"data": {"earningsSurpriseTable": {"rows": [
+            {"fiscalQtrEnd": "Sep 2026", "dateReported": "11/2/2026", "eps": 2.05, "consensusForecast": "1.98"},
+            {"fiscalQtrEnd": "Jun 2026", "dateReported": "7/30/2026", "eps": 1.80, "consensusForecast": "1.88"}]}}}
+        with um.patch.object(a, "_fetch", return_value=json.dumps(rows).encode()):
+            h = a.eps_history("AAPL", t)                                       # Yahoo leer -> Nasdaq
+        self.assertEqual([x["q"] for x in h], ["2026-06", "2026-09"])          # älteste zuerst
+        self.assertEqual(h[-1]["reported"], "2026-11-02")
+        self.assertAlmostEqual(h[-1]["surprise"], (2.05 - 1.98) / 1.98)
+        self.assertLess(h[0]["surprise"], 0)
+        r = a.est_revisions(t)
+        self.assertEqual([x["period"] for x in r], ["laufendes Quartal", "laufendes Geschäftsjahr"])
+        self.assertAlmostEqual(r[1]["chg90"], 8.84 / 8.80 - 1)
+        with um.patch.dict(a.os.environ, {"ANTHROPIC_API_KEY": ""}):
+            self.assertIsNone(a.earnings_ai(1, "0000-1", "Apple", ""))         # ohne Schlüssel keine Tiefenanalyse
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

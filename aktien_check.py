@@ -8321,6 +8321,192 @@ def company_logo(symbol=None, query=None):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Earnings Reviewer: das letzte Quartal auf einen Blick – nach dem Aufbau eines Earnings-Updates
+# (earnings-reviewer:earnings-analysis): zuerst Ergebnis ggü. Erwartung (beat/miss), dann nur das Neue –
+# Kennzahlen ggü. Vorjahresquartal, Ausblick des Managements, geänderte Analystenschätzungen, Quellen mit Links.
+# Die Tiefenanalyse der Pressemitteilung schreibt Claude (US-Werte mit 8-K, nur mit ANTHROPIC_API_KEY).
+# ---------------------------------------------------------------------------
+EARN_CACHE = {}
+ESUM_KEEP = 150
+EARN_WORDS = re.compile(r"quartal|zahlen|ergebnis|umsatz|gewinn|prognose|quarter|results|earnings|revenue|guidance|profit|"
+                        r"beats?|miss(es)?|outlook", re.I)
+
+
+def eps_history(symbol, t):
+    """Gewinn je Aktie je Quartal: Ist und Konsens vorab (Yahoo, sonst Nasdaq/Zacks bzw. Finnhub für US-Werte).
+    [{"q": Quartalsende, "est", "act", "surprise", "reported", "src"}], älteste zuerst, höchstens 8."""
+    out = []
+    eh = yq(lambda: t.earnings_history)
+    if eh is not None and not getattr(eh, "empty", True) and "epsActual" in eh:
+        for q_, r_ in eh.iterrows():
+            act, est = num(r_.get("epsActual")), num(r_.get("epsEstimate"))
+            if act is not None:
+                out.append({"q": str(getattr(q_, "date", lambda: q_)())[:10], "est": est, "act": act,
+                            "surprise": (act - est) / abs(est) if est else None, "src": "Yahoo Finance"})
+    us = symbol if "." not in symbol else safe(lambda: us_listing(symbol))
+    if not out and us:
+        hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+               "Accept": "application/json"}
+        d = safe(lambda: json.loads(_fetch(f"https://api.nasdaq.com/api/company/{urllib.parse.quote(us.replace('-', '.'))}/earnings-surprise",
+                                           headers=hdr, timeout=15)))
+        for r_ in reversed((((d or {}).get("data") or {}).get("earningsSurpriseTable") or {}).get("rows") or []):
+            m_ = re.match(r"([A-Za-z]{3}) (\d{4})", str(r_.get("fiscalQtrEnd") or ""))
+            act, est = num(r_.get("eps")), num(r_.get("consensusForecast"))
+            rep_ = safe(lambda: datetime.strptime(str(r_.get("dateReported")), "%m/%d/%Y").date().isoformat())
+            if m_ and act is not None and MONTHS_EN.get(m_.group(1)):
+                out.append({"q": f"{m_.group(2)}-{MONTHS_EN[m_.group(1)]:02d}", "est": est, "act": act, "reported": rep_,
+                            "surprise": (act - est) / abs(est) if est else None, "src": "Nasdaq (Zacks)"})
+        if not out:
+            for r_ in reversed(safe(lambda: finnhub("stock/earnings", symbol=us)) or []):
+                act, est = num(r_.get("actual")), num(r_.get("estimate"))
+                if act is not None:
+                    out.append({"q": str(r_.get("period") or "")[:10], "est": est, "act": act,
+                                "surprise": (act - est) / abs(est) if est else None, "src": "Finnhub"})
+    return out[-8:]
+
+
+def est_revisions(t):
+    """Änderung der Gewinnschätzungen in den letzten 30 und 90 Tagen (Yahoo eps_trend) – nach den Zahlen zeigt das,
+    wie die Analysten ihre Erwartungen angepasst haben."""
+    tr = yq(lambda: t.eps_trend)
+    if tr is None or getattr(tr, "empty", True) or "current" not in tr:
+        return None
+    out = []
+    for per, lab in (("0q", "laufendes Quartal"), ("+1q", "nächstes Quartal"), ("0y", "laufendes Geschäftsjahr"), ("+1y", "nächstes Geschäftsjahr")):
+        if per not in tr.index:
+            continue
+        cur = num(tr.loc[per, "current"])
+        d30 = num(tr.loc[per, "30daysAgo"]) if "30daysAgo" in tr else None
+        d90 = num(tr.loc[per, "90daysAgo"]) if "90daysAgo" in tr else None
+        if cur is None:
+            continue
+        out.append({"period": lab, "current": cur, "d30": d30, "d90": d90,
+                    "chg30": cur / d30 - 1 if d30 and d30 > 0 else None, "chg90": cur / d90 - 1 if d90 and d90 > 0 else None})
+    return out or None
+
+
+def earnings_ai(cik, acc, name, facts):
+    """Tiefenanalyse der Ergebnis-Pressemitteilung (8-K, Anlage 99.1) durch Claude – nach dem Raster eines
+    Earnings-Updates: Schlagzeile, Kernaussagen, Bereiche, Ausblick/Prognose, Positives, Negatives, Fazit.
+    Je Meldung einmal erstellt und gespeichert."""
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        return None
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("esum") or {}).get(acc)
+    if hit:
+        return hit
+    text, url = sec_press_release(cik, acc)
+    if not text or len(text) < 500:
+        return None
+    prompt = (f"Ergebnis-Pressemitteilung von {name}:\n\n{text[:40000]}\n\n"
+              f"Bekannte Eckdaten (aus den Finanzdaten berechnet): {facts}\n\n"
+              "Erstelle eine Quartalsanalyse auf Deutsch für Privatanleger – sachlich, ohne Kauf- oder Verkaufsempfehlung, "
+              "Zahlen genau wie im Text, nichts erfinden:\n"
+              "1. schlagzeile: ein Satz (höchstens 14 Wörter), der das Quartal zusammenfasst\n"
+              "2. kernaussagen: 5 Punkte, je höchstens 22 Wörter – Umsatz, Gewinn, Margen, wichtigste Treiber, Besonderheiten\n"
+              "3. segmente: bis zu 4 Punkte „Bereich: Entwicklung“ (Geschäftsbereiche oder Regionen); leer, wenn keine genannt\n"
+              "4. ausblick: 1–2 Sätze zur Prognose des Managements; ohne Prognose genau: Keine Prognose in der Mitteilung.\n"
+              "5. prognose: angehoben, bestätigt, gesenkt, neu oder keine – Veränderung der Prognose ggü. vorher, sofern erkennbar\n"
+              "6. positiv: 2–3 Punkte, negativ: 2–3 Punkte (je höchstens 16 Wörter)\n"
+              "7. fazit: 1–2 Sätze, was das Quartal für die weitere Entwicklung bedeutet\n"
+              "8. ton: positiv, gemischt oder negativ\n"
+              'Antworte nur mit JSON: {"schlagzeile": "", "kernaussagen": [], "segmente": [], "ausblick": "", "prognose": "", '
+              '"positiv": [], "negativ": [], "fazit": "", "ton": ""}')
+    model = os.environ.get("EARNINGS_AI_MODEL") or os.environ.get("BIZ_AI_MODEL") or "claude-haiku-5-5"
+    body = json.dumps({"model": model, "max_tokens": 1800, "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, headers={
+        "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        resp = json.loads(r.read())
+    txt = "".join(c.get("text", "") for c in resp.get("content") or [] if c.get("type") == "text")
+    js = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
+    lst = lambda k_, n_, w_: [str(x).strip()[:w_] for x in (js.get(k_) or []) if str(x).strip()][:n_]
+    out = {"headline": str(js.get("schlagzeile") or "").strip()[:160], "points": lst("kernaussagen", 6, 260),
+           "segments": lst("segmente", 4, 200), "outlook": str(js.get("ausblick") or "").strip()[:500],
+           "guidance": str(js.get("prognose") or "").strip().lower()[:12], "pos": lst("positiv", 3, 180),
+           "neg": lst("negativ", 3, 180), "verdict": str(js.get("fazit") or "").strip()[:400],
+           "tone": str(js.get("ton") or "").strip().lower()[:12], "url": url, "model": model, "t": int(time.time())}
+    if not out["points"]:
+        return None
+    with STORE.lock:
+        es = data.setdefault("esum", {})
+        es[acc] = out
+        if len(es) > ESUM_KEEP:
+            for k_ in sorted(es, key=lambda k_: es[k_].get("t", 0))[:len(es) - ESUM_KEEP]:
+                es.pop(k_, None)
+        STORE.dirty = True
+    LOG.info("[Earnings] %s: Pressemitteilung analysiert (%s)", name, model)
+    return out
+
+
+def earnings_review(query):
+    """Daten für den Earnings Reviewer: letztes Quartal (Kennzahlen, Ergebnis ggü. Erwartung, Ausblick, Schätzungs-
+    änderungen, Pressestimmen, Quellen) plus die letzten Quartale für die Diagramme im One-Pager."""
+    symbol, t, info, alts = resolve(query)
+    if info.get("quoteType") == "ETF":
+        raise ValueError("Der Earnings Reviewer ist nur für Aktien – ETFs veröffentlichen keine Quartalszahlen.")
+    hit = EARN_CACHE.get(symbol)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    name = clean_company_name(info.get("longName") or info.get("shortName") or symbol)
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        f_q = ex.submit(lambda: safe(lambda: income_data(symbol, "quarterly")))
+        f_eps = ex.submit(lambda: safe(lambda: eps_history(symbol, t), []))
+        f_sec = ex.submit(lambda: safe(lambda: sec_company(symbol, alts, name)))
+        f_rev = ex.submit(lambda: safe(lambda: est_revisions(t)))
+        f_ev = ex.submit(lambda: safe(lambda: company_events(symbol, alts, info.get("currency") or ""), []))
+        f_news = ex.submit(lambda: (safe(lambda: google_news(f'"{name}" Quartalszahlen', "de", days=45), []) or [])
+                           + (safe(lambda: google_news(f'"{name}" quarterly results', "en", days=45), []) or []))
+        qd, eps_h, sec_, revs, events, news = (f_q.result(), f_eps.result(), f_sec.result(), f_rev.result(), f_ev.result(),
+                                               f_news.result())
+    m = {"name": name, "currency": info.get("currency"), "fin_currency": financial_currency(symbol, info),
+         "eps_quarters": [{"q": e["q"] if len(e["q"]) > 7 else e["q"] + "-28", "est": e["est"], "act": e["act"]} for e in eps_h]}
+    qr = safe(lambda: quarter_report(t, m, sec_)) or {}
+    if not qr and not (qd or {}).get("periods"):
+        raise ValueError("Keine Quartalszahlen verfügbar.")
+    # Ergebnis ggü. Erwartung: Treffer der letzten Quartale
+    beats = [e for e in eps_h if e.get("surprise") is not None]
+    beat_n = sum(1 for e in beats if e["surprise"] > 0.005)
+    last_eps = beats[-1] if beats else None
+    verdict = None
+    if qr.get("eps_surprise") is not None or last_eps:
+        s_ = qr.get("eps_surprise") if qr.get("eps_surprise") is not None else last_eps["surprise"]
+        verdict = "beat" if s_ > 0.005 else "miss" if s_ < -0.005 else "inline"
+    facts = "; ".join(qr.get("points") or [])
+    ai = None
+    er = qr.get("release")
+    if er and sec_:
+        ai = safe(lambda: earnings_ai(sec_["cik"], er["acc"], name, facts))
+    nxt = next((e for e in (events or []) if e.get("type") == "earnings"), None)
+    seen, press = set(), []
+    for it in sorted(news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
+        k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
+        if k_ in seen or not EARN_WORDS.search(it["title"]):
+            continue
+        seen.add(k_)
+        press.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
+                      "date": it["date"].date().isoformat() if it.get("date") else None})
+        if len(press) >= 6:
+            break
+    filings = [f for f in ((sec_ or {}).get("filings") or []) if f["form"] in ("10-Q", "10-K", "8-K", "6-K", "20-F")][:4]
+    P = ((qd or {}).get("periods") or [])[-6:]
+    out = {
+        "symbol": symbol, "name": name, "currency": info.get("currency"), "fin_currency": (qd or {}).get("currency") or m["fin_currency"],
+        "price": current_price(info),
+        "quarter": qr, "verdict": verdict, "beats": {"n": len(beats), "beat": beat_n},
+        "eps_history": eps_h, "revisions": revs, "ai": ai,
+        "quarters": [{k_: p_.get(k_) for k_ in ("label", "end", "revenue", "net_income", "margin", "op_margin")} for p_ in P],
+        "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
+        "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
+        "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
+    }
+    EARN_CACHE[symbol] = (time.time(), out)
+    return out
+
+
 def analyze(query):
     key = query.strip().lower()
     if key in CACHE and time.time() - CACHE[key][0] < 900:
@@ -10446,7 +10632,7 @@ def maintenance():
 
 FEATURES_GET = {"/api/analyze": "Aktienanalyse", "/api/depot": "Depot", "/api/me/summary": "Mein Bereich",
                 "/api/track": "Trefferquote", "/api/screener": "Screener", "/api/ics": "Kalender-Export",
-                "/api/income": "Erfolgsrechnung", "/api/derivatives": "Derivate", "/api/pricecalc": "Kursrechner"}
+                "/api/income": "Erfolgsrechnung", "/api/derivatives": "Derivate", "/api/pricecalc": "Kursrechner", "/api/earnings": "Earnings Reviewer"}
 FEATURES_POST = {"/api/depot": "Depot-Upload", "/api/watchlist": "Watchlist", "/api/alerts": "Preisalarme",
                  "/api/prefs": "Einstellungen", "/api/messages": "Nachrichten", "/api/subscription": "Abo",
                  "/api/report": "Bericht"}
@@ -11559,7 +11745,7 @@ def cache_rules():
             ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300), ("Fondskosten (onvista)", ONVISTA_TER, 7 * 86400, 500),
             ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
             ("stockanalysis-Kursziele", STOCKANALYSIS_TARGET_CACHE, 12 * 3600, 300),
-            ("Kursrechner", PRICECALC_CACHE, 3600, 100), ("Firmenlogos", LOGO_CACHE, LOGO_TTL, 600),
+            ("Kursrechner", PRICECALC_CACHE, 3600, 100), ("Earnings Reviewer", EARN_CACHE, 6 * 3600, 60), ("Firmenlogos", LOGO_CACHE, LOGO_TTL, 600),
             ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
@@ -13039,6 +13225,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(lg[0])
             return
+        if u.path == "/api/earnings":
+            if not q:
+                return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")
+            try:
+                return self.send(200, json.dumps(json_safe(earnings_review(q))), "application/json; charset=utf-8")
+            except ValueError as e:
+                return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
         if u.path == "/api/pricecalc":
             if not q:
                 return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")
