@@ -1862,6 +1862,19 @@ class TestIncomeEstimatesSources(unittest.TestCase):
                 um.patch.dict(a.LOGO_CACHE, clear=True):
             self.assertIsNone(a.company_logo(None, "Bitcoin"))                   # Kryptowährung -> kein Firmenlogo
 
+    def test_pricecalc_buyback_rate(self):
+        import pandas as pd
+        cols = pd.to_datetime(["2026-09-30", "2025-09-30", "2024-09-30", "2023-09-30"])
+        T = lambda vals: type("T", (), {"income_stmt": pd.DataFrame([vals], index=["Diluted Average Shares"], columns=cols)})()
+        r = a.pc_buyback_rate(T([14720.0, 15005.0, 15408.0, 15813.0]))       # Apple: rund 2,4 % weniger Aktien pro Jahr
+        self.assertAlmostEqual(r["rate"], 1 - (14720 / 15813) ** (1 / 3), places=4)
+        self.assertEqual((r["from"], r["to"]), ("2023", "2026"))
+        r = a.pc_buyback_rate(T([2565.0, 2447.0, 2295.0, 2061.0]))           # Verwässerung -> negativ
+        self.assertLess(r["rate"], 0)
+        r = a.pc_buyback_rate(T([4000.0, 1000.0, 1010.0, 1020.0]))           # Split 4:1 -> Reihe endet davor
+        self.assertIsNone(r)
+        self.assertIsNone(a.pc_buyback_rate(type("T", (), {"income_stmt": pd.DataFrame()})()))
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

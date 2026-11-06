@@ -716,6 +716,9 @@ tr.u-locked td{opacity:.65}
 .pc-in{width:68px;font:inherit;font-size:13.5px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2,var(--surface));color:var(--accent)}
 .pc-in:focus{outline:2px solid var(--accent);outline-offset:0}
 .pc-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.pc-bb{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 12px;cursor:pointer}
+.pc-bb input{width:18px;height:18px;margin:0;align-self:center;accent-color:var(--accent)}
+.pc-bb .stamp{flex-basis:100%;margin-left:26px}
 .pc-method{margin-top:14px;font-size:14px}
 .pc-method p{color:var(--text-2);margin:8px 0}
 .pc-dcf{min-width:480px;margin:10px 0}
@@ -4262,7 +4265,8 @@ function scrollToSection(hash, smooth = true) {
 const PC = {data: null, scen: "base", v: null};
 function pcReset() {
   const S = PC.data.scenarios[PC.scen];
-  PC.v = {rg: [...S.rev_growth], ng: [...S.ni_growth], pl: Array(6).fill(S.pe_low), ph: Array(6).fill(S.pe_high)};
+  PC.v = {rg: [...S.rev_growth], ng: [...S.ni_growth], pl: Array(6).fill(S.pe_low), ph: Array(6).fill(S.pe_high),
+          bb: Array(5).fill(PC.data.buyback?.rate ?? 0)};
 }
 function pcCalc() {
   const D = PC.data, S = D.scenarios[PC.scen], V = PC.v;
@@ -4272,13 +4276,16 @@ function pcCalc() {
     const g = V.ng[i - 1];
     ni.push(g != null && ni[i - 1] > 0 ? ni[i - 1] * (1 + g) : S.net_income[i - 1] * rev[i] / S.revenue[i - 1]);
   }
-  const eps = ni.map(n => n * D.k / D.shares);
+  // Aktienzahl: mit Rückkäufen sinkt sie jedes Jahr um die eingetragene Rate (negativ = neue Aktien, Verwässerung)
+  const sh = [D.shares];
+  for (let i = 1; i <= 5; i++) sh.push(sh[i - 1] * (PC.bbOn ? 1 - (V.bb[i - 1] ?? 0) : 1));
+  const eps = ni.map((n, i) => n * D.k / sh[i]);
   const now = Date.now();
   const yrs = D.ends.map(e => (new Date(e).getTime() - now) / (365.25 * 864e5));
   const px = (e, pe) => e > 0 && pe > 0 ? e * pe : null;
   const lo = eps.map((e, i) => px(e, V.pl[i])), hi = eps.map((e, i) => px(e, V.ph[i]));
   const cagr = arr => arr.map((p, i) => p && yrs[i] >= 0.5 ? Math.pow(p / D.price, 1 / yrs[i]) - 1 : null);
-  return {rev, ni, eps, lo, hi, cl: cagr(lo), ch: cagr(hi),
+  return {rev, ni, eps, sh, lo, hi, cl: cagr(lo), ch: cagr(hi),
           rg: rev.map((r, i) => i ? r / rev[i - 1] - 1 : null),
           ng: ni.map((n, i) => i && ni[i - 1] > 0 && n > 0 ? n / ni[i - 1] - 1 : null), m: ni.map((n, i) => rev[i] ? n / rev[i] : null)};
 }
@@ -4287,25 +4294,35 @@ function pcTable() {
   const D = PC.data, R = pcCalc(), V = PC.v, Y = D.years;
   const inp = (arr, i, key, pct_) => `<input class="pc-in" type="number" inputmode="decimal" step="${pct_ ? "0.1" : "0.5"}" data-k="${key}" data-i="${i}"
       value="${arr[i] == null ? "" : pct_ ? (arr[i] * 100).toFixed(1) : (+arr[i]).toFixed(1)}" aria-label="${key} ${Y[pct_ ? i + 1 : i]}">`;
-  const row = (lab, cells, cls = "", hint = "") => `<tr class="${cls}"><th>${lab}${hint ? `<small>${hint}</small>` : ""}</th>${cells.join("")}</tr>`;
+  const row = (key, lab, cells, cls = "", hint = "") => `<tr class="${cls}" data-r="${key}"><th>${lab}${hint ? `<small>${hint}</small>` : ""}</th>${cells.join("")}</tr>`;
   const td = (v, cls = "") => `<td class="num ${cls}">${v}</td>`;
   const cagrTd = v => v == null ? td("") : td(pc(v, 0, true), v >= 0 ? "pos" : "neg");
   const fc = D.fin_currency, c = D.currency;
   return `<div class="peer-scroll"><table class="trk pc-table">
     <thead><tr><th>Jahr</th>${Y.map((y, i) => `<th class="num">${y}${i ? "e" : ""}</th>`).join("")}</tr></thead><tbody>
-    ${row("Umsatz", R.rev.map(v => td(pcMoney(v, fc))))}
-    ${row("Umsatzwachstum", [td("")].concat(V.rg.map((_, i) => td(inp(V.rg, i, "rg", true) + "<i>%</i>", "pc-edit"))), "", "änderbar")}
-    ${row("Reinertrag", R.ni.map(v => td(pcMoney(v, fc), v < 0 ? "neg" : "")), "pc-gap")}
-    ${row("Gewinnwachstum", [td("")].concat(V.ng.map((_, i) => td(inp(V.ng, i, "ng", true) + "<i>%</i>", "pc-edit"))), "", "änderbar")}
-    ${row("Nettomarge", R.m.map(v => td(pc(v, 0))), "pc-gap")}
-    ${row("Gewinn je Aktie", R.eps.map(v => td(nf(v) + " " + esc(c), v < 0 ? "neg" : "")), "pc-gap")}
-    ${row("KGV konservativ", V.pl.map((_, i) => i ? td(inp(V.pl, i, "pl", false), "pc-edit") : td("")), "pc-gap", "änderbar")}
-    ${row("KGV optimistisch", V.ph.map((_, i) => i ? td(inp(V.ph, i, "ph", false), "pc-edit") : td("")), "", "änderbar")}
-    ${row("Kurs konservativ", R.lo.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl pc-gap")}
-    ${row("Kurs optimistisch", R.hi.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl")}
-    ${row("Rendite p. a. konservativ", R.cl.map(cagrTd), "pc-gap", "ab heute")}
-    ${row("Rendite p. a. optimistisch", R.ch.map(cagrTd), "", "ab heute")}
+    ${row("rev", "Umsatz", R.rev.map(v => td(pcMoney(v, fc))))}
+    ${row("rg", "Umsatzwachstum", [td("")].concat(V.rg.map((_, i) => td(inp(V.rg, i, "rg", true) + "<i>%</i>", "pc-edit"))), "", "änderbar")}
+    ${row("ni", "Reinertrag", R.ni.map(v => td(pcMoney(v, fc), v < 0 ? "neg" : "")), "pc-gap")}
+    ${row("ng", "Gewinnwachstum", [td("")].concat(V.ng.map((_, i) => td(inp(V.ng, i, "ng", true) + "<i>%</i>", "pc-edit"))), "", "änderbar")}
+    ${row("m", "Nettomarge", R.m.map(v => td(pc(v, 0))), "pc-gap")}
+    ${PC.bbOn ? row("bb", "Aktienrückkauf", [td("")].concat(V.bb.map((_, i) => td(inp(V.bb, i, "bb", true) + "<i>%</i>", "pc-edit"))), "pc-gap", "änderbar · weniger Aktien pro Jahr")
+      + row("sh", "Aktienzahl", R.sh.map(v => td(pcMoney(v, ""))), "") : ""}
+    ${row("eps", "Gewinn je Aktie", R.eps.map(v => td(nf(v) + " " + esc(c), v < 0 ? "neg" : "")), "pc-gap")}
+    ${row("pl", "KGV konservativ", V.pl.map((_, i) => i ? td(inp(V.pl, i, "pl", false), "pc-edit") : td("")), "pc-gap", "änderbar")}
+    ${row("ph", "KGV optimistisch", V.ph.map((_, i) => i ? td(inp(V.ph, i, "ph", false), "pc-edit") : td("")), "", "änderbar")}
+    ${row("lo", "Kurs konservativ", R.lo.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl pc-gap")}
+    ${row("hi", "Kurs optimistisch", R.hi.map((v, i) => !i ? td("", "pc-none") : td(v == null ? "–" : nf(v) + " " + esc(c))), "pc-hl")}
+    ${row("cl", "Rendite p. a. konservativ", R.cl.map(cagrTd), "pc-gap", "ab heute")}
+    ${row("ch", "Rendite p. a. optimistisch", R.ch.map(cagrTd), "", "ab heute")}
     </tbody></table></div>`;
+}
+function pcBuybackBox() {
+  const B = PC.data.buyback;
+  const hint = B ? (B.rate >= 0 ? `Prognose: ${pc(B.rate, 1)} weniger Aktien pro Jahr – Durchschnitt ${B.from}–${B.to}`
+                              : `Prognose: ${pc(-B.rate, 1)} mehr Aktien pro Jahr (Verwässerung) – Durchschnitt ${B.from}–${B.to}`)
+                 : "Keine Daten zur Aktienzahl – Prognose 0 %, bitte selbst eintragen";
+  return `<label class="pc-bb"><input type="checkbox" id="pc-bb" ${PC.bbOn ? "checked" : ""}> <b>Aktienrückkäufe berücksichtigen</b>
+    <span class="stamp">${hint}</span></label>`;
 }
 function pcRender() {
   const D = PC.data, S = D.scenarios[PC.scen], I = D.inputs;
@@ -4323,14 +4340,14 @@ function pcRender() {
       ${kpi("KGV heute / Median 5 J.", (D.pe_now ? nf(D.pe_now, 1) : "–") + " / " + (D.pe_hist_median ? nf(D.pe_hist_median, 1) : "–"), "DCF-KGV Jahr 5: " + (S.pe_dcf ? nf(S.pe_dcf, 1) : "–"))}
       ${kpi("Kursspanne " + D.years[5], (() => { const R = pcCalc(); return R.lo[5] ? nf(R.lo[5], 0) + " – " + nf(R.hi[5], 0) + " " + esc(D.currency) : "–"; })(), "konservativ – optimistisch")}
     </div>
-    <div class="card pad">${pcTable()}
+    <div class="card pad">${pcBuybackBox()}${pcTable()}
       <div class="pc-actions"><button class="btn" id="pc-reset">Werte des Szenarios wiederherstellen</button>
         <span class="stamp">Umsatz- und Gewinnwachstum (in %) und KGV lassen sich je Jahr überschreiben – alles rechnet sofort neu.</span></div>
       ${D.pe_note ? `<div class="note" style="margin-top:10px">${esc(D.pe_note)}</div>` : ""}
       ${D.fy_missing ? `<div class="note" style="margin-top:10px">Das Geschäftsjahr ${D.fy_missing} ist abgeschlossen, seine Zahlen sind aber noch nicht veröffentlicht – Basisjahr ist deshalb ${D.years[0]}.</div>` : ""}
     </div>
     <div class="card pad pc-method"><h3>So wird gerechnet</h3>
-      <p><b>Kurs = Gewinn je Aktie × KGV.</b> <span>Umsatz und Reinertrag wachsen vom letzten abgeschlossenen Geschäftsjahr aus mit den Raten der Tabelle; Gewinn je Aktie = Reinertrag ÷ heutige Aktienzahl.</span>${D.k !== 1 ? ` <span>Umgerechnet von ${esc(D.fin_currency)} in ${esc(D.currency)}.</span>` : ""} <span>Die Rendite p. a. vergleicht den Kurs am jeweiligen Geschäftsjahresende mit dem heutigen Kurs (ohne Dividenden).</span></p>
+      <p><b>Kurs = Gewinn je Aktie × KGV.</b> <span>Umsatz und Reinertrag wachsen vom letzten abgeschlossenen Geschäftsjahr aus mit den Raten der Tabelle; Gewinn je Aktie = Reinertrag ÷ heutige Aktienzahl.</span>${PC.bbOn ? ` <span>Mit Aktienrückkäufen sinkt die Aktienzahl jedes Jahr um die eingetragene Rate – derselbe Reinertrag verteilt sich auf weniger Aktien. Ein negativer Wert bedeutet mehr Aktien (Verwässerung, z. B. durch Aktienvergütung).</span>` : ""}${D.k !== 1 ? ` <span>Umgerechnet von ${esc(D.fin_currency)} in ${esc(D.currency)}.</span>` : ""} <span>Die Rendite p. a. vergleicht den Kurs am jeweiligen Geschäftsjahresende mit dem heutigen Kurs (ohne Dividenden).</span></p>
       <p><b>Szenarien nach dem DCF-Modell</b> <span>(5 Jahre, Diskontsatz nach CAPM, Abzinsung zur Jahresmitte, ewiges Wachstum danach). Base: Analystenkonsens, danach schrittweise Richtung langfristiges Wachstum. Bear/Bull: Umsatzwachstum 30 % niedriger/höher (mindestens 2 Prozentpunkte), Nettomarge bis Jahr 5 um 10 % niedriger/höher, Diskontsatz ±0,5 Prozentpunkte, ewiges Wachstum 2,0 / 2,5 / 3,0 %.</span></p>
       <p class="stamp"><span>Umsatzwachstum im Basisfall:</span> ${srcG}</p>
       <p><b>KGV:</b> konservativ = niedrigeres, optimistisch = höheres aus aktuellem KGV und Median der letzten fünf Jahre; für Bear/Bull im Verhältnis der DCF-Werte zum Basisfall angepasst. Das reine DCF-KGV (Endwert ÷ Reinertrag in Jahr 5) ist meist deutlich niedriger, weil es nach Jahr 5 nur noch ${pc(S.g_term, 1)} Wachstum unterstellt.</p>
@@ -4346,6 +4363,7 @@ function pcRender() {
     </div>`;
   document.querySelectorAll("#pc-scen button").forEach(b => b.onclick = () => { PC.scen = b.dataset.s; pcReset(); pcRender(); });
   $("#pc-reset").onclick = () => { pcReset(); pcRender(); };
+  $("#pc-bb").onchange = e => { PC.bbOn = e.target.checked; pcRender(); };
   pcBindInputs();
 }
 function pcBindInputs() {
@@ -4353,18 +4371,19 @@ function pcBindInputs() {
     const v = el.value.trim() === "" ? null : parseFloat(el.value.replace(",", "."));
     const k_ = el.dataset.k, i = +el.dataset.i;
     if (v != null && isNaN(v)) return;
-    PC.v[k_][i] = v == null ? null : (k_ === "rg" || k_ === "ng" ? v / 100 : v);
+    PC.v[k_][i] = v == null ? null : (k_ === "rg" || k_ === "ng" || k_ === "bb" ? v / 100 : v);
     // nur die berechneten Zellen neu zeichnen, damit das Eingabefeld den Fokus behält
     const R = pcCalc(), D = PC.data, c = D.currency, fc = D.fin_currency;
-    const rows = $("#pc-res .pc-table tbody").rows;
-    const set = (r, f) => [...rows[r].cells].slice(1).forEach((td, j) => { if (!td.querySelector("input")) td.innerHTML = f(j); });
-    set(0, j => pcMoney(R.rev[j], fc));
-    set(2, j => pcMoney(R.ni[j], fc));
-    set(4, j => pc(R.m[j], 0));
-    set(5, j => nf(R.eps[j]) + " " + esc(c));
-    set(8, j => !j ? "" : R.lo[j] == null ? "–" : nf(R.lo[j]) + " " + esc(c));  // Basisjahr ohne Kurs
-    set(9, j => !j ? "" : R.hi[j] == null ? "–" : nf(R.hi[j]) + " " + esc(c));
-    [[10, R.cl], [11, R.ch]].forEach(([r, a]) => [...rows[r].cells].slice(1).forEach((td, j) => {
+    const cells = key => { const tr = $(`#pc-res .pc-table tr[data-r="${key}"]`); return tr ? [...tr.cells].slice(1) : []; };
+    const set = (key, f) => cells(key).forEach((td, j) => { if (!td.querySelector("input")) td.innerHTML = f(j); });
+    set("rev", j => pcMoney(R.rev[j], fc));
+    set("ni", j => pcMoney(R.ni[j], fc));
+    set("m", j => pc(R.m[j], 0));
+    set("sh", j => pcMoney(R.sh[j], ""));
+    set("eps", j => nf(R.eps[j]) + " " + esc(c));
+    set("lo", j => !j ? "" : R.lo[j] == null ? "–" : nf(R.lo[j]) + " " + esc(c));  // Basisjahr ohne Kurs
+    set("hi", j => !j ? "" : R.hi[j] == null ? "–" : nf(R.hi[j]) + " " + esc(c));
+    [["cl", R.cl], ["ch", R.ch]].forEach(([key, a]) => cells(key).forEach((td, j) => {
       td.textContent = a[j] == null ? "" : pc(a[j], 0, true); td.className = "num " + (a[j] == null ? "" : a[j] >= 0 ? "pos" : "neg"); }));
     const kp = document.querySelectorAll("#pc-res .pc-kpis .adm-k b")[3];
     if (kp) kp.textContent = R.lo[5] ? nf(R.lo[5], 0) + " – " + nf(R.hi[5], 0) + " " + c : "–";

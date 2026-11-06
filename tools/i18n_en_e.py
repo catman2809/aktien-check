@@ -564,3 +564,10 @@ DEPOT_WILD += [
      "Fiscal year {0} has ended, but its figures have not been published yet – the base year is therefore {1}."),
 ]
 DEPOT_WILD += [("{0}: aus Gewinnkonsens abgeleitet", "{0}: derived from the earnings consensus")]
+DEPOT_EXACT.update({"Aktienrückkäufe berücksichtigen": "Include share buybacks", "Aktienrückkauf": "Share buyback",
+                    "Aktienzahl": "Share count", "änderbar · weniger Aktien pro Jahr": "editable · fewer shares per year",
+                    "Keine Daten zur Aktienzahl – Prognose 0 %, bitte selbst eintragen": "No share count data – forecast 0%, please enter your own",
+                    "Mit Aktienrückkäufen sinkt die Aktienzahl jedes Jahr um die eingetragene Rate – derselbe Reinertrag verteilt sich auf weniger Aktien. Ein negativer Wert bedeutet mehr Aktien (Verwässerung, z. B. durch Aktienvergütung).":
+                        "With share buybacks the share count falls each year by the rate entered – the same net income is spread over fewer shares. A negative value means more shares (dilution, e.g. from stock-based compensation)."})
+DEPOT_WILD += [("Prognose: {0} weniger Aktien pro Jahr – Durchschnitt {1}–{2}", "Forecast: {0} fewer shares per year – average {1}–{2}"),
+               ("Prognose: {0} mehr Aktien pro Jahr (Verwässerung) – Durchschnitt {1}–{2}", "Forecast: {0} more shares per year (dilution) – average {1}–{2}")]

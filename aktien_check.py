@@ -8059,6 +8059,29 @@ def pc_dcf(fcfs, wacc, g, net_debt):
     return pv - net_debt, tv - net_debt
 
 
+def pc_buyback_rate(t):
+    """Prognose für Aktienrückkäufe: durchschnittliche jährliche Veränderung der verwässerten Aktienzahl der letzten
+    bis zu vier Geschäftsjahre (positiv = Rückkauf, z. B. Apple ≈ 2,3 % weniger Aktien pro Jahr; negativ = Verwässerung
+    durch neue Aktien, z. B. Palantir). Sprünge über 30 % in einem Jahr (Aktiensplit, Übernahme) beenden die Reihe."""
+    inc = safe(lambda: t.income_stmt)
+    if inc is None or getattr(inc, "empty", True):
+        return None
+    row = next((inc.loc[n] for n in ("Diluted Average Shares", "Basic Average Shares") if n in inc.index), None)
+    if row is None:
+        return None
+    vals = sorted(((str(c)[:10], num(v)) for c, v in row.items() if num(v)), reverse=True)  # neueste zuerst
+    seq = [vals[0]] if vals else []
+    for d_, v in vals[1:5]:
+        if not 0.7 <= seq[-1][1] / v <= 1.3:
+            break
+        seq.append((d_, v))
+    if len(seq) < 2:
+        return None
+    n = len(seq) - 1
+    rate = 1 - (seq[0][1] / seq[-1][1]) ** (1 / n)
+    return {"rate": round(clamp(rate, -0.10, 0.10), 4), "from": seq[-1][0][:4], "to": seq[0][0][:4]}
+
+
 def price_calc(query):
     """Daten für den Kursrechner: letztes abgeschlossenes Geschäftsjahr plus fünf Prognosejahre je Szenario
     (Umsatzwachstum, Gewinnwachstum, KGV konservativ/optimistisch) und die DCF-Kennzahlen dahinter. Gerechnet wird in
@@ -8087,6 +8110,7 @@ def price_calc(query):
     if not k:
         raise ValueError("Wechselkurs nicht verfügbar.")
     shares = mcap / px  # Papiere dieser Notierung (bei ADRs die Zahl der ADRs) -> Gewinn je Papier passt zum Kurs
+    buyback = safe(lambda: pc_buyback_rate(t))
     revs = [p_["revenue"] for p_ in P]
     ly = int(last["end"][:4])
 
@@ -8231,6 +8255,7 @@ def price_calc(query):
         "inputs": {"rf": rf, "beta": beta, "beta_adj": beta_adj, "erp": PC_ERP, "crp": crp, "ke": ke, "net_debt": net_debt,
                    "wacc": wacc0, "fcf_margin": fcf_m0, "net_margin": m0, "financial": financial, "hist_growth": hist_g},
         "fy_missing": next((e.get("fy_missing") for e in E if e.get("fy_missing")), None),
+        "buyback": buyback,
     }
     PRICECALC_CACHE[symbol] = (time.time(), out)
     return out
