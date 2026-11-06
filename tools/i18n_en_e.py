@@ -657,3 +657,9 @@ DEPOT_WILD += [
     ("Dividende je Aktie zuletzt {0} ({1}) – gesenkt um {2} ggü. {3} ({4})", "Latest dividend per share {0} ({1}) – cut by {2} vs. {3} ({4})"),
     ("Kapitalverwendung und Dividende: {*}", "Capital allocation and dividend: {*}"), ("Meldungen: {*}", "News: {*}"),
 ]
+DEPOT_EXACT.update({"Strategische Entscheidungen": "Strategic decisions"})
+DEPOT_WILD += [("Aktienrückkäufe im Quartal: {0} {1} (Vorjahresquartal {2} {3})", "Share buybacks in the quarter: {0} {1} (prior-year quarter {2} {3})"),
+               ("Aktienrückkäufe im Quartal: {0} {1}", "Share buybacks in the quarter: {0} {1}"),
+               ("Zukäufe von Unternehmen im Quartal: {0} {1}", "Acquisitions in the quarter: {0} {1}"),
+               ("Dividende je Aktie erhöht um {0} auf {1} ({2})", "Dividend per share raised by {0} to {1} ({2})"),
+               ("Dividende je Aktie gesenkt um {0} auf {1} ({2})", "Dividend per share cut by {0} to {1} ({2})")]

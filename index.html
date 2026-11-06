@@ -4548,6 +4548,7 @@ function erRender() {
       <h3>Die wichtigsten Punkte</h3>
       <ul class="er-list">${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("") || "<li>Keine Kennzahlen zum letzten Quartal verfügbar.</li>"}</ul>
       ${erOutlook(D) ? `<p class="er-out"><b>Ausblick:</b> ${esc(erOutlook(D))}</p>` : ""}
+      ${(() => { const S = erStrategyPoints(D); return S.length ? `<h3>Strategische Entscheidungen</h3><ul class="er-list">${S.join("")}</ul>` : ""; })()}
       ${D.next ? `<p class="stamp">Nächste Quartalszahlen: ${erDate(D.next.date)}${D.next.estimated ? " (geschätzt)" : ""}</p>` : ""}
       <div class="pc-actions"><button class="btn primary" id="er-op">One-Pager ansehen (A4)</button>
         ${!A ? `<span class="stamp">${rel ? "Die Tiefenanalyse der Pressemitteilung braucht einen Claude-Schlüssel auf dem Server." : "Ausführliche Analyse der Pressemitteilung nur für Werte mit US-Börsenmeldung (8-K)."}</span>` : ""}</div>
@@ -4577,6 +4578,22 @@ function erEps(D) {
       <circle cx="${x}" cy="${sy(e.act)}" r="4.5" fill="${beat ? "#2e7d32" : "#c62828"}"/>
       <text x="${x}" y="${sy(e.act) - 8}" text-anchor="middle" font-size="8.5">${nf(e.act)}</text>
       <text x="${x}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(String(e.q).slice(0, 7))}</text>`; }).join("")}</svg>`;
+}
+// Kurzfassung für die Übersicht: Claude-Punkte, sonst Rückkäufe/Zukäufe/Dividende aus den Zahlen, 8-K-Meldungen, Nachrichten
+function erStrategyPoints(D) {
+  const A = D.ai, C = D.capital, Dv = D.dividend, c = D.quarter?.currency || D.fin_currency || "";
+  const out = (A?.strategy || []).slice(0, 4).map(x => `<li>${esc(x)}</li>`);
+  const row = k => (C?.rows || []).find(r => r.key === k);
+  const bb = row("buyback"), acq = row("acq");
+  if (bb && bb.q < 0) out.push(`<li>Aktienrückkäufe im Quartal: ${pcMoney(-bb.q, c)}${bb.ago ? ` (Vorjahresquartal ${pcMoney(-bb.ago, c)})` : ""}</li>`);
+  if (acq && acq.q < 0) out.push(`<li>Zukäufe von Unternehmen im Quartal: ${pcMoney(-acq.q, c)}</li>`);
+  if (Dv && Math.abs(Dv.change) >= 0.005) out.push(`<li>Dividende je Aktie ${Dv.change > 0 ? "erhöht" : "gesenkt"} um ${nf(Math.abs(Dv.change) * 100, 1)} % auf ${nf(Dv.amount)} (${erDate(Dv.date)})</li>`);
+  if (!A?.strategy?.length) {
+    (D.events_8k || []).filter(e => e.items.some(i => !/Information an Investoren|Abstimmungen der Hauptversammlung/.test(i))).slice(0, 2)
+      .forEach(e => out.push(`<li><a href="${esc(e.url)}" target="_blank" rel="noopener">${erDate(e.date)}: ${esc(e.items.join(", "))}</a></li>`));
+    (D.strategic_news || []).slice(0, 3).forEach(n => out.push(`<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a> <small class="stamp">${esc(n.source)}${n.date ? ", " + erDate(n.date) : ""}</small></li>`));
+  }
+  return out.slice(0, 7);
 }
 // Strategie & wichtige Entscheidungen: Claude (Pressemitteilung), Kapitalverwendung, Dividende, 8-K-Meldungen, Nachrichten
 function erStrategy(D) {
