@@ -8236,6 +8236,66 @@ def price_calc(query):
     return out
 
 
+LOGO_CACHE = {}  # Symbol bzw. Suchbegriff -> (Zeit, (Bilddaten, Typ) oder None)
+LOGO_TTL = 7 * 86400
+
+
+def _png_ok(b, min_px=48):
+    """PNG mit brauchbarer Größe? (FMP liefert für manche Kürzel nur ein 16-Pixel-Symbol, z. B. SIE.DE)"""
+    return bool(b) and b[:4] == b"\x89PNG" and len(b) > 200 and int.from_bytes(b[16:20], "big") >= min_px
+
+
+def _logo_fmp(sym):
+    """Firmenlogo von financialmodelingprep.com (frei, ohne Schlüssel; gleiche Kürzel wie Yahoo, auch SAP.DE, 7203.T)."""
+    try:
+        b = _fetch(f"https://financialmodelingprep.com/image-stock/{urllib.parse.quote(sym)}.png", timeout=8, limit=400_000)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return (b, "image/png") if _png_ok(b) else None
+
+
+def company_logo(symbol=None, query=None):
+    """Logo zu einem Börsenkürzel (Analyse, Depot) oder einem Suchbegriff (Ladebildschirm: „Apple“ -> AAPL).
+    Reihenfolge: Kürzel selbst, US-Notierung derselben Firma, sonst – nur wenn das Firmenprofil schon geladen ist –
+    das Website-Symbol der Firmen-Domain (Google). Eine Woche zwischengespeichert, auch „kein Logo“."""
+    key = ("s:" + canon_symbol(symbol)) if symbol else ("q:" + (query or "").strip().lower())
+    hit = LOGO_CACHE.get(key)
+    if hit and time.time() - hit[0] < (LOGO_TTL if hit[1] else 3600):  # „kein Logo“ nur eine Stunde (Profil kommt evtl. noch)
+        return hit[1]
+    sym = canon_symbol(symbol) if symbol else None
+    if not sym and query:
+        q = query.strip()
+        found = search_symbols(q, include_crypto=True)
+        exact = next((x for x in found if x["symbol"].upper() == q.upper()), None)
+        ql = q.lower()  # gleiche Rangfolge wie resolve(): exakter Firmenname vor „beginnt mit“ (Siemens vor Siemens Energy)
+        ranked = sorted(found, key=lambda x: 0 if clean_company_name(x["name"]).lower() == ql
+                        else 1 if x["name"].lower().startswith(ql) else 2)
+        first = exact or (ranked[0] if ranked else None)
+        # Kryptowährungen und ETFs: kein Firmenlogo (sonst träfe „Bitcoin“ z. B. einen Bitcoin-ETF)
+        sym = first["symbol"] if first and not first.get("crypto") and not first.get("etf") else None
+    out = None
+    if sym and re.fullmatch(r"[A-Z0-9.\-^=]{1,15}", sym):
+        out = safe(lambda: _logo_fmp(sym))
+        if not out and "." in sym:
+            us = safe(lambda: us_listing(sym))
+            if us and us != sym:
+                out = safe(lambda: _logo_fmp(us))
+        if not out:
+            prof = (PROFILE_CACHE.get(sym) or (0, {}))[1] or {}
+            dom = domain_of(prof.get("website") or "") if prof.get("website") else ""
+            if dom:
+                b = safe(lambda: _fetch(f"https://www.google.com/s2/favicons?domain={urllib.parse.quote(dom)}&sz=128", timeout=8,
+                                        limit=200_000))
+                if b and (_png_ok(b) or (b[:3] == b"\xff\xd8\xff" and len(b) > 1500)):  # sonst Weltkugel/Mini-Symbol
+                    out = (b, "image/jpeg" if b[:3] == b"\xff\xd8\xff" else "image/png")
+    LOGO_CACHE[key] = (time.time(), out)
+    if sym and key.startswith("q:"):
+        LOGO_CACHE["s:" + sym] = (time.time(), out)
+    return out
+
+
 def analyze(query):
     key = query.strip().lower()
     if key in CACHE and time.time() - CACHE[key][0] < 900:
@@ -11474,7 +11534,7 @@ def cache_rules():
             ("Nasdaq-Prognosen", NASDAQ_EPS_CACHE, 12 * 3600, 300), ("Nasdaq-Kursziele", NASDAQ_TARGET_CACHE, 12 * 3600, 300), ("Fondskosten (onvista)", ONVISTA_TER, 7 * 86400, 500),
             ("onvista-Kursziele", ONVISTA_TARGET_CACHE, 12 * 3600, 300),
             ("stockanalysis-Kursziele", STOCKANALYSIS_TARGET_CACHE, 12 * 3600, 300),
-            ("Kursrechner", PRICECALC_CACHE, 3600, 100),
+            ("Kursrechner", PRICECALC_CACHE, 3600, 100), ("Firmenlogos", LOGO_CACHE, LOGO_TTL, 600),
             ("onvista-ISIN", ONVISTA_ISIN, 7 * 86400, 500), ("onvista", ONVISTA_CACHE, 12 * 3600, 300), ("US-Notierungen", US_LISTING_CACHE, 7 * 86400, 500)]
 
 
@@ -12942,6 +13002,18 @@ class Handler(BaseHTTPRequestHandler):
                                  "application/json; charset=utf-8")
             except ValueError as e:
                 return self.send(400, json.dumps({"error": str(e)}, ensure_ascii=False), "application/json")
+        if u.path == "/api/logo":
+            s_, q_ = (qs.get("s") or [""])[0][:20], (qs.get("q") or [""])[0][:60]
+            lg = safe(lambda: company_logo(s_ or None, None if s_ else q_)) if (s_ or len(q_) >= 2) else None
+            if not lg:
+                return self.send(404, "", "text/plain")
+            self.send_response(200)
+            self.send_header("Content-Type", lg[1])
+            self.send_header("Content-Length", str(len(lg[0])))
+            self.send_header("Cache-Control", "private, max-age=604800")
+            self.end_headers()
+            self.wfile.write(lg[0])
+            return
         if u.path == "/api/pricecalc":
             if not q:
                 return self.send(400, json.dumps({"error": "Bitte Aktie eingeben."}), "application/json")

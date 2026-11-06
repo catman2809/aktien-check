@@ -1828,6 +1828,40 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertEqual(set(a.PC_SCEN), {"bear", "base", "bull"})
         self.assertEqual([a.PC_SCEN[k]["g_term"] for k in ("bear", "base", "bull")], [0.02, 0.025, 0.03])
 
+    def test_company_logo(self):
+        import unittest.mock as um
+        import urllib.error
+
+        def png(w):
+            return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + w.to_bytes(4, "big") + w.to_bytes(4, "big") + bytes(300)
+        self.assertTrue(a._png_ok(png(128)))
+        self.assertFalse(a._png_ok(png(16)))                                     # FMP-Minisymbol (SIE.DE)
+        calls = []
+
+        def fake_fetch(url, **kw):
+            calls.append(url)
+            if "image-stock/AAPL.png" in url:
+                return png(100)
+            if "image-stock/SIE.DE.png" in url:
+                return png(16)
+            if "s2/favicons" in url and "siemens.com" in url:
+                return png(128)
+            raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+        hits = [{"symbol": "ENR.DE", "name": "Siemens Energy AG"}, {"symbol": "SIE.DE", "name": "Siemens Aktiengesellschaft"}]
+        with um.patch.object(a, "_fetch", side_effect=fake_fetch), um.patch.dict(a.LOGO_CACHE, clear=True), \
+                um.patch.object(a, "us_listing", return_value=None), um.patch.dict(a.PROFILE_CACHE, clear=True), \
+                um.patch.object(a, "search_symbols", return_value=hits):
+            self.assertEqual(a.company_logo("AAPL")[1], "image/png")
+            self.assertIsNone(a.company_logo("SIE.DE"))                          # ohne Firmenprofil kein Ersatz
+            a.LOGO_CACHE.clear()
+            a.PROFILE_CACHE["SIE.DE"] = (a.time.time(), {"website": "https://www.siemens.com"})
+            lg = a.company_logo(None, "Siemens")                                 # „Siemens“ -> SIE.DE, nicht Siemens Energy
+            self.assertEqual(int.from_bytes(lg[0][16:20], "big"), 128)
+            self.assertFalse(any("ENR.DE" in c for c in calls))
+        with um.patch.object(a, "search_symbols", return_value=[{"symbol": "BTC-EUR", "name": "Bitcoin", "crypto": True}]), \
+                um.patch.dict(a.LOGO_CACHE, clear=True):
+            self.assertIsNone(a.company_logo(None, "Bitcoin"))                   # Kryptowährung -> kein Firmenlogo
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

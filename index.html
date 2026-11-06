@@ -120,6 +120,13 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .hero{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px}
 @media (max-width:960px){.hero{grid-template-columns:1fr}}
 .co-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.co-id{display:flex;gap:14px;align-items:flex-start;min-width:0}
+.co-logo,.dp-logo,.load-logo{background:#fff;object-fit:contain;flex:none;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.co-logo{width:56px;height:56px;border-radius:14px;padding:7px;margin-top:2px}
+.dp-logo{width:24px;height:24px;border-radius:6px;padding:2px;vertical-align:middle;margin-right:8px}
+.load-logo{display:block;width:60px;height:60px;border-radius:16px;padding:8px;margin:4px auto 12px;opacity:0;transition:opacity .3s}
+.load-logo.on{opacity:1}
+@media (max-width:600px){.co-logo{width:46px;height:46px;border-radius:12px;padding:6px}}
 .co-name{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:6px 0 4px;line-height:1.2}
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .tag{font-size:12px;padding:3px 9px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2)}
@@ -1240,6 +1247,7 @@ input,select,textarea{background-color:var(--surface-2)}
 .steps li{padding:3px 0;transition:color .3s}
 .steps li.done{color:var(--text)} .steps li.done::before{content:"✓  ";color:var(--pos)}
 .steps li:not(.done)::before{content:"○  "}
+.loading .steps li{color:var(--on-photo-2)} .loading .steps li.done{color:var(--on-photo)} .loading .steps li.done::before{color:#a6dd7f}
 .error{max-width:520px;margin:64px auto;text-align:center;padding:28px}
 .error b{display:block;font-size:17px;margin-bottom:6px}
 @media (max-width:640px){
@@ -2740,7 +2748,7 @@ function renderDepot() {
     <div class="card pad">
       <div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
         <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th>${showOutlook ? `<th class="num">Score</th><th class="num">Potenzial</th>` : ""}<th>Branche</th><th>Land</th></tr></thead>
-      <tbody>${P.map(p => `<tr><td><span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
+      <tbody>${P.map(p => `<tr><td>${p.symbol ? logoImg(p.symbol, "dp-logo") : ""}<span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
         <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
         <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
         <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
@@ -4419,6 +4427,8 @@ document.addEventListener("click", e => {
   if (e.target.closest("#homebtn") || (e.target.closest("#brand") && !e.ctrlKey && !e.metaKey)) { e.preventDefault(); goHome(); }
 });
 
+// Firmenlogo über den eigenen Server (/api/logo); fehlt eins, verschwindet das Bild einfach
+const logoImg = (sym, cls) => sym ? `<img class="${cls}" src="/api/logo?s=${encodeURIComponent(sym)}" alt="" loading="lazy" onerror="this.remove()">` : "";
 /* Run */
 let runId = 0;
 async function run(q) {
@@ -4427,6 +4437,7 @@ async function run(q) {
   $("#subnav").style.display = "none";
   const steps = ["Unternehmen finden", "Kurs- und Bilanzdaten laden", "Nachrichten aus Tier 1–3 sammeln", "Kategorien bewerten"];
   $("#out").innerHTML = `<div class="loading">${KERZI_LOAD()}
+    <img class="load-logo" src="/api/logo?q=${encodeURIComponent(q)}" alt="" onload="this.classList.add('on')" onerror="this.remove()">
     <b>Analysiere „${esc(q)}“</b><div class="stamp">Kann bis zu 90 Sekunden dauern</div>
     <ul class="steps">${steps.map(s => `<li>${s}</li>`).join("")}</ul></div>`;
   const lis = [...document.querySelectorAll(".steps li")];
@@ -5610,10 +5621,13 @@ function render(d) {
   <section id="ueberblick" class="hero">
     <div class="card pad">
       <div class="co-head">
-        <div>
+        <div class="co-id">
+          ${logoImg(d.symbol, "co-logo")}
+          <div>
           <div class="eyebrow">${esc(d.symbol)} · ${esc(d.exchange)}</div>
           <div class="co-name" translate="no">${esc(d.name)}</div>
           <div class="tags">${[d.sector, d.industry, d.country, d.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>
+          </div>
         </div>
         <div class="price-box">
           <div class="price num">${nf(d.price)}<small>${esc(d.currency)}</small></div>
