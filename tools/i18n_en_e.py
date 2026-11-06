@@ -663,3 +663,6 @@ DEPOT_WILD += [("Aktienrückkäufe im Quartal: {0} {1} (Vorjahresquartal {2} {3}
                ("Zukäufe von Unternehmen im Quartal: {0} {1}", "Acquisitions in the quarter: {0} {1}"),
                ("Dividende je Aktie erhöht um {0} auf {1} ({2})", "Dividend per share raised by {0} to {1} ({2})"),
                ("Dividende je Aktie gesenkt um {0} auf {1} ({2})", "Dividend per share cut by {0} to {1} ({2})")]
+DEPOT_EXACT.update({"Ausblick des Managements": "Management outlook",
+                    "Wörtlich aus der Ergebnis-Pressemitteilung (englisch)": "Verbatim from the earnings press release",
+                    "Pressemitteilung öffnen": "Open press release"})

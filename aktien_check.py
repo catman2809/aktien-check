@@ -7105,8 +7105,14 @@ def _html_text(raw):
 def sec_press_release(cik, acc):
     """Text der Ergebnis-Pressemitteilung (Anlage 99.1) eines 8-K."""
     folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}"
-    items = [i["name"] for i in _sec_json(folder + "/index.json")["directory"]["item"]]
+    entries = _sec_json(folder + "/index.json")["directory"]["item"]
+    items = [i["name"] for i in entries]
     ex = next((n for n in items if re.search(r"ex-?99|exhibit-?99", n, re.I) and n.lower().endswith((".htm", ".html"))), None)
+    if not ex:  # anders benannt (Nvidia: q2fy27pr.htm, Intel: q326earningsrelease.htm) – nicht das 8-K selbst oder R-Seiten
+        htm = [i for i in entries if i["name"].lower().endswith((".htm", ".html")) and not re.match(r"(R\d+|.*-index.*|.*-\d{8})\.htm", i["name"], re.I)]
+        named = [i for i in htm if re.search(r"pr\b|press|release|earnings|results", i["name"].replace(".htm", ""), re.I)]
+        pick = (named or sorted(htm, key=lambda i: -int(i.get("size") or 0)))[:1]
+        ex = pick[0]["name"] if pick else None
     if not ex:
         return None, None
     raw = _fetch(f"{folder}/{ex}", headers=SEC_UA, timeout=20, limit=3_000_000).decode("utf-8", "replace")
@@ -8558,6 +8564,81 @@ def earnings_ai(cik, acc, name, facts):
     return out
 
 
+GUIDE_HEAD = re.compile(r"\b(Business Outlook|Financial Outlook|Outlook|Guidance)\b")
+GUIDE_END = re.compile(r"\b(Highlights|Forward[- ]Looking|Earnings Webcast|Conference Call|Webcast|About [A-Z]\w+|Page \d+ of|"
+                       r"Reconciliations?|RECONCILIATION|Quarterly Highlights|Segment|Dividend|Share Repurchase|"
+                       r"Actual results|This outlook)\b")
+GUIDE_SAY = re.compile(r"\b(we (now )?expect|we anticipate|looking ahead|looking forward|we see|we are (further )?raising|"
+                       r"we (have )?raised|raising (our|its|the)|(our|its|the) (full[- ]year |annual )?(outlook|guidance) "
+                       r"(for|is|calls)|expects? (to|revenue|net|full)|is expected to be|are expected to be)\b", re.I)
+GUIDE_PAST = re.compile(r"\b(exceeded|above|beat|topped|ahead of|in line with) (our |its |the )?(prior )?(guidance|outlook)\b", re.I)
+GUIDE_BOILER = re.compile(r"forward[- ]looking|risks? and uncertaint|undue reliance|safe harbor|private securities litigation|"
+                          r"actual results (may|could)|not able to reconcile|should not be considered|conference call|webcast", re.I)
+GUIDE_NUM = re.compile(r"\d[\d.,]*\s*(%|percent|billion|million|basis points)|\$\s?\d", re.I)
+
+
+def release_guidance(cik, acc):
+    """Ausblick ohne KI aus der Ergebnis-Pressemitteilung (wörtlich, englisch): der Abschnitt „Outlook“/„Guidance“ mit
+    den meisten konkreten Zahlen (Nvidia: „Revenue is expected to be $108.0 billion, plus or minus 2%“, Intel: Tabelle
+    „Q4 2026 Revenue $15.0 – $16.0“) und bis zu zwei vorausschauende Aussagen des Managements („we expect …“,
+    „looking ahead …“) – ohne den Rechtshinweis zu zukunftsgerichteten Aussagen. Dazu, ob die Prognose angehoben,
+    bestätigt oder gesenkt wurde (auch aus der Überschrift, z. B. Coca-Cola „Raises Full Year Guidance“).
+    Je Meldung einmal ermittelt und gespeichert."""
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("gsum") or {}).get(acc)
+    if hit is not None:
+        return hit or None
+    text, url = sec_press_release(cik, acc)
+    out = None
+    if text:
+        t = re.sub(r"\s+", " ", text)
+        cut = re.search(r"forward[- ]looking statements", t, re.I)
+        body = t[:cut.start()] if cut and cut.start() > len(t) * 0.25 else t
+        # 1. Abschnitt „Outlook“ mit den meisten Zahlen in den folgenden 350 Zeichen
+        best = None
+        for m in GUIDE_HEAD.finditer(body):
+            if m.start() < 500 or GUIDE_PAST.search(body[max(0, m.start() - 40):m.end() + 5]):  # nicht Überschrift/Eckdaten
+                continue
+            nxt = body[m.start():m.start() + 350]
+            score = len(GUIDE_NUM.findall(nxt)) + (3 if re.search(r"as follows|expected to be|Q\d|full[- ]year|fiscal 20\d\d", nxt, re.I) else 0)
+            if score >= 3 and (best is None or score > best[0]):
+                best = (score, m.start())
+        excerpt = None
+        if best:
+            seg = body[best[1]:best[1] + 700]
+            end = GUIDE_END.search(seg, 120)
+            seg = seg[:end.start()] if end else seg
+            if len(seg) > 520:
+                dot = seg.rfind(". ", 0, 520)
+                seg = seg[:dot + 1] if dot > 200 else seg[:520].rstrip() + " …"
+            excerpt = seg.strip()
+        # 2. vorausschauende Aussagen des Managements
+        quotes = []
+        for s_ in re.split(r"(?<=[.!?\"”])\s+(?=[A-Z\"“])", body):
+            s_ = s_.strip(" \"“”")
+            if 40 <= len(s_) <= 380 and GUIDE_SAY.search(s_) and not GUIDE_PAST.search(s_) and not GUIDE_BOILER.search(s_) \
+                    and not (excerpt and s_[:60] in excerpt):
+                quotes.append(s_)
+            if len(quotes) >= 2:
+                break
+        blob = " ".join([t[:600]] + quotes + [excerpt or ""]).lower()
+        direction = ("angehoben" if re.search(r"rais(es|ed|ing) (its |the |our )?([\w-]+ ){0,4}(outlook|guidance|forecast|expectations)", blob)
+                     else "gesenkt" if re.search(r"(lower|reduc|cut)\w* (its |the |our )?(full[- ]year |annual )?(outlook|guidance|forecast)", blob)
+                     else "bestätigt" if re.search(r"(reaffirm|reiterat|maintain|confirm)\w* (its |the |our )?(full[- ]year |annual )?(outlook|guidance|forecast)", blob)
+                     else None)
+        if excerpt or quotes:
+            out = {"excerpt": excerpt, "quotes": quotes, "direction": direction, "url": url}
+    with STORE.lock:
+        gs = data.setdefault("gsum", {})
+        gs[acc] = out or {}
+        if len(gs) > ESUM_KEEP:
+            for k_ in list(gs)[:len(gs) - ESUM_KEEP]:
+                gs.pop(k_, None)
+        STORE.dirty = True
+    return out
+
+
 def earnings_review(query):
     """Daten für den Earnings Reviewer: letztes Quartal (Kennzahlen, Ergebnis ggü. Erwartung, Ausblick, Schätzungs-
     änderungen, Pressestimmen, Quellen) plus die letzten Quartale für die Diagramme im One-Pager."""
@@ -8603,8 +8684,11 @@ def earnings_review(query):
     facts = "; ".join(qr.get("points") or [])
     ai = None
     er = qr.get("release")
+    guide = None
     if er and sec_:
         ai = safe(lambda: earnings_ai(sec_["cik"], er["acc"], name, facts))
+        if not ai:
+            guide = safe(lambda: release_guidance(sec_["cik"], er["acc"]))
     nxt = next((e for e in (events or []) if e.get("type") == "earnings"), None)
     seen, press = set(), []
     for it in sorted(news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
@@ -8637,6 +8721,7 @@ def earnings_review(query):
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
         "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
+        "guidance": guide,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)

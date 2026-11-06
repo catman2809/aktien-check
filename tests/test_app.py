@@ -1932,6 +1932,31 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertTrue(a.STRAT_NOISE.search("SAP SE Shares Purchased by Pzena Investment Management LLC"))
         self.assertTrue(a.STRAT_NOISE.search("Allianz Strategy Select 30 IT EUR Fonds"))
 
+    def test_release_guidance_without_ai(self):
+        import unittest.mock as um
+        intro = "Acme Reports Third Quarter Results and Raises Full Year Guidance. " + "Revenue grew 7% to $1.2 billion. " * 20
+        text = (intro + "Results exceeded our guidance for the quarter. "
+                "\"Looking ahead, we expect continued strong demand across our portfolio,\" said the CEO. "
+                "Business Outlook Acme's outlook for the fourth quarter of fiscal 2026 is as follows Revenue is expected to be "
+                "$1.3 billion, plus or minus 2%. Gross margin is expected to be 61.0%, plus or minus 50 basis points. "
+                "Conference Call Acme will host a call today. " + "Other text. " * 30 +
+                "Forward-Looking Statements This press release contains forward-looking statements; we expect nothing here.")
+        store = {"gsum": {}}
+        with um.patch.object(a, "sec_press_release", return_value=(text, "https://sec.example/ex99.htm")), \
+                um.patch.object(a.STORE, "load", return_value=store):
+            g = a.release_guidance(1, "0001-26-1")
+            self.assertTrue(g["excerpt"].startswith("Business Outlook"))
+            self.assertIn("$1.3 billion", g["excerpt"])
+            self.assertNotIn("Conference Call", g["excerpt"])                     # Abschnitt endet vor dem nächsten
+            self.assertEqual(len(g["quotes"]), 1)                                 # „exceeded guidance“ zählt nicht
+            self.assertIn("Looking ahead", g["quotes"][0])
+            self.assertEqual(g["direction"], "angehoben")                         # aus der Überschrift
+            self.assertNotIn("nothing here", " ".join(g["quotes"]))              # Rechtshinweis bleibt draußen
+            self.assertIn("0001-26-1", store["gsum"])                             # einmal ermittelt, dann gespeichert
+        with um.patch.object(a, "sec_press_release", return_value=("Plain results text without outlook. " * 30, "u")), \
+                um.patch.object(a.STORE, "load", return_value={"gsum": {}}):
+            self.assertIsNone(a.release_guidance(1, "0001-26-2"))
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

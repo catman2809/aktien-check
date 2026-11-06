@@ -732,6 +732,10 @@ tr.u-locked td{opacity:.65}
 .er-headline{font-family:var(--serif);font-size:19px;font-weight:600;margin:12px 0 0}
 .er-list{margin:0;padding-left:20px} .er-list li{margin:4px 0}
 .er-out{margin:12px 0 4px}
+.er-quote blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:0 8px 8px 0;font-size:14px;font-style:italic}
+.er-qsrc{margin:2px 0 0}
+.op-sheet .er-quote blockquote{font-size:1em;padding:3px 8px;border-left:2px solid #1f4e79;background:#f2f5fa;border-radius:0;margin:3px 0}
+.op-sheet .er-qsrc{font-size:.85em;color:#666}
 /* One-Pager: weißes A4-Blatt, unabhängig von Hell/Dunkel, druckfähig */
 #op-wrap{position:fixed;inset:0;z-index:90;background:rgba(10,8,6,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;flex-direction:column}
 body.op-open{overflow:hidden}
@@ -4534,9 +4538,17 @@ function erPoints(D) {
 function erOutlook(D) {
   return D.ai?.outlook || D.quarter?.ai?.outlook || "";
 }
+// Ausblick ohne KI: wörtlicher Auszug aus dem Abschnitt „Outlook“ und Aussagen des Managements (englisch)
+function erGuideQuotes(D, full) {
+  const G = D.guidance;
+  if (erOutlook(D) || !G || (!G.excerpt && !G.quotes?.length)) return "";
+  const qs = [G.excerpt, ...(G.quotes || [])].filter(Boolean).slice(0, full ? 3 : 2);
+  return `<div class="er-quote" translate="no">${qs.map(q => `<blockquote>„${esc(q)}“</blockquote>`).join("")}</div>
+    <p class="stamp er-qsrc"><span>Wörtlich aus der Ergebnis-Pressemitteilung (englisch)</span>${G.url ? ` · <a href="${esc(G.url)}" target="_blank" rel="noopener">Pressemitteilung öffnen</a>` : ""}</p>`;
+}
 function erRender() {
   const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict];
-  const G = A && ER_GUIDE[A.guidance];
+  const G = ER_GUIDE[A?.guidance || D.guidance?.direction];
   const rel = Q.release;
   $("#er-res").innerHTML = `
     <div class="pc-head"><div class="co-id">${logoImg(D.symbol, "co-logo")}<div><h2>${esc(D.name)} <small class="stamp">${esc(D.symbol)}</small></h2>
@@ -4548,10 +4560,10 @@ function erRender() {
       <h3>Die wichtigsten Punkte</h3>
       <ul class="er-list">${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("") || "<li>Keine Kennzahlen zum letzten Quartal verfügbar.</li>"}</ul>
       ${erOutlook(D) ? `<p class="er-out"><b>Ausblick:</b> ${esc(erOutlook(D))}</p>` : ""}
+      ${erGuideQuotes(D) ? `<h3>Ausblick des Managements</h3>${erGuideQuotes(D)}` : ""}
       ${(() => { const S = erStrategyPoints(D); return S.length ? `<h3>Strategische Entscheidungen</h3><ul class="er-list">${S.join("")}</ul>` : ""; })()}
       ${D.next ? `<p class="stamp">Nächste Quartalszahlen: ${erDate(D.next.date)}${D.next.estimated ? " (geschätzt)" : ""}</p>` : ""}
-      <div class="pc-actions"><button class="btn primary" id="er-op">One-Pager ansehen (A4)</button>
-        ${!A ? `<span class="stamp">${rel ? "Die Tiefenanalyse der Pressemitteilung braucht einen Claude-Schlüssel auf dem Server." : "Ausführliche Analyse der Pressemitteilung nur für Werte mit US-Börsenmeldung (8-K)."}</span>` : ""}</div>
+      <div class="pc-actions"><button class="btn primary" id="er-op">One-Pager ansehen (A4)</button></div>
     </div>`;
   $("#er-op").onclick = () => erOnePager();
 }
@@ -4611,7 +4623,7 @@ function erStrategy(D) {
   return `<h4>Strategie &amp; wichtige Entscheidungen</h4><div class="op-cols"><div>${left.join("") || "<p>Keine Angaben zur Kapitalverwendung.</p>"}</div><div>${right.join("")}</div></div>`;
 }
 function erOnePager() {
-  const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict], G = A && ER_GUIDE[A.guidance];
+  const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict], G = ER_GUIDE[A?.guidance || D.guidance?.direction];
   const c = Q.currency || D.fin_currency || "";
   const pct_ = (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + nf(v * 100, d) + " %";
   const kpi = [["Umsatz", Q.revenue != null ? pcMoney(Q.revenue, c) : "–", pct_(Q.revenue_g)],
@@ -4645,6 +4657,7 @@ function erOnePager() {
       <h1 class="op-title">${esc(A?.headline || (V ? V[1] + (Q.revenue_g != null ? ` – Umsatz ${pct_(Q.revenue_g)} ggü. Vorjahresquartal` : "") : "Quartalszahlen im Überblick"))}</h1>
       <div class="op-cols"><div>
         <h4>Die wichtigsten Punkte</h4><ul>${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("")}</ul>
+        ${erGuideQuotes(D, true) ? `<h4>Ausblick des Managements</h4>${erGuideQuotes(D, true)}` : ""}
         ${erOutlook(D) || A?.outlook_points?.length ? `<h4>Ausblick</h4>${erOutlook(D) ? `<p>${esc(erOutlook(D))}</p>` : ""}${A?.outlook_points?.length ? `<ul>${A.outlook_points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}` : ""}
         ${lst("Geschäftsbereiche", A?.segments)}${lst("Positiv", A?.pos)}${lst("Negativ", A?.neg)}
         ${A?.verdict ? `<h4>Fazit</h4><p>${esc(A.verdict)}</p>` : ""}
