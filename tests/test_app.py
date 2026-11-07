@@ -1941,7 +1941,7 @@ class TestIncomeEstimatesSources(unittest.TestCase):
                 "$1.3 billion, plus or minus 2%. Gross margin is expected to be 61.0%, plus or minus 50 basis points. "
                 "Conference Call Acme will host a call today. " + "Other text. " * 30 +
                 "Forward-Looking Statements This press release contains forward-looking statements; we expect nothing here.")
-        store = {"gsum": {}}
+        store = {"gsum2": {}}
         with um.patch.object(a, "sec_press_release", return_value=(text, "https://sec.example/ex99.htm")), \
                 um.patch.object(a.STORE, "load", return_value=store):
             g = a.release_guidance(1, "0001-26-1")
@@ -1952,9 +1952,9 @@ class TestIncomeEstimatesSources(unittest.TestCase):
             self.assertIn("Looking ahead", g["quotes"][0])
             self.assertEqual(g["direction"], "angehoben")                         # aus der Überschrift
             self.assertNotIn("nothing here", " ".join(g["quotes"]))              # Rechtshinweis bleibt draußen
-            self.assertIn("0001-26-1", store["gsum"])                             # einmal ermittelt, dann gespeichert
+            self.assertIn("0001-26-1", store["gsum2"])                             # einmal ermittelt, dann gespeichert
         with um.patch.object(a, "sec_press_release", return_value=("Plain results text without outlook. " * 30, "u")), \
-                um.patch.object(a.STORE, "load", return_value={"gsum": {}}):
+                um.patch.object(a.STORE, "load", return_value={"gsum2": {}}):
             self.assertIsNone(a.release_guidance(1, "0001-26-2"))
 
     def test_translate_guidance_de(self):
@@ -1972,15 +1972,19 @@ class TestIncomeEstimatesSources(unittest.TestCase):
             return json.dumps({"responseData": {"translatedText": "Wir erwarten Wachstum."}}).encode()
         with um.patch.object(a, "_fetch", side_effect=fallback):
             self.assertEqual(a.translate_de("We expect growth."), "Wir erwarten Wachstum.")
-        store = {"gsum": {}}
+        store = {"gsum2": {}}
         g = {"excerpt": "Outlook Revenue is expected to be $1 billion.", "quotes": ["We expect growth."], "direction": None, "url": "u"}
         with um.patch.object(a, "translate_de", side_effect=lambda t: "DE: " + t), um.patch.object(a.STORE, "load", return_value=store):
             d = a.guidance_de("acc1", g)
         self.assertTrue(d["de"])
         self.assertEqual(d["quotes_de"], ["DE: We expect growth."])
-        self.assertTrue(store["gsum"]["acc1"]["de"])                          # gespeichert, nicht erneut übersetzen
+        self.assertTrue(store["gsum2"]["acc1"]["de"])                          # gespeichert, nicht erneut übersetzen
         with um.patch.object(a, "translate_de", return_value=None):
             self.assertNotIn("de", a.guidance_de("acc2", g))                  # Fehlschlag -> Original, später neu versuchen
+
+    def test_html_text_entities(self):
+        raw = "<p>Boeing Defense, Space &#38; Security, F&#47;A-XX&nbsp;fighter &amp; &#8220;more&#8221;</p>"
+        self.assertEqual(a._html_text(raw), 'Boeing Defense, Space & Security, F/A-XX fighter & "more"')
 
     def test_earnings_topics(self):
         self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)

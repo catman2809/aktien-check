@@ -7097,9 +7097,9 @@ def _html_text(raw):
     t_ = re.sub(r"(?is)<(script|style).*?</\1>", " ", raw)
     t_ = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h\d)>", "\n", t_)
     t_ = re.sub(r"<[^>]+>", " ", t_)
-    t_ = (t_.replace("&nbsp;", " ").replace("&#160;", " ").replace("&amp;", "&").replace("&#8217;", "'")
-          .replace("&#8220;", '"').replace("&#8221;", '"').replace("&#8212;", "–").replace("&#8211;", "–"))
-    t_ = re.sub(r"&#?\w+;", " ", t_)
+    # alle Zeichen-Entities auflösen (Boeing schreibt „&#38;“ für & und „&#47;“ für /), geschützte Leerzeichen -> Leerzeichen
+    t_ = html_mod.unescape(t_).replace(" ", " ").replace(" ", " ").replace("​", "")
+    t_ = t_.replace("’", "'").replace("“", '"').replace("”", '"').replace("—", "–")
     t_ = re.sub(r"[ \t]+", " ", t_)
     return re.sub(r" *\n[ \n]*", "\n", t_).strip()
 
@@ -8663,7 +8663,7 @@ def guidance_de(acc, g):
     g = {**g, "excerpt_de": ex, "quotes_de": qs, "de": True}
     data = STORE.load()
     with STORE.lock:
-        data.setdefault("gsum", {})[acc] = g
+        data.setdefault("gsum2", {})[acc] = g
         STORE.dirty = True
     return g
 
@@ -8677,7 +8677,7 @@ def release_guidance(cik, acc):
     Je Meldung einmal ermittelt und gespeichert."""
     data = STORE.load()
     with STORE.lock:
-        hit = (data.get("gsum") or {}).get(acc)
+        hit = (data.get("gsum2") or {}).get(acc)
     if hit is not None:
         return hit or None
     text, url = sec_press_release(cik, acc)
@@ -8721,7 +8721,8 @@ def release_guidance(cik, acc):
         if excerpt or quotes:
             out = {"excerpt": excerpt, "quotes": quotes, "direction": direction, "url": url}
     with STORE.lock:
-        gs = data.setdefault("gsum", {})
+        data.pop("gsum", None)  # alte Fassung (Sonderzeichen wie & und / gingen beim Auslesen verloren)
+        gs = data.setdefault("gsum2", {})
         gs[acc] = out or {}
         if len(gs) > ESUM_KEEP:
             for k_ in list(gs)[:len(gs) - ESUM_KEEP]:
@@ -8790,7 +8791,7 @@ def release_topics(cik, acc):
     Ohne den Rechtshinweis am Ende. Je Meldung einmal ermittelt, übersetzt und gespeichert."""
     data = STORE.load()
     with STORE.lock:
-        hit = (data.get("tsum") or {}).get(acc)
+        hit = (data.get("tsum2") or {}).get(acc)
     if hit is not None and (hit.get("de") or not hit.get("topics")):
         return hit or None
     if hit is None:
@@ -8830,7 +8831,8 @@ def release_topics(cik, acc):
                 x["de"] = x.get("de") or tr.get(x["en"])
     hit["de"] = all(x.get("de") for v in hit["topics"].values() for x in v)
     with STORE.lock:
-        ts = data.setdefault("tsum", {})
+        data.pop("tsum", None)  # alte Fassung (Sonderzeichen wie & und / gingen beim Auslesen verloren)
+        ts = data.setdefault("tsum2", {})
         ts[acc] = hit
         if len(ts) > ESUM_KEEP:
             for k_ in list(ts)[:len(ts) - ESUM_KEEP]:
