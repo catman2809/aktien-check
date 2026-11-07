@@ -717,6 +717,27 @@ tr.u-locked td{opacity:.65}
 .pc-in{width:68px;font:inherit;font-size:13.5px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2,var(--surface));color:var(--accent)}
 .pc-in:focus{outline:2px solid var(--accent);outline-offset:0}
 .pc-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.pc-yrs{display:flex;flex-wrap:nowrap;overflow-x:auto;max-width:100%;margin:2px 0 10px;scrollbar-width:none}
+.pc-yrs::-webkit-scrollbar{display:none}
+.pc-yrs{display:flex;width:100%;box-sizing:border-box}
+.pc-yrs button{flex:1 1 0;min-width:0;padding:7px 2px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.pc-r{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:14px}
+.pc-r span small{display:block;font-size:11.5px;color:var(--text-3);font-weight:400}
+.pc-r>span:first-child{color:var(--text-2);font-weight:600;min-width:0}
+.pc-r b{font-weight:600;white-space:nowrap;text-align:right}
+.pc-r-gap{margin-top:6px}
+.pc-r-hl{background:color-mix(in srgb,var(--accent) 16%,transparent);border-radius:8px;padding:9px 10px;border-bottom:0;margin-top:4px}
+.pc-r-hl b{font-weight:700;font-size:15px}
+.pc-r-in .pc-in{width:84px;font-size:16px;padding:7px 8px}
+.pc-r .pc-edit{white-space:nowrap}
+.pc-pad{visibility:hidden}
+.pc-sum-h{margin:16px 0 6px;font-size:14px}
+table.trk.pc-sum{width:100%;min-width:0;table-layout:fixed}
+table.trk.pc-sum td,table.trk.pc-sum th{padding:7px 8px}
+.pc-sum td,.pc-sum th{padding:7px 8px}
+.pc-sum tr[data-y]{cursor:pointer}
+.pc-sum tr.on td{background:color-mix(in srgb,var(--accent) 12%,transparent);font-weight:600}
+@media (max-width:640px){.pc-in{font-size:16px}.pc-actions .btn{width:100%}}
 .pc-bb{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 12px;cursor:pointer}
 .pc-bb input{width:18px;height:18px;margin:0;align-self:center;accent-color:var(--accent)}
 .pc-bb .stamp{flex-basis:100%;margin-left:26px}
@@ -4419,6 +4440,40 @@ function pcTable() {
     ${row("ch", "Rendite p. a. optimistisch", R.ch.map(cagrTd), "", "ab heute")}
     </tbody></table></div>`;
 }
+// Handy: statt der breiten Tabelle ein Jahr nach dem anderen (Reiter), Werte untereinander, dazu alle Kursziele kompakt
+const PC_MQ = matchMedia("(max-width:640px)");
+function pcFmt(R) {  // Anzeige der berechneten Werte je Jahr (Tabelle und Karten)
+  const D = PC.data, c = D.currency, fc = D.fin_currency;
+  const cg = v => v == null ? "" : pc(v, 0, true);
+  return {rev: j => pcMoney(R.rev[j], fc), ni: j => pcMoney(R.ni[j], fc), m: j => pc(R.m[j], 0), sh: j => pcMoney(R.sh[j], ""),
+    eps: j => nf(R.eps[j]) + " " + esc(c), lo: j => !j ? "" : R.lo[j] == null ? "–" : nf(R.lo[j]) + " " + esc(c),
+    hi: j => !j ? "" : R.hi[j] == null ? "–" : nf(R.hi[j]) + " " + esc(c), cl: j => cg(R.cl[j]), ch: j => cg(R.ch[j])};
+}
+function pcCards() {
+  const D = PC.data, R = pcCalc(), V = PC.v, Y = D.years, F = pcFmt(R);
+  const j = Math.min(Math.max(PC.yr ?? 1, 0), Y.length - 1);
+  const inp = (arr, i, key, pct_) => `<input class="pc-in" type="number" inputmode="decimal" step="${pct_ ? "0.1" : "0.5"}" data-k="${key}" data-i="${i}"
+      value="${arr[i] == null ? "" : pct_ ? (arr[i] * 100).toFixed(1) : (+arr[i]).toFixed(1)}" aria-label="${key} ${Y[j]}">`;
+  const val = (key, lab, hint = "", cls = "") => `<div class="pc-r ${cls}"><span>${lab}${hint ? `<small>${hint}</small>` : ""}</span>
+      <b class="num ${key === "cl" || key === "ch" ? (R[key][j] == null ? "" : R[key][j] >= 0 ? "pos" : "neg") : ""}" data-c="${key}" data-j="${j}">${F[key](j)}</b></div>`;
+  const edit = (lab, html, hint = "änderbar") => `<div class="pc-r pc-r-in"><span>${lab}<small>${hint}</small></span><span class="pc-edit">${html}</span></div>`;
+  const rows = [val("rev", "Umsatz"), j ? edit("Umsatzwachstum", inp(V.rg, j - 1, "rg", true) + "<i>%</i>") : "",
+    val("ni", "Reinertrag", "", "pc-r-gap"), j ? edit("Gewinnwachstum", inp(V.ng, j - 1, "ng", true) + "<i>%</i>") : "",
+    val("m", "Nettomarge"),
+    PC.bbOn && j ? edit("Aktienrückkauf", inp(V.bb, j - 1, "bb", true) + "<i>%</i>", "änderbar · weniger Aktien pro Jahr") : "",
+    PC.bbOn ? val("sh", "Aktienzahl") : "",
+    val("eps", "Gewinn je Aktie", "", "pc-r-gap"),
+    j ? edit("KGV konservativ", inp(V.pl, j, "pl", false) + `<i class="pc-pad">%</i>`)
+      + edit("KGV optimistisch", inp(V.ph, j, "ph", false) + `<i class="pc-pad">%</i>`) : "",
+    j ? val("lo", "Kurs konservativ", "", "pc-r-gap pc-r-hl") + val("hi", "Kurs optimistisch", "", "pc-r-hl") : "",
+    j ? val("cl", "Rendite p. a. konservativ", "ab heute") + val("ch", "Rendite p. a. optimistisch", "ab heute") : ""].join("");
+  return `<div class="seg pc-yrs" role="tablist">${Y.map((y, i) => `<button type="button" data-y="${i}" class="${i === j ? "on" : ""}">${y}${i ? "e" : ""}</button>`).join("")}</div>
+    <div class="pc-yr">${j ? "" : `<p class="stamp" style="margin:0 0 6px">Basisjahr – zuletzt berichtete Zahlen, ohne Kursziel.</p>`}${rows}</div>
+    <h4 class="pc-sum-h">Kursziele im Überblick</h4>
+    <table class="trk pc-sum"><thead><tr><th>Jahr</th><th class="num">konservativ</th><th class="num">optimistisch</th></tr></thead><tbody>
+    ${Y.map((y, i) => i ? `<tr data-y="${i}" class="${i === j ? "on" : ""}"><td>${y}e</td><td class="num" data-c="lo" data-j="${i}">${F.lo(i)}</td><td class="num" data-c="hi" data-j="${i}">${F.hi(i)}</td></tr>` : "").join("")}
+    </tbody></table>`;
+}
 function pcBuybackBox() {
   const B = PC.data.buyback;
   const hint = B ? (B.rate >= 0 ? `Prognose: ${pc(B.rate, 1)} weniger Aktien pro Jahr – Durchschnitt ${B.from}–${B.to}`
@@ -4443,7 +4498,7 @@ function pcRender() {
       ${kpi("KGV heute / Median 5 J.", (D.pe_now ? nf(D.pe_now, 1) : "–") + " / " + (D.pe_hist_median ? nf(D.pe_hist_median, 1) : "–"), "DCF-KGV Jahr 5: " + (S.pe_dcf ? nf(S.pe_dcf, 1) : "–"))}
       ${kpi("Kursspanne " + D.years[5], (() => { const R = pcCalc(); return R.lo[5] ? nf(R.lo[5], 0) + " – " + nf(R.hi[5], 0) + " " + esc(D.currency) : "–"; })(), "konservativ – optimistisch")}
     </div>
-    <div class="card pad">${pcBuybackBox()}${pcTable()}
+    <div class="card pad">${pcBuybackBox()}${PC_MQ.matches ? pcCards() : pcTable()}
       <div class="pc-actions"><button class="btn" id="pc-reset">Werte des Szenarios wiederherstellen</button>
         <span class="stamp">Umsatz- und Gewinnwachstum (in %) und KGV lassen sich je Jahr überschreiben – alles rechnet sofort neu.</span></div>
       ${D.pe_note ? `<div class="note" style="margin-top:10px">${esc(D.pe_note)}</div>` : ""}
@@ -4467,6 +4522,9 @@ function pcRender() {
   document.querySelectorAll("#pc-scen button").forEach(b => b.onclick = () => { PC.scen = b.dataset.s; pcReset(); pcRender(); });
   $("#pc-reset").onclick = () => { pcReset(); pcRender(); };
   $("#pc-bb").onchange = e => { PC.bbOn = e.target.checked; pcRender(); };
+  document.querySelectorAll("#pc-res .pc-yrs button, #pc-res .pc-sum tr[data-y]").forEach(b => b.onclick = () => {
+    PC.yr = +b.dataset.y; pcRender(); });
+  PC_MQ.onchange = () => { if ($("#pc-res .pc-kpis")) pcRender(); };  // Drehen/Fenstergröße: Tabelle <-> Karten
   pcBindInputs();
 }
 function pcBindInputs() {
@@ -4476,7 +4534,12 @@ function pcBindInputs() {
     if (v != null && isNaN(v)) return;
     PC.v[k_][i] = v == null ? null : (k_ === "rg" || k_ === "ng" || k_ === "bb" ? v / 100 : v);
     // nur die berechneten Zellen neu zeichnen, damit das Eingabefeld den Fokus behält
-    const R = pcCalc(), D = PC.data, c = D.currency, fc = D.fin_currency;
+    const R = pcCalc(), D = PC.data, c = D.currency, fc = D.fin_currency, F = pcFmt(R);
+    document.querySelectorAll("#pc-res [data-c]").forEach(el => {  // Handy-Karten und Kursziel-Übersicht
+      const k2 = el.dataset.c, j = +el.dataset.j;
+      el.innerHTML = F[k2](j);
+      if (k2 === "cl" || k2 === "ch") el.className = "num " + (R[k2][j] == null ? "" : R[k2][j] >= 0 ? "pos" : "neg");
+    });
     const cells = key => { const tr = $(`#pc-res .pc-table tr[data-r="${key}"]`); return tr ? [...tr.cells].slice(1) : []; };
     const set = (key, f) => cells(key).forEach((td, j) => { if (!td.querySelector("input")) td.innerHTML = f(j); });
     set("rev", j => pcMoney(R.rev[j], fc));
