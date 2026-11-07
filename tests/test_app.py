@@ -2038,6 +2038,25 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertTrue(any("Auftragsbestand 745 Milliarden US-Dollar (Boeing)" in x for x in d))
         self.assertEqual(d[-1], "Darüber hinaus berichten die Medien über die Lieferketten.")  # nur Themen mit Schlagzeilen
 
+    def test_decision_sentences(self):
+        t = ("EX-99.1 2 ex991.htm Exhibit 99.1 Boeing Reports Third-Quarter Results. ARLINGTON, Va. – The Boeing Company today "
+             "reported third-quarter results. \"We made progress. Recent milestones are important steps,\" said Kelly Ortberg. "
+             "\"Vera Rubin, now in full production, was built to power exactly this moment.\" "
+             "During the quarter, the 737-7 received an amended type certificate from the Federal Aviation Administration. "
+             "Also in the quarter, the company received a seven-year contract award to expand PAC-3 Seeker production. "
+             "This order is not included in backlog pending completion of the source selection process. "
+             "Apple's board of directors has declared a cash dividend of $0.27 per share of the Company's common stock. "
+             "The company appointed Jane Doe as chief financial officer, effective January 1. "
+             "Revenue was $24.2 billion, up 4 percent. "
+             "Also in the quarter, the company received a seven-year contract award to expand PAC-3 Seeker production. "
+             "Forward-Looking Statements This press release contains forward-looking statements. The company will pay dividends.")
+        d = a.decision_sentences(t)
+        self.assertEqual([x["cat"] for x in d], ["Zulassung", "Aufträge", "Aktionäre", "Personal"])
+        self.assertFalse(any("said" in x["en"] or "moment" in x["en"] for x in d))   # Zitate des Managements
+        self.assertFalse(any("pending completion" in x["en"] for x in d))
+        self.assertFalse(any("Revenue was" in x["en"] for x in d))                   # reine Zahlen, keine Entscheidung
+        self.assertFalse(any("will pay dividends" in x["en"] for x in d))            # nach dem Rechtshinweis
+
     def test_earnings_topics(self):
         self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)
         self.assertEqual(a.name_in("Sap's eröffnet Filiale", "SAP SE"), -1)

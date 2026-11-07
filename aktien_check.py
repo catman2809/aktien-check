@@ -8786,6 +8786,101 @@ def name_in(title, name):
     return m_.start() if m_ else -1
 
 
+# Entscheidungen des Managements (Earnings Reviewer): alle Sätze der Ergebnis-Pressemitteilung, in denen etwas beschlossen,
+# angekündigt, abgeschlossen, gewonnen oder zugelassen wird – Aufträge, Rückkäufe, Dividenden, Zulassungen, Personalien,
+# Investitionen, Übernahmen. Regelbasiert, je Satz eine Kategorie; übersetzt und je Meldung gespeichert.
+DECISION_CATS = [  # (Kategorie, Muster) – die erste passende gilt
+    ("Aktionäre", r"\bdividends?\b|\brepurchas\w*|\bbuy-?backs?\b|\breturned .{0,60}\bto (share|stock)holders"),
+    ("Personal", r"\bappoint\w*|\bnamed\b.{0,60}\b(chief|ceo|cfo|coo|president|officer|director|chair)|\bhired\b|"
+                 r"\b(step|stepp\w*) down\b|\bretire\w*\b.{0,40}\b(chief|ceo|cfo|president)|\bsucceed\w*"),
+    ("Aufträge", r"\bawards?\b|\bawarded\b|\bcontracts?\b|\border(s|ed)?\b.{0,40}\b(for|from)\b|\bselect(ed|ion)\b|\bwon\b|\bcaptured\b"),
+    ("Zulassung", r"\bcertif\w*|\bapprov(al|ed)\b|\bclearance\b|\bauthorization from\b|\bFDA\b|\bFAA\b"),
+    ("Übernahme / Partnerschaft", r"\bacqui\w*|\bmerger\b|\bdivest\w*|\bspin-?off\b|\bsale of\b|\bpartner\w*|\bcollaborat\w*|"
+                                  r"\bjoint venture\b|\b(signed|reached|entered into) (an? |a definitive )?(agreement|deal)"),
+    ("Produkte", r"\blaunch\w*|\bunveil\w*|\bintroduc\w*|\bgeneral availability|\bbegan shipping|\bstarted shipping|\brolled out|"
+                 r"\bnow in (full )?production|\bdebut\w*"),
+    ("Investition", r"\binvest\w*|\bnew (plant|factory|facility|data cent\w*)|\bbroke ground|\bopened\b|\bexpand\w*|\bcapacity\b"),
+    ("Umbau", r"\brestructur\w*|\blayoffs?\b|\bworkforce reduction|\bexit(ed|ing)?\b|\bwind(ing)? down|\bimpairment|\bcost[- ]reduction"),
+]
+DECISION_CAT_RE = [(c, re.compile(rx, re.I)) for c, rx in DECISION_CATS]
+# Satz beschreibt eine Handlung des Unternehmens (nicht nur Zahlen oder Marktkommentar)
+DECISION_ACT = re.compile(
+    r"\b(announc(ed|es|ing)|approved|authoriz(ed|es|ation)|declared|agreed|signed|completed|closed the|launch(ed|es)|unveil(ed|s)|"
+    r"introduc(ed|es)|appoint(ed|s)|named|selected|award(ed|s)?|won|captured|received|certif(ied|ication)|returned|"
+    r"repurchased|will (pay|begin|start|invest|open|close|exit|build|expand|reduce|acquire|sell|return|repurchase|launch|ship)|"
+    r"plans? to|intends? to|is investing|invested|acquired|divested|entered into|reached|opened|began|started|now in (full )?production|"
+    r"remaining under)\b", re.I)
+DECISION_SKIP = re.compile(r"\b(said|says|commented|added)\b|financial results|results for|conference call|webcast|non-gaap|"
+                           r"reconciliation|pending completion|not included in backlog|forward-looking|press release|"
+                           r"\(unaudited\)|^\W*(exhibit|ex-99)", re.I)
+
+
+def _release_body(text):
+    """Text der Pressemitteilung ohne Anlagen-Kopf und ohne Rechtshinweis am Ende."""
+    t = re.sub(r"\s+", " ", text or "")
+    t = re.sub(r"^.{0,400}?\bExhibit 99\.\d+\s*", "", t)
+    cut = re.search(r"forward[- ]looking statements", t, re.I)
+    return t[:cut.start()] if cut and cut.start() > len(t) * 0.25 else t
+
+
+def _release_sentences(body, raw=False):
+    """Sätze der Pressemitteilung; raw=True lässt Anführungszeichen stehen (Ende eines Zitats erkennen)."""
+    return [s_.strip() if raw else s_.strip(" \"“”•·") for s_ in
+            re.split(r"(?<!\bU\.S\.)(?<!\bInc\.)(?<!\bCorp\.)(?<!\bCo\.)(?<!\bLtd\.)(?<!\bNo\.)(?<!\bMr\.)(?<!\bMs\.)"
+                     r"(?<!\bDr\.)(?<!\bSt\.)(?<=[.!?\"”])\s+(?=[A-Z\"“•])", body)]
+
+
+def decision_sentences(text, limit=12):
+    """Sätze mit Entscheidungen aus dem Text einer Pressemitteilung, in Reihenfolge, je mit Kategorie."""
+    out, seen = [], set()
+    for raw in _release_sentences(_release_body(text), raw=True):
+        if raw.endswith(("\"", "”")):
+            continue  # Ende eines Zitats des Managements („… genau für diesen Moment gebaut.“) – Kommentar, keine Entscheidung
+        s_ = raw.strip(" \"“”•·")
+        if not 40 <= len(s_) <= 380 or DECISION_SKIP.search(s_) or TOPIC_BOILER.search(s_) or not DECISION_ACT.search(s_):
+            continue
+        cat = next((c for c, rx in DECISION_CAT_RE if rx.search(s_)), None)
+        if not cat:
+            continue
+        k_ = re.sub(r"\W+", "", s_.lower())[:80]
+        if k_ in seen:
+            continue
+        seen.add(k_)
+        out.append({"en": s_, "cat": cat})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def release_decisions(cik, acc):
+    """Entscheidungen des Managements aus der Ergebnis-Pressemitteilung (je Meldung einmal ermittelt und übersetzt)."""
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("dsum") or {}).get(acc)
+    if hit is not None and (hit.get("de") or not hit.get("items")):
+        return hit
+    if hit is None:
+        text, url = sec_press_release(cik, acc)
+        if not text:
+            return None
+        hit = {"items": decision_sentences(text), "url": url}
+    todo = [{"title": x["en"]} for x in hit["items"] if not x.get("de")]
+    if todo:
+        translate_titles(todo)
+        tr = {it["title"]: it.get("title_de") for it in todo}
+        for x in hit["items"]:
+            x["de"] = x.get("de") or tr.get(x["en"])
+    hit["de"] = all(x.get("de") for x in hit["items"])
+    with STORE.lock:
+        ds = data.setdefault("dsum", {})
+        ds[acc] = hit
+        if len(ds) > ESUM_KEEP:
+            for k_ in list(ds)[:len(ds) - ESUM_KEEP]:
+                ds.pop(k_, None)
+        STORE.dirty = True
+    return hit
+
+
 def release_topics(cik, acc):
     """Je Thema bis zu zwei Sätze der Ergebnis-Pressemitteilung (die mit den meisten Treffern), englisch und deutsch.
     Ohne den Rechtshinweis am Ende. Je Meldung einmal ermittelt, übersetzt und gespeichert."""
@@ -9242,6 +9337,13 @@ def earnings_review(query):
     safe(lambda: translate_titles(press + strategic + topic_news))  # englische Schlagzeilen zusätzlich auf Deutsch
     rel_topics = safe(lambda: release_topics(sec_["cik"], er["acc"])) if er and sec_ and not ai else None
     topics = safe(lambda: earnings_topics(rel_topics, (sec_ or {}).get("events_8k"), strategic + topic_news + press, name)) or []
+    rel_dec = safe(lambda: release_decisions(sec_["cik"], er["acc"])) if er and sec_ else None
+    decisions = (rel_dec or {}).get("items") or []
+    if decisions:  # Sätze, die schon unter „Entscheidungen des Managements“ stehen, nicht noch einmal bei den Themen
+        dtxt = " ".join(x["en"] for x in decisions)
+        for tp in topics:
+            tp["quotes"] = [q for q in tp["quotes"] if q["en"][:60] not in dtxt]
+        topics = [tp for tp in topics if tp["quotes"] or tp["filings"] or tp["news"]]
     # je verlinktem Artikel ein Stichpunkt (Vorspann der Redaktion) – nur für die angezeigten
     safe(lambda: article_summaries(press[:6] + strategic[:6] + [h for tp in topics for h in tp["news"]]))
     if guide:  # Prognose-Sätze, die schon im Ausblick stehen, nicht doppelt
@@ -9272,7 +9374,7 @@ def earnings_review(query):
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
         "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
-        "guidance": guide, "segments": segs, "topics": topics, "digest": safe(lambda: press_digest(press, topics, strategic)) or [],
+        "guidance": guide, "segments": segs, "topics": topics, "decisions": decisions, "decisions_url": (rel_dec or {}).get("url"), "digest": safe(lambda: press_digest(press, topics, strategic)) or [],
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)
