@@ -2019,6 +2019,25 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertFalse(a.other_ticker("Berkshire (NYSE:BRK.B) buys more", "BRK-B"))
         self.assertFalse(a.other_ticker("Apple tops estimates", "AAPL"))
 
+    def test_press_digest(self):
+        self.assertEqual(a.join_de(["A", "B", "C"]), "A, B und C")
+        self.assertEqual(a.press_digest([{"title": "Boeing beats"}]), [])               # zu wenig Artikel
+        press = [{"title": "Boeing Aktie stürzt nach Quartalszahlen ab: Lieferziel gekappt", "source": "XTB",
+                  "summary": "Boeing Aktie bricht um 10 % ein: Produktion langsamer."},
+                 {"title": "Boeing-Aktie unter Druck: Quartalszahlen belasten den Kurs", "source": "LYNX"},
+                 {"title": "Boeing shares sell off on slower-than-expected 737 production", "source": "Reuters",
+                  "title_de": "Boeing-Aktien fallen wegen langsamerer 737-Produktion"},
+                 {"title": "Boeing reports third quarter results", "source": "Boeing",
+                  "summary_de": "Der Auftragsbestand stieg auf 745 Milliarden US-Dollar."}]
+        topics = [{"key": "supply", "label": "Lieferketten", "news": [{"title": "x"}]}, {"key": "legal", "label": "Recht", "news": []}]
+        d = a.press_digest(press, topics)
+        self.assertIn("kritisch", d[0])
+        self.assertIn("2 von 4 Artikeln", d[0])
+        self.assertTrue(any(x.startswith("Im Mittelpunkt stehen Produktion und Auslieferungen") for x in d))
+        self.assertTrue(any("Kursverlusten" in x and "10 % Minus" in x for x in d))
+        self.assertTrue(any("Auftragsbestand 745 Milliarden US-Dollar (Boeing)" in x for x in d))
+        self.assertEqual(d[-1], "Darüber hinaus berichten die Medien über die Lieferketten.")  # nur Themen mit Schlagzeilen
+
     def test_earnings_topics(self):
         self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)
         self.assertEqual(a.name_in("Sap's eröffnet Filiale", "SAP SE"), -1)

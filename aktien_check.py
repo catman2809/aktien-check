@@ -8982,6 +8982,164 @@ def earnings_topics(rel_topics, events_8k, news, name=""):
     return out
 
 
+# Fazit der Presse (Earnings Reviewer): eigene Sätze aus festen Bausteinen – Ton, Schwerpunkte, Kursreaktion, genannte
+# Zahlen und weitere Themen. Grundlage sind Schlagzeilen und Vorspann der Artikel (englisch und deutsch); ohne KI.
+DIGEST_THEMES = [  # (Schlüssel, Bezeichnung im Satz, Suchmuster)
+    ("prod", "Produktion und Auslieferungen", r"\bproduction|\bproduktion|\bdeliver\w*|\bauslieferung\w*|\bramp|\bhochlauf|\bfertigung"),
+    ("demand", "die Auftragslage", r"\bdemand\b|\bnachfrage|\bbacklog|\bauftragsbestand|\borders?\b|\bbestellungen|\baufträge"),
+    ("guide", "der Ausblick", r"\bguidance|\boutlook|\bforecast|\bprognose\w*|\bausblick|\bjahresziel"),
+    ("cash", "der Cashflow", r"\bcash ?flow|\bfree cash|\bmittelzufluss"),
+    ("margin", "die Margen", r"\bmargins?\b|\bmarge\w*|\bprofitabilität|\bprofitability"),
+    ("costs", "die Kosten", r"\bcosts?\b|\bkosten|\bcharges?\b|\bbelastung\w*|\babschreibung\w*|\bwrite-?downs?"),
+    ("profit", "die Gewinnentwicklung", r"\bprofits?\b|\bgewinn\w*|\blosse?s?\b|\bverlust\w*|\bearnings per share|\beps\b"),
+    ("revenue", "der Umsatz", r"\brevenues?\b|\bumsatz\w*|\bsales\b|\berlöse"),
+    ("ai", "Künstliche Intelligenz", r"\bai\b|\bki\b|künstliche intelligenz|\bartificial intelligence|\bgenerative"),
+    ("cloud", "das Cloud-Geschäft", r"\bcloud"),
+    ("tariff", "Zölle", r"\btariffs?\b|\bzölle?\b|\bzoll\w*"),
+    ("mgmt", "das Management", r"\bceo\b|\bchief executive|\bvorstandschef|\bkonzernchef|\b(neue[rn]?|der) chef\b"),
+    ("capital", "die Ausschüttungen", r"\bbuybacks?\b|\brepurchase|\baktienrückk\w*|\bdividend\w*"),
+]
+DIGEST_THEME_RE = {k: re.compile(rx, re.I) for k, _, rx in DIGEST_THEMES}
+DIGEST_THEME_LABEL = {k: lab for k, lab, _ in DIGEST_THEMES}
+DIGEST_THEME_SHORT = {"prod": "Produktion", "demand": "Aufträge", "guide": "Ausblick", "cash": "Cashflow", "margin": "Margen",
+                      "costs": "Kosten", "profit": "Gewinn", "revenue": "Umsatz", "ai": "KI", "cloud": "Cloud", "tariff": "Zölle",
+                      "mgmt": "Management", "capital": "Ausschüttungen"}
+DIGEST_THEME_PLURAL = {"prod", "margin", "costs", "tariff", "capital"}  # „Im Mittelpunkt stehen die Kosten“
+DIGEST_STOCK = r"(?:aktie\w*|shares?|stock|papiere|titel|kurs)"
+DIGEST_DOWN = re.compile(DIGEST_STOCK + r"\b[^.;]{0,45}?\b(?:fällt|fallen|fiel|stürzt|stürzen|bricht|brechen|sinkt|sinken|verliert|verlieren|"
+                         r"unter druck|rutscht|sackt|sell(?:s|ing)? off|slump\w*|plung\w*|tumbl\w*|drop\w*|fall(?:s|ing)?\b|sink\w*|slid\w*|"
+                         r"declin\w*)|\b(?:kurssturz|kursverlust\w*|kursrutsch|sell-?off)\b", re.I)
+DIGEST_UP = re.compile(DIGEST_STOCK + r"\b[^.;]{0,45}?\b(?:steigt|steigen|stieg|legt zu|legen zu|springt|klettert|klettern|zieht an|"
+                       r"gewinnt|gewinnen|rall\w*|jump\w*|surg\w*|soar\w*|ris(?:es|ing)\b|gain\w*|climb\w*|pop\w*)|\b(?:kurssprung|kursgewinn\w*)\b", re.I)
+DIGEST_PCT = re.compile(r"(\d{1,2}(?:[.,]\d{1,2})?)\s?(?:%|prozent|percent)", re.I)
+_DIGEST_NUM = (r"\d[\d.,]*\s?(?:Billionen|Milliarden|Mrd\.?|Millionen|Mio\.?)\s?(?:US-Dollar|Dollar|Euro|Franken|USD|EUR|CHF|\$|€)"
+               r"|(?:\$|€|US-\$)\s?\d[\d.,]*\s?(?:Mrd\.?|Mio\.?|Milliarden|Millionen)")
+DIGEST_METRICS = [("Auftragsbestand", r"auftragsbestand\w*"), ("Umsatz", r"umsatz\w*|erlöse?"), ("Verlust", r"verlust\w*"),
+                  ("Gewinn", r"gewinn\w*|überschuss"), ("Cashflow", r"cashflow\w*|mittelzufluss"), ("Kosten", r"kosten\w*|belastung\w*"),
+                  ("Rückkäufe", r"aktienrückk\w*|rückk[aä]uf\w*")]
+
+
+DIGEST_TOPIC_TXT = {"acq": "Übernahmen", "restr": "den Konzernumbau", "prod": "neue Produkte", "legal": "Rechtsstreitigkeiten",
+                    "macro": "die Konjunktur", "supply": "die Lieferketten", "reg": "Regulierung", "rates": "die Zinsen",
+                    "targets": "Prognosen"}
+
+
+def join_de(xs):
+    xs = [x for x in xs if x]
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " und " + xs[-1] if xs else ""
+
+
+def _digest_texts(it):
+    """Alle Fassungen eines Artikels: Titel und Vorspann, englisch und deutsch."""
+    return [x for x in (it.get("title"), it.get("title_de"), it.get("summary"), it.get("summary_de")) if x]
+
+
+def _digest_de(it):
+    """Deutsche Fassung (für Zahlen in deutschen Satzbausteinen)."""
+    t = it.get("title_de") or (it["title"] if GERMAN_HINT.search(it.get("title") or "") else "")
+    s_ = it.get("summary_de") or (it.get("summary") if GERMAN_HINT.search(it.get("summary") or "") else "")
+    return [x for x in (t, s_) if x]
+
+
+def press_digest(press, topics=(), strategic=()):
+    """Fazit der Presse in 2–5 Sätzen aus festen Bausteinen. Leere Liste, wenn es zu wenig Artikel gibt."""
+    press = [p for p in press or [] if p.get("title")]
+    if len(press) < 2:
+        return []
+    out = []
+    # 1. Ton: Schlagzeile zählt voll, Vorspann halb
+    tones = []
+    for p in press:
+        v = headline_sentiment(p["title"]) + 0.5 * headline_sentiment(p.get("summary") or "")
+        tones.append(1 if v >= 0.25 else -1 if v <= -0.25 else 0)
+    neg, pos, n = tones.count(-1), tones.count(1), len(tones)
+    srcs = list(dict.fromkeys(p["source"] for p in press if p.get("source")))
+    src_txt = f" (u. a. {join_de(srcs[:2])})" if srcs else ""
+    rest = n - neg - pos
+    rest_txt = f", {rest} sachlich" if rest else ""
+    if neg > pos and neg >= max(2, n / 3):
+        tone = (f"Die Berichterstattung zum Quartal fällt {'überwiegend' if neg > n / 2 else 'eher'} kritisch aus: {neg} von {n} "
+                f"Artikeln{src_txt} sind negativ gestimmt" + (f", {pos} positiv" if pos else "") + rest_txt + ".")
+    elif pos > neg and pos >= max(2, n / 3):
+        tone = (f"Die Presse bewertet das Quartal {'überwiegend' if pos > n / 2 else 'eher'} positiv: {pos} von {n} "
+                f"Artikeln{src_txt} fallen wohlwollend aus" + (f", {neg} kritisch" if neg else "") + rest_txt + ".")
+    elif pos and neg and pos + neg >= n / 2:
+        tone = (f"Das Echo in den Medien ist geteilt: Unter {n} Artikeln{src_txt} {'ist' if pos == 1 else 'sind'} {pos} positiv "
+                f"und {neg} kritisch gestimmt" + rest_txt + ".")
+    else:
+        tone = (f"Die Berichterstattung ist überwiegend sachlich – {rest} von {n} Artikeln{src_txt} berichten ohne klare Wertung"
+                + (f", je {pos} positiv und kritisch" if pos and pos == neg else f", {pos} positiv" if pos else "")
+                + (f", {neg} kritisch" if neg and pos != neg else "") + ".") if rest < n else \
+            f"Die Berichterstattung ist sachlich – {n} Artikel{src_txt} berichten ohne klare Wertung."
+    out.append(tone)
+    # 2. Schwerpunkte: Themen, die in den meisten Artikeln vorkommen
+    cnt = {}
+    for p in press:
+        blob = " ".join(_digest_texts(p))
+        for k, _lab, _rx in DIGEST_THEMES:
+            if DIGEST_THEME_RE[k].search(blob):
+                cnt[k] = cnt.get(k, 0) + 1
+    top = [k for k, c in sorted(cnt.items(), key=lambda x: -x[1]) if c >= 2][:3]
+    if top:
+        labs = [DIGEST_THEME_LABEL[k] for k in top]
+        plural = len(labs) > 1 or top[0] in DIGEST_THEME_PLURAL
+        lead = f"Im Mittelpunkt {'stehen' if plural else 'steht'} {join_de(labs)}"
+        out.append(lead + (f" ({DIGEST_THEME_SHORT[top[0]]}: {cnt[top[0]]} von {n} Artikeln)." if cnt[top[0]] >= 3 else "."))
+    # 3. Kursreaktion laut Presse (mit genanntem Prozentwert)
+    down = up = 0
+    pct_dn, pct_up = [], []
+    for p in press:
+        for t_ in _digest_texts(p):
+            for rx, lst in ((DIGEST_DOWN, pct_dn), (DIGEST_UP, pct_up)):
+                m_ = rx.search(t_)
+                if m_:
+                    near = t_[max(0, m_.start() - 40):m_.end() + 40]
+                    pm = DIGEST_PCT.search(near)
+                    if pm:
+                        v = float(pm.group(1).replace(",", "."))
+                        if 0.3 <= v <= 40:
+                            lst.append(v)
+        blob = " ".join(_digest_texts(p))
+        d_, u_ = bool(DIGEST_DOWN.search(blob)), bool(DIGEST_UP.search(blob))
+        down += d_ and not u_
+        up += u_ and not d_
+    if down and down > up:
+        mx = max(pct_dn) if pct_dn else None
+        out.append("Laut den Berichten reagierte die Aktie mit Kursverlusten"
+                   + (f", genannt werden bis zu {nf_de(mx)} % Minus." if mx else "."))
+    elif up and up > down:
+        mx = max(pct_up) if pct_up else None
+        out.append("Laut den Berichten legte die Aktie nach den Zahlen zu"
+                   + (f", genannt werden bis zu {nf_de(mx)} % Plus." if mx else "."))
+    elif up and down:
+        out.append("Die Kursreaktion wird unterschiedlich beschrieben – teils mit Verlusten, teils mit Gewinnen.")
+    # 4. genannte Zahlen (nur aus deutschen Fassungen, damit der Satz einheitlich bleibt)
+    figs, seen_m = [], set()
+    for it in list(press) + list(strategic or []) + [h for tp in topics or [] for h in tp.get("news") or []]:
+        for t_ in _digest_de(it):
+            for lab, mrx in DIGEST_METRICS:
+                if lab in seen_m:
+                    continue
+                m_ = re.search(rf"\b(?:{mrx})\b[^.;:!?]{{0,45}}?({_DIGEST_NUM})", t_, re.I) \
+                    or re.search(rf"({_DIGEST_NUM})[^.;:!?]{{0,30}}?\b(?:{mrx})\b", t_, re.I)
+                if m_:
+                    seen_m.add(lab)
+                    figs.append(f"{lab} {m_.group(1).strip()}" + (f" ({it['source']})" if it.get("source") else ""))
+        if len(figs) >= 3:
+            break
+    if figs:
+        out.append(f"In den Berichten genannte Zahlen: {join_de(figs[:3])}.")
+    # 5. weitere Themen der Medien (aus „Themen im Quartalsbericht“, nur wo Schlagzeilen dazu vorliegen)
+    more = [DIGEST_TOPIC_TXT.get(tp["key"], tp["label"]) for tp in topics or [] if tp.get("news")]
+    if more:
+        out.append(f"Darüber hinaus berichten die Medien über {join_de(more[:4])}.")
+    return out
+
+
+def nf_de(v):
+    return (f"{v:.1f}".rstrip("0").rstrip(".")).replace(".", ",")
+
+
 TICKER_IN_TITLE = re.compile(r"\b(?:NYSE|NASDAQ|Nasdaq|NYSEARCA|NYSEAMERICAN|AMEX|OTC|OTCMKTS|TSX|LSE|ETR|FRA|XETRA)\s*:\s*([A-Z][A-Z0-9.\-]{0,9})\b")
 
 
@@ -9114,7 +9272,7 @@ def earnings_review(query):
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
         "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
-        "guidance": guide, "segments": segs, "topics": topics,
+        "guidance": guide, "segments": segs, "topics": topics, "digest": safe(lambda: press_digest(press, topics, strategic)) or [],
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)

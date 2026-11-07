@@ -595,7 +595,7 @@ DEPOT_EXACT.update({
     "Geänderte Gewinnschätzungen": "Revised earnings estimates", "aktuell": "current",
     "laufendes Quartal": "current quarter", "nächstes Quartal": "next quarter", "laufendes Geschäftsjahr": "current fiscal year", "nächstes Geschäftsjahr": "next fiscal year",
     "Geschäftsbereiche": "Business segments", "Positiv": "Positive", "Negativ": "Negative", "Fazit": "Conclusion",
-    "Pressestimmen": "Press coverage", "Quellen:": "Sources:", "Quartalszahlen im Überblick": "Quarterly results at a glance",
+    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Quellen:": "Sources:", "Quartalszahlen im Überblick": "Quarterly results at a glance",
     "Alle Pflichtmeldungen bei SEC EDGAR": "All filings at SEC EDGAR",
     "Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.": "Not investment advice – automatically generated summary from public data.",
     "Der Earnings Reviewer ist nur für Aktien – ETFs veröffentlichen keine Quartalszahlen.": "The Earnings Reviewer is for stocks only – ETFs do not publish quarterly results.",
