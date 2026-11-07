@@ -387,7 +387,36 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-line-leg i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .dp-tbl td,.dp-tbl th{white-space:nowrap} .dp-tbl td small{display:block}
 .dp-intro ul{margin:6px 0 10px;padding-left:20px;font-size:14px;color:var(--text-2)}
-@media (max-width:600px){.dp-donut-body{flex-direction:column;align-items:stretch}.dp-donut svg{align-self:center}.dp-kpi b{font-size:18px}}
+@media (max-width:600px){.dp-kpi b{font-size:18px}}
+@media (max-width:640px){
+  .dp-upload-c{padding:12px 14px}
+  .dp-upload-c .dp-actions{margin:0}
+  .dp-kpis{grid-template-columns:1fr 1fr;gap:8px}
+  .dp-kpi{padding:10px 11px}
+  .dp-kpi b{font-size:17px}
+  .dp-kpi span{font-size:11.5px;line-height:1.35}
+  .dp-tabs{display:flex;width:100%;box-sizing:border-box;margin-bottom:10px}
+  .dp-tabs button{flex:1 1 0;min-width:0;padding:7px 2px;font-size:12px}
+  .dp-donut-body{flex-direction:row;align-items:flex-start;gap:12px}
+  .dp-donut svg{width:104px;height:104px;flex:none}
+  .dp-leg{font-size:12.5px;min-width:0}
+  .dp-leg-long{max-height:260px}
+  .dp-tax .dp-taxrow{flex-wrap:wrap;gap:6px 12px}
+  .dp-tax .dp-taxrow select{max-width:100%;font-size:16px}
+  .dp-donut h3{margin-top:0}
+  .dp-plist{list-style:none;margin:0;padding:0}
+  .dp-plist li{padding:10px 0;border-bottom:1px solid var(--border)}
+  .dp-plist li:first-child{padding-top:2px} .dp-plist li:last-child{border-bottom:0}
+  .dp-p1{display:flex;align-items:center;gap:6px}
+  .dp-p1 .dp-logo{margin-right:2px}
+  .dp-pn{flex:1;min-width:0;font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dp-pn a{color:var(--text);text-decoration:none}
+  .dp-p1 b{font-size:14.5px;white-space:nowrap}
+  .dp-p2,.dp-p3{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--text-2);margin-top:3px;padding-left:32px}
+  .dp-p3{justify-content:flex-start;gap:4px 14px;flex-wrap:wrap}
+  .dp-p3 b{font-weight:600;color:var(--text)} .dp-p3 b.pos{color:var(--pos)} .dp-p3 b.neg{color:var(--neg)}
+  .dp-p4{padding-left:32px;margin-top:2px;font-size:11.5px}
+}
 .src-badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:var(--surface-2);color:var(--text);margin-left:2px}
 .dv-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:12px}
 @media (max-width:760px){.dv-grid{grid-template-columns:minmax(0,1fr)}}
@@ -2620,6 +2649,8 @@ async function moversLoad() {
 
 /* Depot-Analyse: CSV-Export des Brokers hochladen -> Struktur, Risiko, Dividenden, Prüfpunkte */
 let DEPOT = null, depotView = false, depotBusy = "", depotErr = "";
+const DP_MQ = matchMedia("(max-width:640px)");
+let DP_TAB = "pos";  // Handy: gewählter Reiter der Aufteilung
 let OUTLOOK = null, outlookFor = null, outlookTimer = null;  // Depot-Ausblick (Bewertung, Dividenden, Kosten) – im Hintergrund
 async function loadOutlook(sig) {
   clearTimeout(outlookTimer);
@@ -2737,6 +2768,13 @@ function dpScoreCells(p) {
   const up = i.upside ?? i.fair_up;
   return `<td class="num"><span class="dot ${GROUP_TONE[i.group] || ""}"></span> <b>${scTxt(i.score)}</b> <small class="stamp">${esc(i.label || "")}</small></td>
     <td class="num ${up == null ? "" : up >= 0 ? "pos" : "neg"}" title="${i.upside != null ? "zum Kursziel der Analysten" : "zum fairen Wert"}${i.fair_up != null && i.upside != null ? ` · zum fairen Wert ${pc(i.fair_up, 0, true)}` : ""}">${up == null ? "–" : pc(up, 0, true)}</td>`;
+}
+function dpScoreMini(p) {  // Handy-Liste: Score und Potenzial in einer Zeile
+  const i = OUTLOOK?.positions?.[p.symbol];
+  if (!i) return OUTLOOK?.pending && p.symbol ? `<span>Score <b>…</b></span>` : "";
+  const up = i.upside ?? i.fair_up;
+  return `<span>Score <span class="dot ${GROUP_TONE[i.group] || ""}"></span> <b>${scTxt(i.score)}</b></span>`
+    + (up == null ? "" : `<span>Pot. <b class="${up >= 0 ? "pos" : "neg"}">${pc(up, 0, true)}</b></span>`);
 }
 function dpWaitNote(what) {
   const O = OUTLOOK || {};
@@ -2859,7 +2897,12 @@ function renderDepot() {
   const eur = v => v == null ? "–" : nf(v, v >= 1000 ? 0 : 2) + " €";
   const tone = v => v == null ? "" : v >= 0 ? "pos" : "neg";
   const sgn = v => v != null && v >= 0 ? "+" : "";
-  const upload = `<div class="card pad dp-upload">
+  const mob = DP_MQ.matches;
+  const upload = mob && D && S && !depotBusy && !depotErr ? `<div class="card pad dp-upload dp-upload-c">
+    <input type="file" id="dp-file" accept=".csv,.txt,text/csv" hidden>
+    <div class="dp-actions"><button class="btn primary xs" id="dp-pick" type="button">Neue Datei hochladen</button>
+      <button class="btn xs" id="dp-tpl" type="button">Vorlage</button>
+      ${D.saved ? `<button class="btn xs" id="dp-del" type="button">Depot löschen</button>` : ""}</div></div>` : `<div class="card pad dp-upload">
     <div class="dp-drop" id="dp-drop" tabindex="0" role="button" aria-label="CSV-Datei auswählen">
       <b>${D ? "Neue Depot-Datei hochladen" : "CSV-Datei deines Depots hierher ziehen oder auswählen"}</b>
       <span>Export aus deinem Online-Depot (z. B. comdirect, Consorsbank, ING, DKB, flatex, Scalable, Trade Republic) oder eine eigene Tabelle mit den Spalten ISIN (oder Symbol/Name), Stück und optional Kaufkurs.</span>
@@ -2870,6 +2913,26 @@ function renderDepot() {
       ${D?.saved ? `<button class="btn xs" id="dp-del" type="button">Gespeichertes Depot löschen</button>` : ""}</div>
     ${depotBusy ? `<div class="note dp-note">${KERZI_MINI} ${esc(depotBusy)}</div>` : ""}
     ${depotErr ? `<div class="note dp-note dp-err">${esc(depotErr)}</div>` : ""}</div>`;
+  // Aufteilung: auf dem Handy ein Diagramm mit Reitern statt fünf untereinander
+  const dpAlloc = (A, S) => {
+    const all = [["pos", "Positionen", "Einzelpositionen", A.positions, ""],
+      ["sec", "Branchen", "Branchen", A.sectors, S.see_through > 0.02 ? `inkl. Durchschau in ETFs (${pc(S.see_through, 0)} des Depots)` : ""],
+      ["cty", "Länder", "Länder", A.countries, "Sitz der Unternehmen"], ["kind", "Klassen", "Anlageklassen", A.kinds, ""],
+      ["cur", "Währungen", "Währungen", A.currencies, "Heimatwährung der Unternehmen"]].filter(x => (x[3] || []).length);
+    if (!mob) return `<div class="dp-grid">${all.map(x => dpDonut(x[2], x[3], x[4])).join("")}</div>`;
+    const cur = all.find(x => x[0] === DP_TAB) || all[0];
+    return `<div class="seg dp-tabs" role="tablist">${all.map(x => `<button type="button" data-t="${x[0]}" class="${x === cur ? "on" : ""}">${x[1]}</button>`).join("")}</div>
+      ${dpDonut(cur[2], cur[3], cur[4])}`;
+  };
+  // Positionen: auf dem Handy als Liste (Name, Wert, Anteil, Gewinn, 12 Monate) statt Tabelle mit 12 Spalten
+  const dpPosList = P => `<ul class="dp-plist">${P.map(p => `<li>
+      <div class="dp-p1">${p.symbol ? logoImg(p.symbol, "dp-logo") : ""}<span class="dp-pn" translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>
+        <b class="num">${nf(p.value, 0)} €</b></div>
+      <div class="dp-p2"><span><span translate="no">${esc(p.symbol || p.isin || "")}</span> · ${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) + " Stk." : ""}${p.price != null ? " à " + nf(p.price, 2) + " €" : ""}</span><span>${pc(p.weight, 1)}</span></div>
+      <div class="dp-p3"><span>G/V <b class="${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</b></span>
+        <span>12 Mon. <b class="${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</b></span>
+        <span>Div. <b>${p.div_yield ? pc(p.div_yield, 2) : "–"}</b></span>${showOutlook ? dpScoreMini(p) : ""}${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}</div>
+      <div class="dp-p4 stamp">${esc([p.kind, p.sector, p.country].filter(Boolean).join(" · "))}</div></li>`).join("")}</ul>`;
   let body = "";
   if (D && S) {
     const P = D.positions, A = D.alloc;
@@ -2899,13 +2962,7 @@ function renderDepot() {
     </div>
     ${showOutlook ? dpOutlook(D) : ""}
     <h2 class="section">Aufteilung</h2>
-    <div class="dp-grid">
-      ${dpDonut("Einzelpositionen", A.positions)}
-      ${dpDonut("Branchen", A.sectors, S.see_through > 0.02 ? `inkl. Durchschau in ETFs (${pc(S.see_through, 0)} des Depots)` : "")}
-      ${dpDonut("Länder", A.countries, "Sitz der Unternehmen")}
-      ${dpDonut("Anlageklassen", A.kinds)}
-      ${dpDonut("Währungen", A.currencies, "Heimatwährung der Unternehmen")}
-    </div>
+    ${dpAlloc(A, S)}
     <h2 class="section">Depot-Check</h2>
     <div class="card pad dp-checks">${(D.checks || []).map(c => `<div class="dp-check ${c.level}"><span class="dp-ico" aria-hidden="true">${c.level === "ok" ? "✓" : c.level === "warn" ? "!" : "i"}</span>
       <div><b>${esc(c.title)}</b><span>${esc(c.text)}</span></div></div>`).join("")}
@@ -2918,14 +2975,14 @@ function renderDepot() {
     ${showOutlook ? dpCosts(D) : ""}
     <h2 class="section">Positionen</h2>
     <div class="card pad">
-      <div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
+      ${mob ? dpPosList(P) : `<div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
         <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th>${showOutlook ? `<th class="num">Score</th><th class="num">Potenzial</th>` : ""}<th>Branche</th><th>Land</th></tr></thead>
       <tbody>${P.map(p => `<tr><td>${p.symbol ? logoImg(p.symbol, "dp-logo") : ""}<span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
         <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
         <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
         <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
         <td class="num ${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</td>
-        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td>${showOutlook ? dpScoreCells(p) : ""}<td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>
+        <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td>${showOutlook ? dpScoreCells(p) : ""}<td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>`}
       <div class="stamp" style="margin-top:8px"><span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
         ${D.file ? `<span>Datei:</span> <span translate="no">${esc(D.file)}</span>` : ""}${D.saved ? ` <span>· gespeichert am ${esc(D.saved)}</span>` : ""}
         <span>Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.</span></div></div>`;
@@ -2964,7 +3021,9 @@ function bindDepot() {
     try { await api("/api/depot", {action: "delete"}); DEPOT = null; } catch (e) { depotErr = e.message; }
     renderDepot();
   };
-  document.querySelectorAll(".dp-tbl a[data-q]").forEach(a => a.onclick = e => { e.preventDefault(); depotView = false; $("#q").value = a.dataset.q; run(a.dataset.q); });
+  document.querySelectorAll(".dp-tabs button").forEach(b => b.onclick = () => { DP_TAB = b.dataset.t; renderDepot(); });
+  if (!bindDepot.mq) { bindDepot.mq = true; DP_MQ.addEventListener("change", () => { if (depotView) renderDepot(); }); }
+  document.querySelectorAll(".dp-tbl a[data-q], .dp-plist a[data-q]").forEach(a => a.onclick = e => { e.preventDefault(); depotView = false; $("#q").value = a.dataset.q; run(a.dataset.q); });
   // Tooltips: Kreisdiagramme und Verlaufslinie
   let tip = $("#dp-tip");
   if (!tip) { tip = document.createElement("div"); tip.id = "dp-tip"; tip.className = "dp-tip"; document.body.appendChild(tip); }
