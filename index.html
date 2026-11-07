@@ -2464,12 +2464,12 @@ function welcome() {
         <span>Alle Werte dieser Indizes per Knopfdruck bewerten lassen – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
       <button class="btn primary" id="scropen">Screener öffnen</button>
     </div>` : ""}
+    <div class="mv" id="mv"></div>
     <div class="feat">
       <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
       <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
       <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
     </div>
-    <div class="mv" id="mv"></div>
     ${wlLoad().length ? `<div class="wl-preview">
       <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
       <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
