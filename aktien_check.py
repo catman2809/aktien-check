@@ -953,6 +953,7 @@ def mentions_sibling(title, siblings):
 
 def clean_company_name(name):
     n = re.sub(r"[,.]", " ", name or "")
+    n = re.sub(r"^\s*The\s+(?=\S)", "", n)  # „The Boeing Company“ -> „Boeing“
     n = re.sub(r"\b(Inc|Incorporated|Corp|Corporation|Company|Co|AG|Aktiengesellschaft|SE|KGaA|plc|PLC|Ltd|Limited|N V|NV|SA|S A|"
                r"Holding|Holdings|Group|Class [A-C]|& Co|GmbH|ASA|AB|Oyj|SpA|S p A|Société Européenne|Societe Europeenne)\b", " ", n)
     return re.sub(r"\s+", " ", n).strip() or name
@@ -8620,7 +8621,8 @@ SEG_NAME_DE = {"Services": "Dienste", "Graphics": "Grafik", "Compute & Networkin
           "Wearables, Home and Accessories": "Wearables, Zuhause & Zubehör", "Asset & Wealth Management": "Vermögensverwaltung",
           "Consumer & Community Banking": "Privat- & Geschäftskundenbank", "Commercial & Investment Bank": "Firmenkunden- & Investmentbank",
           "Global Services": "Service & Wartung", "Bottling Investments": "Abfüllbeteiligungen", "Corporate": "Konzern/Sonstiges",
-          "All Other": "Sonstiges", "Other": "Sonstiges", "Advertising": "Werbung", "Cloud": "Cloud", "Data Center": "Rechenzentren",
+          "All Other": "Sonstiges", "Rest of EMEA": "Übriges Europa, Nahost & Afrika", "Rest of APJ": "Übriger Asien-Pazifik-Raum",
+          "Rest of Americas": "Übriges Amerika", "Rest of World": "Übrige Welt", "Rest of the World": "Übrige Welt", "Other": "Sonstiges", "Advertising": "Werbung", "Cloud": "Cloud", "Data Center": "Rechenzentren",
           "Gaming": "Gaming", "Automotive": "Automobil", "Professional Visualization": "Profi-Visualisierung"}
 GERMAN_HINT = re.compile(r"[äöüß]|\b(der|die|das|und|mit|für|nach|vor|aus|bei|zum|zur|nicht|auf|Aktie|Quartal|Zahlen|Gewinn|Umsatz)\b", re.I)
 

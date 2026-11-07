@@ -4551,6 +4551,9 @@ function erSegments(D) {
     <table class="op-tbl"><tbody>${S.items.map(i => `<tr><td translate="no"${de && i.name_de ? ` title="${esc(i.name)}"` : ""}>${esc(de && i.name_de ? i.name_de : i.name)}</td>
       <td>${nf(i.share * 100, 0)} %</td><td>${g(i.growth)}</td></tr>`).join("")}</tbody></table>`;
 }
+// Quartal als „Sep 26“ (statt 2026-09) für die Diagrammachse
+const erQ = q => { const m = String(q || "").match(/^(\d{4})-(\d{2})/); return m ? MONTHS_DE_SHORT_JS[+m[2] - 1] + " " + m[1].slice(2) : String(q || ""); };
+const MONTHS_DE_SHORT_JS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 function erOutlook(D) {
   return D.ai?.outlook || D.quarter?.ai?.outlook || "";
 }
@@ -4607,7 +4610,7 @@ function erEps(D) {
     return `${e.est != null ? `<line x1="${x - bw * 0.32}" x2="${x + bw * 0.32}" y1="${sy(e.est)}" y2="${sy(e.est)}" stroke="#7a7a7a" stroke-width="2"/>` : ""}
       <circle cx="${x}" cy="${sy(e.act)}" r="4.5" fill="${beat ? "#2e7d32" : "#c62828"}"/>
       <text x="${x}" y="${sy(e.act) - 8}" text-anchor="middle" font-size="8.5">${nf(e.act)}</text>
-      <text x="${x}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(String(e.q).slice(0, 7))}</text>`; }).join("")}</svg>`;
+      <text x="${x}" y="${H + 12}" text-anchor="middle" font-size="8.5">${esc(erQ(e.q))}</text>`; }).join("")}</svg>`;
 }
 // Kurzfassung für die Übersicht: Claude-Punkte, sonst Rückkäufe/Zukäufe/Dividende aus den Zahlen, 8-K-Meldungen, Nachrichten
 function erStrategyPoints(D) {
@@ -4657,18 +4660,18 @@ function erOnePager() {
   if (D.sec_url) src.push(`<a href="${esc(D.sec_url)}" target="_blank" rel="noopener">Alle Pflichtmeldungen bei SEC EDGAR</a>`);
   const epsSrc = D.eps_history?.length ? D.eps_history[D.eps_history.length - 1].src : null;
   src.push(`<span>Kennzahlen: ${Q.source === "SEC" ? "SEC EDGAR" : "Yahoo Finance"}</span>`);
-  if (epsSrc) src.push(`<span>Konsens Gewinn je Aktie: ${esc(epsSrc)}</span>`);
+  if (epsSrc) src.push(`<span>Erwarteter Gewinn je Aktie: ${esc(epsSrc)}</span>`);
   if (R.length) src.push(`<span>Schätzungsänderungen: Yahoo Finance</span>`);
   if (D.capital || D.dividend) src.push(`<span>Kapitalverwendung und Dividende: Yahoo Finance</span>`);
   if ((D.strategic_news || []).length || (D.press || []).length) src.push(`<span>Meldungen: Google News</span>`);
   if (A) src.push(`<span>Analyse der Pressemitteilung: Claude (${esc(A.model || "")})</span>`);
   const wrap = document.createElement("div");
   wrap.id = "op-wrap";
-  wrap.innerHTML = `<div class="op-bar"><b>One-Pager ${esc(D.name)}</b><span>
+  wrap.innerHTML = `<div class="op-bar"><b>Kurzbericht ${esc(D.name)} (A4)</b><span>
       <button class="btn primary" id="op-print">Drucken / als PDF speichern</button> <button class="btn" id="op-close">Schließen</button></span></div>
     <div class="op-scroll"><div class="op-sheet">
       <header class="op-head"><div class="op-id">${logoImg(D.symbol, "op-logo")}<div><div class="op-name" translate="no">${esc(D.name)}</div>
-        <div class="op-sub">${esc(D.symbol)} · Earnings Update · Quartal bis ${erDate(Q.end)}${Q.release ? ` · veröffentlicht ${erDate(Q.release.date)}` : ""}</div></div></div>
+        <div class="op-sub">${esc(D.symbol)} · Quartalszahlen im Überblick · Quartal bis ${erDate(Q.end)}${Q.release ? ` · veröffentlicht ${erDate(Q.release.date)}` : ""}</div></div></div>
         <div class="op-meta">${D.price ? `Kurs ${nf(D.price)} ${esc(D.currency || "")}<br>` : ""}Stand ${esc(D.generated)}<br>Stocky</div></header>
       <div class="op-verdict">${V ? `<span class="op-tag ${V[0]}">${V[1]}</span>` : ""}${G ? `<span class="op-tag ${G[0]}">${G[1]}</span>` : ""}
         ${D.beats.n ? `<span>${D.beats.beat} von ${D.beats.n} Quartalen über dem Konsens</span>` : ""}</div>

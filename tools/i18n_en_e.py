@@ -674,3 +674,7 @@ DEPOT_EXACT.update({"Umsatz nach Regionen": "Revenue by region"})
 DEPOT_WILD += [("±{0} ggü. Vorjahr", "±{0} vs. prior year")]
 DEPOT_EXACT.update({"Freier Cashflow": "Free cash flow", "Erwarteter Gewinn je Aktie (Konsens)": "Expected EPS (consensus)"})
 DEPOT_WILD += [("{0} Prozentpunkte", "{0} pp")]
+DEPOT_EXACT.update({"Quartalszahlen im Überblick": "Quarterly results at a glance"})
+DEPOT_WILD += [("Kurzbericht {*} (A4)", "Brief report {*} (A4)"), ("{*} · Quartalszahlen im Überblick · Quartal bis {0} · veröffentlicht {1}", "{*} · Quarterly results at a glance · quarter ended {0} · published {1}"),
+               ("{*} · Quartalszahlen im Überblick · Quartal bis {0}", "{*} · Quarterly results at a glance · quarter ended {0}"),
+               ("Erwarteter Gewinn je Aktie: {*}", "Expected EPS: {*}")]
