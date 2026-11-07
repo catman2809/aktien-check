@@ -1552,10 +1552,15 @@ class TestDepotParse(unittest.TestCase):
         S = {"eff_stocks": 1.9, "see_through": 0, "div_yield": 0.01}
         A = {"sectors": [{"label": "Technologie", "weight": 1.0}], "countries": [{"label": "Deutschland", "weight": 1.0}],
              "currencies": [{"label": "EUR", "weight": 1.0}]}
-        titles = {c["title"]: c["level"] for c in a.depot_checks(S, A, {"vol": 0.3}, rows)}
-        for t, lvl in (("Klumpenrisiko Einzelaktie", "warn"), ("Geringe Streuung", "warn"), ("Branchen-Klumpen", "warn"),
-                       ("Heimatmarkt-Neigung", "info"), ("Größere Verlustpositionen", "info"), ("Hohe Schwankung", "warn")):
-            self.assertEqual(titles.get(t), lvl, t)
+        C = a.depot_checks(S, A, {"vol": 0.3, "bench_vol": 0.11}, rows)
+        titles = {c["title"]: c["text"] for c in C}
+        for t in ("Einzelaktien über 10 % Anteil", "Streuung (rechnerisch)", "Größte Branche", "Größtes Land",
+                  "Buchverluste über 30 %", "Schwankung (Volatilität)"):
+            self.assertIn(t, titles)
+        self.assertEqual({c["level"] for c in C}, {"info"})                    # nur beschreibend, keine Warnstufen
+        blob = " ".join(titles).lower() + " " + " ".join(titles.values()).lower()
+        for w in ("klumpen", "risiko", "gut", "prüfen", "achten", "sollte", "verkauf", "empfehl", "zu hoch", "zu gering"):
+            self.assertNotIn(w, blob, w)                                       # keine Wertung, keine Handlungshinweise
 
 
 class TestHostedWithoutPassword(TestHTTP):

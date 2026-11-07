@@ -2604,7 +2604,7 @@ function welcome() {
     </div>
     <div class="trk-teaser card dp-teaser tz">${tzIll("dp")}
       <div class="tz-txt"><b>Mein Depot analysieren</b>
-        <span>CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Risiko, Dividenden und ein Depot-Check auf Klumpenrisiken.</span></div>
+        <span>CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Schwankung, Dividenden und die Struktur des Depots – rein beschreibend, ohne Bewertung einzelner Positionen.</span></div>
       <button class="btn primary" id="dpopen">Depot hochladen</button>
     </div>
     ${ME?.admin ? `<div class="trk-teaser card tz">${tzIll("scr")}
@@ -2815,46 +2815,33 @@ function dpLine(C) {
 }
 
 const GROUP_TONE = {Kaufen: "pos", Halten: "neu", Verkaufen: "neg"};
-function dpScoreCells(p) {
+function dpScoreCells(p) {  // Positionstabelle: KGV und Forward-KGV (beschreibend, keine Bewertung)
   const i = OUTLOOK?.positions?.[p.symbol];
   if (!i) return `<td class="num stamp">${OUTLOOK?.pending && p.symbol ? "…" : "–"}</td><td class="num">–</td>`;
-  const up = i.upside ?? i.fair_up;
-  return `<td class="num"><span class="dot ${GROUP_TONE[i.group] || ""}"></span> <b>${scTxt(i.score)}</b> <small class="stamp">${esc(i.label || "")}</small></td>
-    <td class="num ${up == null ? "" : up >= 0 ? "pos" : "neg"}" title="${i.upside != null ? "zum Kursziel der Analysten" : "zum fairen Wert"}${i.fair_up != null && i.upside != null ? ` · zum fairen Wert ${pc(i.fair_up, 0, true)}` : ""}">${up == null ? "–" : pc(up, 0, true)}</td>`;
+  return `<td class="num">${i.pe > 0 ? nf(i.pe, 1) : "–"}</td><td class="num">${i.fpe > 0 ? nf(i.fpe, 1) : "–"}</td>`;
 }
-function dpScoreMini(p) {  // Handy-Liste: Score und Potenzial in einer Zeile
+function dpScoreMini(p) {  // Handy-Liste: KGV in einer Zeile (beschreibend, keine Bewertung)
   const i = OUTLOOK?.positions?.[p.symbol];
-  if (!i) return OUTLOOK?.pending && p.symbol ? `<span>Score <b>…</b></span>` : "";
-  const up = i.upside ?? i.fair_up;
-  return `<span>Score <span class="dot ${GROUP_TONE[i.group] || ""}"></span> <b>${scTxt(i.score)}</b></span>`
-    + (up == null ? "" : `<span>Pot. <b class="${up >= 0 ? "pos" : "neg"}">${pc(up, 0, true)}</b></span>`);
+  if (!i || !(i.pe > 0 || i.fpe > 0)) return "";
+  return `<span>KGV <b>${i.pe > 0 ? nf(i.pe, 1) : "–"}</b></span>` + (i.fpe > 0 ? `<span>Fwd. <b>${nf(i.fpe, 1)}</b></span>` : "");
 }
 function dpWaitNote(what) {
   const O = OUTLOOK || {};
   if (O.error) return `<div class="card pad stamp">${esc(what)} nicht verfügbar: ${esc(O.error)}</div>`;
-  return `<div class="card pad dp-wait">${KERZI_MINI} <span>${esc(what)} wird berechnet – jede Position wird mit Stockys Aktienanalyse bewertet${O.total ? ` (${O.done} von ${O.total})` : ""}. Das dauert beim ersten Mal 1–2 Minuten.</span></div>`;
+  return `<div class="card pad dp-wait">${KERZI_MINI} <span>${esc(what)} wird berechnet – die Kennzahlen jeder Position werden geladen${O.total ? ` (${O.done} von ${O.total})` : ""}. Das dauert beim ersten Mal 1–2 Minuten.</span></div>`;
 }
 function dpOutlook(D) {
   const O = OUTLOOK;
-  const head = `<h2 class="section">Bewertung der Positionen</h2>`;
-  if (!O || O.pending || O.error) return head + dpWaitNote("Die Bewertung");
-  const Dp = O.depot || {}, G = Dp.groups || {};
-  const bar = ["Kaufen", "Halten", "Verkaufen"].filter(g => G[g]).map(g =>
-    `<i class="${GROUP_TONE[g]}" style="width:${(G[g] * 100).toFixed(1)}%" title="${g}: ${pc(G[g], 0)}"></i>`).join("");
-  const sells = (D.positions || []).filter(p => O.positions?.[p.symbol]?.group === "Verkaufen");
-  const sellW = sells.reduce((a, p) => a + p.weight, 0);
-  const tn = v => v == null ? "" : v >= 15 ? "pos" : v <= -15 ? "neg" : "";
+  // nur beschreibende Kennzahlen – keine Bewertung einzelner Positionen (kein Score, kein Kaufen/Verkaufen, kein Potenzial)
+  const head = `<h2 class="section">Kennzahlen der Positionen</h2>`;
+  if (!O || O.pending || O.error) return head + dpWaitNote("Die Kennzahlen");
+  const Dp = O.depot || {};
   return head + `<div class="dp-kpis">
-      ${dpKpi("Depot-Score", Dp.score != null ? scTxt(Dp.score) : "–", `0 bis 100 · gewichtet nach Wert${Dp.score_cov < 0.99 ? ` · für ${pc(Dp.score_cov, 0)} des Depots` : ""}`, tn(Dp.score))}
       ${dpKpi("KGV (gewichtet)", Dp.pe != null ? nf(Dp.pe, 1) : "–", Dp.pe != null ? `Aktien mit Gewinn, ${pc(Dp.pe_cov, 0)} des Depots` : "keine Aktien mit Gewinn")}
       ${dpKpi("Forward-KGV (gewichtet)", Dp.fpe != null ? nf(Dp.fpe, 1) : "–", "auf den erwarteten Gewinn")}
-      ${dpKpi("Erwartetes Gewinnwachstum", Dp.eps_g != null ? pc(Dp.eps_g, 1, true) : "–", "nächstes Geschäftsjahr, gewichtet", Dp.eps_g == null ? "" : Dp.eps_g >= 0 ? "pos" : "neg")}
+      ${dpKpi("Erwartetes Gewinnwachstum", Dp.eps_g != null ? pc(Dp.eps_g, 1, true) : "–", "nächstes Geschäftsjahr, Analystenkonsens, gewichtet")}
     </div>
-    <div class="card pad dp-groups"><div class="dp-gbar">${bar}</div>
-      <div class="dp-glegend">${["Kaufen", "Halten", "Verkaufen"].map(g => `<span><span class="dot ${GROUP_TONE[g]}"></span> ${g} ${pc(G[g] || 0, 0)}</span>`).join("")}</div>
-      ${sells.length ? `<p class="dp-sellnote"><b>${sells.length} ${sells.length === 1 ? "Position" : "Positionen"} mit Verkaufen-Signal</b>, zusammen ${pc(sellW, 1)} des Depots:
-        ${sells.map(p => `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>`).join(", ")}.</p>` : ""}
-      <p class="stamp" style="margin:8px 0 0">Score, Empfehlung und Potenzial aus Stockys Aktienanalyse (die ${O.n} größten Positionen mit Kursdaten), Stand ${esc(O.generated || "")}. Potenzial: zum Kursziel der Analysten, sonst zum fairen Wert. Gewichtetes KGV über die Gewinnrendite, wie bei Indizes.</p></div>`;
+    <p class="stamp" style="margin:4px 0 0">Kennzahlen der ${O.n} größten Positionen mit Kursdaten, Stand ${esc(O.generated || "")}. Gewichtetes KGV über die Gewinnrendite, wie bei Indizes. Erwartetes Gewinnwachstum laut Analystenkonsens.</p>`;
 }
 function dpDividends(D) {
   const O = OUTLOOK, head = `<h2 class="section">Dividenden-Ausblick</h2>`;
@@ -2904,7 +2891,7 @@ function dpTaxes(D) {
         ${winnersTaxable > 0 ? `<div class="dp-kv"><span>Steuerpflichtig über dem Freibetrag (geschätzt ${pc(rate, 3)})</span><b>${eur(winnersTaxable)} → ${eur(winnersTaxable * rate)} Steuer</b></div>` : ""}`
         : `<p class="stamp">Für den Verbrauch des Freibetrags im laufenden Jahr bitte eine Umsatzliste (Käufe, Verkäufe, Dividenden) hochladen.</p>`}
       ${P.length ? `<div class="dp-kv"><span>Steuer, wenn du heute alles verkaufst (offene Gewinne, nach Freibetrag)</span><b>${eur(Math.max(0, taxAll))}</b></div>` : ""}
-      ${losers.length ? `<div class="dp-loss"><b>Positionen im Minus</b> <span class="stamp">– ein Verkauf würde den Verlust steuerlich nutzbar machen (Aktienverluste nur gegen Aktiengewinne)</span>
+      ${losers.length ? `<div class="dp-loss"><b>Positionen mit Buchverlust</b> <span class="stamp">– nicht realisiert; steuerlich zählen Verluste erst bei Verkauf (Aktienverluste nur mit Aktiengewinnen verrechenbar)</span>
         ${losers.slice(0, 8).map(p => `<div class="adm-row"><span>${esc(p.name)} <small class="stamp">${p.cls === "stock" ? "Aktie" : "Fonds"}</small></span><b class="num neg">${eur(p.gain)}</b></div>`).join("")}</div>` : ""}
       <p class="stamp" style="margin:10px 0 0">Schätzung für Anleger in Deutschland: Abgeltungsteuer 25 % plus Solidaritätszuschlag (${pc(rate, 3)}), ohne Kirchensteuer. Aktien-ETFs mit 30 % Teilfreistellung, Anleihen-ETFs ohne. Krypto ist ausgenommen (nach einem Jahr Haltedauer steuerfrei). Maßgeblich ist die Abrechnung deiner Bank – Verlustvorträge aus Vorjahren und andere Depots kennt die App nicht.</p></div>`;
 }
@@ -2919,9 +2906,9 @@ function dpCosts(D) {
       ${F.length ? dpKpi("Laufende Fondskosten", eur(C.ter_eur) + " / Jahr", `Ø TER ${pc(C.ter_avg, 2)} der ETFs`) : ""}
       ${S.fees ? dpKpi("Ordergebühren", eur(S.fees), "laut Umsatzliste, seit Beginn") : ""}
     </div>
-    ${F.length ? `<div class="peer-scroll"><table class="trk"><thead><tr><th>Fonds</th><th class="num">Wert</th><th class="num">TER</th><th class="num">Kosten / Jahr</th><th></th></tr></thead><tbody>
+    ${F.length ? `<div class="peer-scroll"><table class="trk"><thead><tr><th>Fonds</th><th class="num">Wert</th><th class="num">TER</th><th class="num">Kosten / Jahr</th></tr></thead><tbody>
       ${F.map(f => `<tr><td>${f.symbol ? `<a href="?q=${encodeURIComponent(f.symbol)}" data-q="${esc(f.symbol)}">${esc(f.name)}</a>` : esc(f.name)}</td><td class="num">${nf(f.value, 0)} €</td>
-        <td class="num">${pc(f.ter, 2)}</td><td class="num">${eur(f.eur)}</td><td class="stamp">${f.ter > 0.005 ? "teuer – breite Index-ETFs gibt es oft für 0,1–0,2 %" : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+        <td class="num">${pc(f.ter, 2)}</td><td class="num">${eur(f.eur)}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <p class="stamp" style="margin:8px 0 0">TER = jährliche Gesamtkostenquote, wird automatisch aus dem Fondsvermögen entnommen (steckt also schon in der Wertentwicklung).</p></div>`;
 }
 function dpKpi(label, value, sub, tone) {
@@ -3009,19 +2996,19 @@ function renderDepot() {
       ${dpKpi("Schwankung (Volatilität)", Rk.vol != null ? pc(Rk.vol, 1) : "–", (Rk.bench_vol != null ? `MSCI World ${pc(Rk.bench_vol, 1)}` : "pro Jahr") + " · heutiger Bestand")}
       ${dpKpi("Größter Rückgang", Rk.max_dd != null ? pc(Rk.max_dd, 1) : "–", "vom Hoch, 12 Monate, heutiger Bestand", Rk.max_dd != null ? "neg" : "")}
       ${dpKpi("Beta zum MSCI World", Rk.beta != null ? nf(Rk.beta, 2) : "–", Rk.beta != null ? (Rk.beta > 1.1 ? "schwankt stärker als der Markt" : Rk.beta < 0.9 ? "schwankt weniger als der Markt" : "etwa wie der Markt") : "")}
-      ${dpKpi("Sharpe-Ratio", Rk.sharpe != null ? nf(Rk.sharpe, 2) : "–", "Rendite je Risikoeinheit (über 1 = gut)")}
+      ${dpKpi("Sharpe-Ratio", Rk.sharpe != null ? nf(Rk.sharpe, 2) : "–", "Rendite über dem risikolosen Zins je Einheit Schwankung")}
       ${dpKpi("Größte Position", pc(S.largest, 1), S.largest_name)}
       ${dpKpi("Top 5 / Top 10", `${pc(S.top5, 0)} / ${pc(S.top10, 0)}`, "Anteil am Depot")}
     </div>
     ${showOutlook ? dpOutlook(D) : ""}
     <h2 class="section">Aufteilung</h2>
     ${dpAlloc(A, S)}
-    <h2 class="section">Depot-Check</h2>
+    <h2 class="section">Depot-Struktur</h2>
     <div class="card pad dp-checks">${(D.checks || []).map(c => `<div class="dp-check ${c.level}"><span class="dp-ico" aria-hidden="true">${c.level === "ok" ? "✓" : c.level === "warn" ? "!" : "i"}</span>
       <div><b>${esc(c.title)}</b><span>${esc(c.text)}</span></div></div>`).join("")}
       ${(Rk.pairs || []).length ? `<div class="dp-pairs"><b>Ähnlich verlaufende Positionen</b> <span class="stamp">(Korrelation der Tagesrenditen, 12 Monate)</span>
         ${Rk.pairs.map(p => `<div class="adm-row"><span>${esc(p.a)} ↔ ${esc(p.b)}</span><b class="num">${nf(p.corr, 2)}</b></div>`).join("")}</div>` : ""}
-      ${Rk.avg_corr != null ? `<div class="stamp" style="margin-top:8px">Durchschnittliche Korrelation der größeren Positionen: ${nf(Rk.avg_corr, 2)} (unter 0,5 = gute Streuung).</div>` : ""}</div>
+      ${Rk.avg_corr != null ? `<div class="stamp" style="margin-top:8px">Durchschnittliche Korrelation der größeren Positionen: ${nf(Rk.avg_corr, 2)} (0 = unabhängig, 1 = völlig gleichlaufend).</div>` : ""}</div>
     ${dpLine(D.chart)}
     ${showOutlook ? dpDividends(D) : ""}
     ${dpTaxes(D)}
@@ -3029,14 +3016,15 @@ function renderDepot() {
     <h2 class="section">Positionen</h2>
     <div class="card pad">
       ${mob ? dpPosList(P) : `<div class="peer-scroll"><table class="trk dp-tbl"><thead><tr><th>Wertpapier</th><th>Art</th><th class="num">Stück</th><th class="num">Kurs €</th><th class="num">Wert €</th><th class="num">Anteil</th>
-        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th>${showOutlook ? `<th class="num">Score</th><th class="num">Potenzial</th>` : ""}<th>Branche</th><th>Land</th></tr></thead>
+        <th class="num">G/V</th><th class="num">12 Monate</th><th class="num">Div.-Rendite</th>${showOutlook ? `<th class="num">KGV</th><th class="num">Fwd.-KGV</th>` : ""}<th>Branche</th><th>Land</th></tr></thead>
       <tbody>${P.map(p => `<tr><td>${p.symbol ? logoImg(p.symbol, "dp-logo") : ""}<span translate="no">${p.symbol ? `<a href="?q=${encodeURIComponent(p.symbol)}" data-q="${esc(p.symbol)}">${esc(p.name)}</a>` : esc(p.name)}</span>${p.flag ? ` <span class="stamp" title="${esc(p.flag)}">⚠</span>` : ""}<small class="stamp" translate="no">${esc(p.symbol || p.isin || "")}</small></td>
         <td>${esc(p.kind)}</td><td class="num">${p.qty != null ? nf(p.qty, p.qty % 1 ? 3 : 0) : "–"}</td><td class="num">${p.price != null ? nf(p.price, 2) : "–"}</td>
         <td class="num">${nf(p.value, 0)}</td><td class="num">${pc(p.weight, 1)}</td>
         <td class="num ${tone(p.gain_pct)}">${p.gain_pct != null ? pc(p.gain_pct, 1, true) : "–"}</td>
         <td class="num ${tone(p.perf_1y)}">${p.perf_1y != null ? pc(p.perf_1y, 1, true) : "–"}</td>
         <td class="num">${p.div_yield ? pc(p.div_yield, 2) : "–"}</td>${showOutlook ? dpScoreCells(p) : ""}<td>${esc(p.sector)}</td><td>${esc(p.country)}</td></tr>`).join("")}</tbody></table></div>`}
-      <div class="stamp" style="margin-top:8px"><span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
+      <div class="stamp" style="margin-top:8px"><span>Die Depotanalyse beschreibt die Zusammensetzung deines Depots. Sie bewertet keine Positionen und ist keine Anlageberatung.</span>
+        <span>Kurse und Wechselkurse von Yahoo Finance, Stand ${esc(D.generated)}.</span>
         ${D.file ? `<span>Datei:</span> <span translate="no">${esc(D.file)}</span>` : ""}${D.saved ? ` <span>· gespeichert am ${esc(D.saved)}</span>` : ""}
         <span>Kaufkurse werden in Euro angenommen, sofern die Datei keine andere Währung nennt.</span></div></div>`;
   } else if (!depotBusy) {
@@ -3044,7 +3032,8 @@ function renderDepot() {
       <li>Aufteilung nach Einzelpositionen, Branchen (mit Durchschau in ETFs), Ländern, Anlageklassen und Währungen</li>
       <li>Depotwert, Gewinn/Verlust je Position, erwartete Dividenden pro Jahr</li>
       <li>Rendite, Schwankung, größter Rückgang, Beta und Sharpe-Ratio der letzten 12 Monate im Vergleich zum MSCI World</li>
-      <li>Depot-Check: Klumpenrisiken, Streuung, Heimatmarkt-Neigung, Währungsrisiko, ähnlich verlaufende Positionen</li></ul>
+      <li>Depot-Struktur: Konzentration, rechnerische Streuung, größte Branche und größtes Land, Fremdwährungsanteil, ähnlich verlaufende Positionen</li>
+      <li>Rein beschreibend – die Depotanalyse bewertet keine Positionen und gibt keine Kauf- oder Verkaufsempfehlungen.</li></ul>
       <p class="stamp">Die Datei wird nur auf dem Server ausgewertet. Gespeichert werden – wenn du es möchtest – nur Wertpapier, Stückzahl und Kaufkurs, verschlüsselt in deinem Konto.</p></div>`;
   }
   $("#out").innerHTML = `<section class="dp">

@@ -10451,18 +10451,19 @@ DEPOT_POS_CACHE = {}        # Symbol -> (Zeit, Kurzfassung der Analyse)
 
 
 def depot_position_info(sym):
-    """Kurzfassung der Stocky-Analyse einer Depotposition (6 Stunden zwischengespeichert)."""
+    """Beschreibende Kennzahlen einer Depotposition (6 Stunden zwischengespeichert): KGV, Forward-KGV, erwartetes
+    Gewinnwachstum laut Analystenkonsens, TER, Dividendentermine. Bewusst ohne Score, Kaufen/Halten/Verkaufen und
+    Potenzial – die Depotanalyse bewertet keine Positionen (sonst persönliche Empfehlung = Anlageberatung)."""
     hit = DEPOT_POS_CACHE.get(sym)
-    if hit and time.time() - hit[0] < 6 * 3600:
+    if hit and time.time() - hit[0] < 6 * 3600 and "score" not in hit[1]:
         return hit[1]
     res = analyze(sym)
-    f, fair, r = res.get("facts") or {}, res.get("fair") or {}, res.get("rating") or {}
+    f = res.get("facts") or {}
     this_year = datetime.now().year
     fc = (res.get("divhist") or {}).get("forecast") or []
     nxt = next((x for x in fc if x["year"] == this_year + 1), None)
     eps = ((res.get("forecast") or {}).get("eps") or {}).get("+1y") or {}
-    info = {"score": r.get("score"), "label": r.get("label"), "group": r.get("group"), "upside": f.get("upside"),
-            "fair_up": fair.get("upside"), "pe": f.get("pe"), "fpe": f.get("fpe"), "eps_g": eps.get("growth"),
+    info = {"pe": f.get("pe"), "fpe": f.get("fpe"), "eps_g": eps.get("growth"),
             "ter": f.get("ter"), "div_g": nxt.get("growth") if nxt else None, "price": res.get("price"),
             "events": [e for e in res.get("events") or [] if e.get("type") in ("exdiv", "pay")], "etf": bool(res.get("etf"))}
     DEPOT_POS_CACHE[sym] = (time.time(), info)
@@ -10503,8 +10504,9 @@ def depot_dividend_plan(row, info):
 
 
 def depot_outlook(rows, progress=None):
-    """Bewertung je Position (Score, Empfehlung, Potenzial, KGV), Depot-Score und gewichtete Kennzahlen, Dividenden-Ausblick
-    für 12 Monate mit Kalender und laufende Kosten der Fonds. Nur Positionen mit Symbol, die 25 größten."""
+    """Beschreibende Kennzahlen je Position und gewichtet fürs Depot (KGV, Forward-KGV, erwartetes Gewinnwachstum),
+    Dividenden-Ausblick für 12 Monate mit Kalender und laufende Kosten der Fonds – ohne Bewertung der Positionen.
+    Nur Positionen mit Symbol, die 25 größten."""
     cand = [r_ for r_ in rows if r_.get("symbol") and r_["kind"] in ("Aktie", "ETF", "Anleihen-ETF")][:25]
     infos = {}
 
@@ -10518,11 +10520,7 @@ def depot_outlook(rows, progress=None):
             if info:
                 infos[sym] = info
     total = sum(r_["value"] for r_ in rows) or 1.0
-    scored = [(r_, infos[r_["symbol"]]) for r_ in cand if r_["symbol"] in infos and infos[r_["symbol"]].get("score") is not None]
-    w_sc = sum(r_["value"] for r_, _ in scored)
-    groups = {}
-    for r_, i_ in scored:
-        groups[i_.get("group") or "–"] = groups.get(i_.get("group") or "–", 0.0) + r_["value"] / total
+    scored = [(r_, infos[r_["symbol"]]) for r_ in cand if r_["symbol"] in infos]
 
     def harmonic(key):  # gewichtetes KGV über die Gewinnrendite (wie bei Indizes), nur Aktien mit Gewinn
         xs = [(r_["value"], i_[key]) for r_, i_ in scored if r_["kind"] == "Aktie" and i_.get(key) and i_[key] > 0]
@@ -10546,9 +10544,9 @@ def depot_outlook(rows, progress=None):
         if r_["kind"] in ("ETF", "Anleihen-ETF") and ter is not None:
             funds.append({"name": r_["name"], "symbol": r_.get("symbol"), "value": r_["value"], "ter": ter, "eur": r_["value"] * ter})
     f_val = sum(x["value"] for x in funds)
-    return {"positions": {s_: {k: v for k, v in i_.items() if k != "events"} for s_, i_ in infos.items()},
-            "depot": {"score": sum(r_["value"] * i_["score"] for r_, i_ in scored) / w_sc if w_sc else None,
-                      "score_cov": w_sc / total, "groups": groups, "pe": pe, "pe_cov": pe_cov, "fpe": fpe, "fpe_cov": fpe_cov,
+    keep = ("pe", "fpe", "eps_g", "ter", "div_g", "price", "etf")  # nur Beschreibendes an den Browser
+    return {"positions": {s_: {k: i_.get(k) for k in keep} for s_, i_ in infos.items()},
+            "depot": {"pe": pe, "pe_cov": pe_cov, "fpe": fpe, "fpe_cov": fpe_cov,
                       "eps_g": sum(v * g for v, g in eg) / sum(v for v, _ in eg) if eg else None},
             "dividends": {"total": sum(x["eur"] for x in plan), "months": sorted(months.items()), "calendar": plan[:40]},
             "costs": {"funds": sorted(funds, key=lambda x: -x["eur"]), "ter_eur": sum(x["eur"] for x in funds),
@@ -10888,69 +10886,55 @@ def analyze_depot(positions, history=None):
 
 
 def depot_checks(S, A, R, rows):
-    """Typische Prüfpunkte einer Depotanalyse -> [{level: ok|info|warn, title, text}]."""
+    """Depot-Struktur: rein beschreibende Kennzahlen zu Konzentration, Streuung, Branchen, Ländern, Währungen und
+    Schwankung -> [{level: "info", title, text}]. Bewusst ohne Wertung („gut“, „Klumpenrisiko“) und ohne Handlungshinweise
+    („prüfen“, „verkaufen“) – sonst wäre es eine persönliche Empfehlung (Anlageberatung, erlaubnispflichtig)."""
     out = []
-    add = lambda lvl, title, text: out.append({"level": lvl, "title": title, "text": text})
+    add = lambda title, text: out.append({"level": "info", "title": title, "text": text})
     stocks = [r_ for r_ in rows if r_["kind"] == "Aktie"]
     big_single = [r_ for r_ in stocks if r_["weight"] > 0.10]
     if big_single:
-        add("warn", "Klumpenrisiko Einzelaktie", "Über 10 % des Depots in einer Aktie: " + ", ".join(
-            f"{r_['name']} ({pct(r_['weight'])})" for r_ in big_single[:4]) + ". Ein Kurseinbruch dieser Firma trifft das ganze Depot spürbar.")
-    else:
-        add("ok", "Keine übergroße Einzelaktie", "Keine Aktie macht mehr als 10 % des Depots aus.")
-    etf_share = sum(r_["weight"] for r_ in rows if r_["kind"].endswith("ETF"))
-    eff = S["eff_stocks"] or 0  # Streuung des Einzelaktien-Teils; ETFs gelten als breit gestreut
-    tail = f" ({pct(etf_share)} des Depots liegen zusätzlich in breit gestreuten ETFs.)" if etf_share > 0.05 else ""
-    if etf_share >= 0.5:
-        add("ok", "Breite Streuung über ETFs", f"{pct(etf_share)} des Depots liegen in ETFs – jeder ETF enthält viele Einzelwerte.")
-    elif stocks and eff < 8:
-        add("warn", "Geringe Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch nur {fnum(eff, 1)} gleich großen Positionen "
-            "(Herfindahl-Index). Ab etwa 15–20 Einzelaktien aus verschiedenen Branchen sinkt das Einzelrisiko deutlich." + tail)
-    elif stocks and eff < 15:
-        add("info", "Mittlere Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch {fnum(eff, 1)} gleich großen Positionen – "
-            "ausreichend, wenn die Branchen gemischt sind." + tail)
+        add("Einzelaktien über 10 % Anteil", ", ".join(f"{r_['name']} ({pct(r_['weight'])})" for r_ in big_single[:6]) + ".")
     elif stocks:
-        add("ok", "Gute Streuung", f"Der Einzelaktien-Teil entspricht rechnerisch {fnum(eff, 1)} gleich großen Positionen." + tail)
+        top = max(stocks, key=lambda r_: r_["weight"])
+        add("Größte Einzelaktie", f"{top['name']} mit {pct(top['weight'])} des Depots; keine Aktie über 10 %.")
+    etf_share = sum(r_["weight"] for r_ in rows if r_["kind"].endswith("ETF"))
+    eff = S["eff_stocks"] or 0
+    if stocks:
+        add("Streuung (rechnerisch)", f"Der Einzelaktien-Teil entspricht {fnum(eff, 1)} gleich großen Positionen "
+            f"(Herfindahl-Index, {len(stocks)} Aktien)." + (f" ETF-Anteil: {pct(etf_share)}." if etf_share > 0.005 else ""))
+    elif etf_share > 0:
+        add("ETF-Anteil", f"{pct(etf_share)} des Depots liegen in ETFs.")
     top_sec = next((x for x in A["sectors"] if not x["label"].startswith("ETF")), None)
-    if top_sec and top_sec["weight"] > 0.30:
-        add("warn", "Branchen-Klumpen", f"{top_sec['label']} macht {pct(top_sec['weight'])} des Depots aus"
-            + (" (inkl. Durchschau in ETFs)" if S["see_through"] > 0.05 else "") + ". Branchenkrisen schlagen dann voll durch.")
-    elif top_sec:
-        add("ok", "Branchen gemischt", f"Größte Branche: {top_sec['label']} mit {pct(top_sec['weight'])}.")
+    if top_sec:
+        add("Größte Branche", f"{top_sec['label']} mit {pct(top_sec['weight'])} des Depots"
+            + (" (inkl. Durchschau in ETFs)" if S["see_through"] > 0.05 else "") + ".")
     ctry = [x for x in A["countries"] if not x["label"].startswith(("ETF", "Krypto"))]
-    if ctry and ctry[0]["weight"] > 0.6:
-        add("info", "Länderschwerpunkt", f"{pct(ctry[0]['weight'])} des Depots in Aktien aus {ctry[0]['label']}.")
-    de = next((x["weight"] for x in A["countries"] if x["label"] == "Deutschland"), 0)
-    if de > 0.4:
-        add("info", "Heimatmarkt-Neigung", f"{pct(de)} in deutschen Aktien – Deutschland macht nur rund 2 % der weltweiten "
-            "Börsenwerte aus („Home Bias“).")
+    if ctry:
+        add("Größtes Land", f"{ctry[0]['label']} mit {pct(ctry[0]['weight'])} des Depots (Sitz der Unternehmen)"
+            + (f", danach {ctry[1]['label']} mit {pct(ctry[1]['weight'])}" if len(ctry) > 1 else "") + ".")
     fx_share = sum(x["weight"] for x in A["currencies"] if x["label"] not in ("EUR", "ETF (Währungsmix)", "Krypto"))
-    if fx_share > 0.5:
-        add("info", "Währungsrisiko", f"{pct(fx_share)} des Depots in Aktien mit Heimatwährung außerhalb des Euro – "
-            "Wechselkurse beeinflussen die Rendite spürbar (in beide Richtungen).")
+    if fx_share > 0.005:
+        add("Fremdwährungen", f"{pct(fx_share)} des Depots in Aktien mit Heimatwährung außerhalb des Euro; "
+            "Wechselkursänderungen wirken sich auf den Wert in Euro aus.")
     crypto = sum(r_["weight"] for r_ in rows if r_["kind"] == "Krypto")
-    if crypto > 0.10:
-        add("warn", "Hoher Krypto-Anteil", f"{pct(crypto)} in Kryptowährungen – sehr schwankungsanfällig (Rückgänge von 70 % und mehr kamen vor).")
+    if crypto > 0.005:
+        add("Kryptowährungen", f"{pct(crypto)} des Depots.")
     small = [r_ for r_ in rows if r_["weight"] < 0.01]
-    if len(small) >= 5:
-        add("info", "Viele Kleinstpositionen", f"{len(small)} Positionen unter 1 % des Depots – sie beeinflussen das Ergebnis "
-            "kaum, kosten aber Aufmerksamkeit und Gebühren.")
+    if small:
+        add("Positionen unter 1 %", f"{len(small)} von {len(rows)} Positionen, zusammen {pct(sum(r_['weight'] for r_ in small))}.")
     losers = [r_ for r_ in rows if r_.get("gain_pct") is not None and r_["gain_pct"] < -0.30]
     if losers:
-        add("info", "Größere Verlustpositionen", "Mehr als 30 % im Minus: " + ", ".join(
-            f"{r_['name']} ({pct(r_['gain_pct'])})" for r_ in losers[:5]) + ". Prüfen, ob die ursprüngliche Kaufidee noch gilt.")
+        add("Buchverluste über 30 %", ", ".join(f"{r_['name']} ({pct(r_['gain_pct'])})" for r_ in losers[:6]) + ".")
     if R.get("vol") is not None:
-        if R["vol"] > 0.25:
-            add("warn", "Hohe Schwankung", f"Volatilität {pct(R['vol'])} pro Jahr – deutlich über einem breiten Weltaktien-ETF "
-                f"({pct(R.get('bench_vol') or 0.15)}).")
-        elif R["vol"] < 0.12:
-            add("ok", "Ruhiges Depot", f"Volatilität {pct(R['vol'])} pro Jahr.")
-    for pr in (R.get("pairs") or [])[:1]:
+        add("Schwankung (Volatilität)", f"{pct(R['vol'])} pro Jahr, heutige Zusammensetzung"
+            + (f"; MSCI World im selben Zeitraum {pct(R['bench_vol'])}" if R.get("bench_vol") is not None else "") + ".")
+    for pr in (R.get("pairs") or [])[:2]:
         if pr["corr"] >= 0.85:
-            add("info", "Ähnliche Positionen", f"{pr['a']} und {pr['b']} bewegen sich fast gleich (Korrelation {fnum(pr['corr'], 2)}) – "
-                "sie streuen das Risiko kaum.")
-    if S["div_yield"] and S["div_yield"] > 0.04:
-        add("info", "Dividendenstark", f"Dividendenrendite {pct(S['div_yield'])} – auf Dividendensicherheit und Branchenmix achten.")
+            add("Ähnlicher Kursverlauf", f"{pr['a']} und {pr['b']}: Korrelation der Tagesrenditen {fnum(pr['corr'], 2)} "
+                "(1 = völlig gleichlaufend).")
+    if S["div_yield"]:
+        add("Dividendenrendite", f"{pct(S['div_yield'])} auf den heutigen Depotwert (letzte 12 Monate, heutiger Bestand).")
     return out
 
 

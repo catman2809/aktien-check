@@ -595,7 +595,17 @@ DEPOT_EXACT.update({
     "Geänderte Gewinnschätzungen": "Revised earnings estimates", "aktuell": "current",
     "laufendes Quartal": "current quarter", "nächstes Quartal": "next quarter", "laufendes Geschäftsjahr": "current fiscal year", "nächstes Geschäftsjahr": "next fiscal year",
     "Geschäftsbereiche": "Business segments", "Positiv": "Positive", "Negativ": "Negative", "Fazit": "Conclusion",
-    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "Lesen": "Read", "A4-Seiten": "A4 pages", "Kurzbericht ansehen (2 Seiten A4)": "View report (2 A4 pages)", "Seite 2 von 2": "Page 2 of 2",
+    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "Lesen": "Read", "Kennzahlen der Positionen": "Holdings metrics", "Depot-Struktur": "Portfolio structure",
+    "Positionen mit Buchverlust": "Holdings with unrealised loss", "Fwd.-KGV": "Fwd. P/E", "Fwd.": "Fwd.",
+    "Einzelaktien über 10 % Anteil": "Single stocks above 10 %", "Größte Einzelaktie": "Largest single stock",
+    "Streuung (rechnerisch)": "Diversification (calculated)", "ETF-Anteil": "ETF share", "Größte Branche": "Largest sector",
+    "Größtes Land": "Largest country", "Fremdwährungen": "Foreign currencies", "Kryptowährungen": "Cryptocurrencies",
+    "Positionen unter 1 %": "Holdings below 1 %", "Buchverluste über 30 %": "Unrealised losses above 30 %",
+    "Ähnlicher Kursverlauf": "Similar price movement",
+    "Die Depotanalyse beschreibt die Zusammensetzung deines Depots. Sie bewertet keine Positionen und ist keine Anlageberatung.":
+        "The portfolio analysis describes the composition of your portfolio. It does not rate any holdings and is not investment advice.",
+    "Rein beschreibend – die Depotanalyse bewertet keine Positionen und gibt keine Kauf- oder Verkaufsempfehlungen.":
+        "Purely descriptive – the portfolio analysis does not rate holdings and gives no buy or sell recommendations.", "A4-Seiten": "A4 pages", "Kurzbericht ansehen (2 Seiten A4)": "View report (2 A4 pages)", "Seite 2 von 2": "Page 2 of 2",
     "Kurzbericht · Quartal bis {*}": "Report · quarter ending {*}", "Entscheidungen des Managements": "Management decisions", "Ergebnis-Pressemitteilung": "earnings press release",
     "Aktionäre": "Shareholders", "Aufträge": "Orders", "Zulassung": "Approval", "Personal": "People", "Übernahme / Partnerschaft": "Deals & partnerships",
     "Produkte": "Products", "Investition": "Investment", "Umbau": "Restructuring", "Aktionäre:": "Shareholders:", "Aufträge:": "Orders:",
