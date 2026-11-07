@@ -2057,6 +2057,23 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertFalse(any("Revenue was" in x["en"] for x in d))                   # reine Zahlen, keine Entscheidung
         self.assertFalse(any("will pay dividends" in x["en"] for x in d))            # nach dem Rechtshinweis
 
+    def test_translate_titles_mixed_languages(self):
+        import unittest.mock as um
+        calls = []
+
+        def fake(text):
+            calls.append(text)
+            return "\n".join("DE:" + ln for ln in text.split("\n"))
+        items = [{"title": "Boeing shares sell off on slower 737 production"}, {"title": "Les résultats de LVMH reculent"},
+                 {"title": "Apple beats estimates as iPhone sales climb"}, {"title": "Allianz und TUI bauen Kooperation aus"}]
+        with um.patch.dict(a.TITLE_DE, clear=True), um.patch.object(a, "translate_de", side_effect=fake):
+            a.translate_titles(items)
+        self.assertIn("Les résultats de LVMH reculent", calls)               # andere Sprache einzeln übersetzt
+        self.assertTrue(any("Boeing shares" in c and "Apple beats" in c for c in calls))  # Englisch gemeinsam
+        self.assertFalse(any("Boeing shares" in c and "LVMH" in c for c in calls))       # nie gemischt
+        self.assertEqual(items[1]["title_de"], "DE:Les résultats de LVMH reculent")
+        self.assertNotIn("title_de", items[3])                                         # deutsch bleibt
+
     def test_earnings_topics(self):
         self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)
         self.assertEqual(a.name_in("Sap's eröffnet Filiale", "SAP SE"), -1)

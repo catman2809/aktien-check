@@ -8580,14 +8580,16 @@ GUIDE_NUM = re.compile(r"\d[\d.,]*\s*(%|percent|billion|million|basis points)|\$
 
 
 def translate_de(text):
-    """Englisch -> Deutsch ohne Schlüssel: Google-Übersetzer (Web-Schnittstelle), sonst MyMemory (bis 500 Zeichen je
-    Abruf, daher satzweise). Übersetzt wird nur öffentlicher Text (Pressemitteilungen). None bei Fehlschlag."""
+    """Beliebige Sprache -> Deutsch ohne Schlüssel: Google-Übersetzer (Web-Schnittstelle, Ausgangssprache wird erkannt –
+    mit fest „Englisch“ würden französische oder italienische Texte falsch übersetzt), sonst MyMemory (englisch, bis 500
+    Zeichen je Abruf, daher satzweise). Übersetzt wird nur öffentlicher Text (Pressemitteilungen, Schlagzeilen).
+    None bei Fehlschlag."""
     text = (text or "").strip()
     if not text:
         return None
     try:
         u = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode(
-            {"client": "gtx", "sl": "en", "tl": "de", "dt": "t", "q": text[:4500]})
+            {"client": "gtx", "sl": "auto", "tl": "de", "dt": "t", "q": text[:4500]})
         d = json.loads(_fetch(u, timeout=15))
         out = "".join(seg[0] for seg in (d[0] or []) if seg and seg[0]).strip()
         if out:
@@ -8627,10 +8629,22 @@ SEG_NAME_DE = {"Services": "Dienste", "Graphics": "Grafik", "Compute & Networkin
 GERMAN_HINT = re.compile(r"[äöüß]|\b(der|die|das|und|mit|für|nach|vor|aus|bei|zum|zur|nicht|auf|Aktie|Quartal|Zahlen|Gewinn|Umsatz)\b", re.I)
 
 
+ENGLISH_HINT = re.compile(r"\b(the|and|of|to|in|for|on|with|as|at|by|from|its|after|amid|shares?|stock|says|will|is|are|"
+                          r"was|has|have|than|over|beats?|misses|reports?|results|earnings|quarter|revenue)\b", re.I)
+
+
 def translate_titles(items):
     """Schlagzeilen (Pressestimmen, Meldungen) auf Deutsch: englische Titel in einem Abruf übersetzen (zeilenweise),
-    deutsche bleiben unverändert. Ergebnis in „title_de“; ohne Übersetzung bleibt der Originaltitel."""
+    Titel in anderen Sprachen (Französisch, Spanisch …) einzeln – in einem gemischten Abruf erkennt der Dienst nur eine
+    Sprache und übersetzt die anderen falsch. Deutsche bleiben unverändert. Ergebnis in „title_de“; ohne Übersetzung
+    bleibt der Originaltitel."""
     todo = [it for it in items if it.get("title") and not GERMAN_HINT.search(it["title"]) and it["title"] not in TITLE_DE]
+    other = [it for it in todo if not ENGLISH_HINT.search(it["title"])]
+    todo = [it for it in todo if ENGLISH_HINT.search(it["title"])]
+    for it in other[:12]:
+        one = safe(lambda: translate_de(it["title"]))
+        if one:
+            TITLE_DE[it["title"]] = one.replace("\n", " ").strip()
     if todo:
         tr = translate_de("\n".join(it["title"].replace("\n", " ") for it in todo))
         lines = [ln.strip() for ln in (tr or "").split("\n")]
@@ -9000,6 +9014,19 @@ def article_summaries(items, budget=24):
     with STORE.lock:
         known = dict(data.get("asum") or {})
     todo = list({it["link"]: it for it in items if it["link"] not in known}.values())
+    # früher ohne Übersetzung gespeichert (Dienst nicht erreichbar)? -> jetzt nachholen
+    retry = {it["link"]: known[it["link"]] for it in items if it["link"] in known and (known[it["link"]] or {}).get("en")
+             and not known[it["link"]].get("de") and not GERMAN_HINT.search(known[it["link"]]["en"])}
+    if retry:
+        tr = [{"title": v["en"]} for v in retry.values()]
+        safe(lambda: translate_titles(tr))
+        de_ = {x["title"]: x.get("title_de") for x in tr}
+        fixed = {k_: {**v, "de": de_.get(v["en"])} for k_, v in retry.items() if de_.get(v["en"])}
+        if fixed:
+            known.update(fixed)
+            with STORE.lock:
+                data.setdefault("asum", {}).update(fixed)
+                STORE.dirty = True
 
     def one(it):  # Netzfehler -> Ausnahme (später erneut); gesperrte Seite oder kein Vorspann -> None (gespeichert)
         url = gnews_resolve(it["link"])
