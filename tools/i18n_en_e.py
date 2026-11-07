@@ -575,11 +575,11 @@ DEPOT_WILD += [("Prognose: {0} weniger Aktien pro Jahr – Durchschnitt {1}–{2
 # Earnings Reviewer
 DEPOT_EXACT.update({
     "Earnings Reviewer": "Earnings Reviewer",
-    "Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein One-Pager (A4) zum Ansehen und Drucken.":
-        "A stock's latest quarter at a glance: above or below expectations, the key figures and the outlook as bullet points – plus a one-pager (A4) to view and print.",
+    "Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein Kurzbericht (2 Seiten A4) zum Ansehen und Drucken.":
+        "A stock's latest quarter at a glance: above or below expectations, the key figures and the outlook as bullet points – plus a brief report (2 A4 pages) to view and print.",
     "Quartal auswerten": "Review quarter",
-    "Das letzte Quartal auf einen Blick: Ergebnis ggü. den Erwartungen der Analysten, die wichtigsten Kennzahlen, der Ausblick des Managements und geänderte Schätzungen – kurz als Stichpunkte und ausführlich als One-Pager (A4).":
-        "The latest quarter at a glance: results versus analyst expectations, the key figures, management's outlook and revised estimates – briefly as bullet points and in detail as a one-pager (A4).",
+    "Das letzte Quartal auf einen Blick: Ergebnis ggü. den Erwartungen der Analysten, die wichtigsten Kennzahlen, der Ausblick des Managements und geänderte Schätzungen – kurz als Stichpunkte und ausführlich als Kurzbericht (2 Seiten A4).":
+        "The latest quarter at a glance: results versus analyst expectations, the key figures, management's outlook and revised estimates – briefly as bullet points and in detail as a brief report (2 A4 pages).",
     "Auswerten": "Review",
     "Über den Erwartungen": "Above expectations", "Unter den Erwartungen": "Below expectations", "Im Rahmen der Erwartungen": "In line with expectations",
     "Prognose angehoben": "Guidance raised", "Prognose bestätigt": "Guidance confirmed", "Prognose gesenkt": "Guidance lowered", "Neue Prognose": "New guidance",
@@ -595,7 +595,8 @@ DEPOT_EXACT.update({
     "Geänderte Gewinnschätzungen": "Revised earnings estimates", "aktuell": "current",
     "laufendes Quartal": "current quarter", "nächstes Quartal": "next quarter", "laufendes Geschäftsjahr": "current fiscal year", "nächstes Geschäftsjahr": "next fiscal year",
     "Geschäftsbereiche": "Business segments", "Positiv": "Positive", "Negativ": "Negative", "Fazit": "Conclusion",
-    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "Lesen": "Read", "Entscheidungen des Managements": "Management decisions", "Ergebnis-Pressemitteilung": "earnings press release",
+    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "Lesen": "Read", "A4-Seiten": "A4 pages", "Kurzbericht ansehen (2 Seiten A4)": "View report (2 A4 pages)", "Seite 2 von 2": "Page 2 of 2",
+    "Kurzbericht · Quartal bis {*}": "Report · quarter ending {*}", "Entscheidungen des Managements": "Management decisions", "Ergebnis-Pressemitteilung": "earnings press release",
     "Aktionäre": "Shareholders", "Aufträge": "Orders", "Zulassung": "Approval", "Personal": "People", "Übernahme / Partnerschaft": "Deals & partnerships",
     "Produkte": "Products", "Investition": "Investment", "Umbau": "Restructuring", "Aktionäre:": "Shareholders:", "Aufträge:": "Orders:",
     "Zulassung:": "Approval:", "Personal:": "People:", "Übernahme / Partnerschaft:": "Deals & partnerships:", "Produkte:": "Products:",
@@ -681,7 +682,7 @@ DEPOT_WILD += [("±{0} ggü. Vorjahr", "±{0} vs. prior year")]
 DEPOT_EXACT.update({"Freier Cashflow": "Free cash flow", "Erwarteter Gewinn je Aktie (Konsens)": "Expected EPS (consensus)"})
 DEPOT_WILD += [("{0} Prozentpunkte", "{0} pp")]
 DEPOT_EXACT.update({"Quartalszahlen im Überblick": "Quarterly results at a glance"})
-DEPOT_WILD += [("Kurzbericht {*} (A4)", "Brief report {*} (A4)"), ("{*} · Quartalszahlen im Überblick · Quartal bis {0} · veröffentlicht {1}", "{*} · Quarterly results at a glance · quarter ended {0} · published {1}"),
+DEPOT_WILD += [("Kurzbericht {*} (A4)", "Brief report {*} (A4)"), ("Kurzbericht {*} (2 Seiten A4)", "Brief report {*} (2 A4 pages)"), ("Kurzbericht · Quartal bis {0}", "Report · quarter ended {0}"), ("{*} · Quartalszahlen im Überblick · Quartal bis {0} · veröffentlicht {1}", "{*} · Quarterly results at a glance · quarter ended {0} · published {1}"),
                ("{*} · Quartalszahlen im Überblick · Quartal bis {0}", "{*} · Quarterly results at a glance · quarter ended {0}"),
                ("Erwarteter Gewinn je Aktie: {*}", "Expected EPS: {*}")]
 
