@@ -1995,9 +1995,10 @@ class TestIncomeEstimatesSources(unittest.TestCase):
             self.assertEqual(items[2]["title_de"], "Allianz-Aktie mit Schwung")
             a.translate_titles([{"title": "Apple Raises $7.5 Billion From Debt Offering"}])
             self.assertEqual(tr.call_count, 1)                                 # aus dem Zwischenspeicher
-        with um.patch.dict(a.TITLE_DE, clear=True), um.patch.object(a, "translate_de", return_value="nur eine Zeile"):
+        with um.patch.dict(a.TITLE_DE, clear=True), \
+                um.patch.object(a, "translate_de", side_effect=lambda t: "zusammengelegt" if "\n" in t else "DE " + t):
             x = a.translate_titles([{"title": "One headline here"}, {"title": "Another headline there"}])
-            self.assertFalse(any("title_de" in i for i in x))                  # Zeilen passen nicht -> Original
+            self.assertEqual([i["title_de"] for i in x], ["DE One headline here", "DE Another headline there"])  # einzeln
 
     def test_segment_names_german(self):
         self.assertEqual(a.SEG_NAME_DE["Graphics"], "Grafik")

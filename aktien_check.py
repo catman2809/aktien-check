@@ -8636,6 +8636,11 @@ def translate_titles(items):
             for it, ln in zip(todo, lines):
                 if ln:
                     TITLE_DE[it["title"]] = ln
+        else:  # Dienst hat Zeilen zusammengelegt/geteilt (v. a. MyMemory) -> jede Schlagzeile einzeln übersetzen
+            for it in todo[:12]:
+                one = safe(lambda: translate_de(it["title"]))
+                if one:
+                    TITLE_DE[it["title"]] = one.replace("\n", " ").strip()
         if len(TITLE_DE) > 2000:
             for k_ in list(TITLE_DE)[:500]:
                 TITLE_DE.pop(k_, None)
