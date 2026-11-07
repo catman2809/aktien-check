@@ -8841,6 +8841,115 @@ def release_topics(cik, acc):
     return hit
 
 
+# Kurzfassung verlinkter Artikel (Earnings Reviewer): Google-News-Link -> echte Adresse -> Beschreibung des Artikels
+# (og:description bzw. meta description, also der Vorspann der Redaktion), englische auf Deutsch. Ohne KI.
+ART_SUM_KEEP = 600
+ART_DESC_RE = [re.compile(p, re.I | re.S) for p in (
+    r'<meta[^>]+(?:property|name)=["\']og:description["\'][^>]*content=["\']([^"\']*)',
+    r'<meta[^>]+content=["\']([^"\']*)["\'][^>]*(?:property|name)=["\']og:description',
+    r'<meta[^>]+name=["\']twitter:description["\'][^>]*content=["\']([^"\']*)',
+    r'<meta[^>]+name=["\']description["\'][^>]*content=["\']([^"\']*)',
+    r'<meta[^>]+content=["\']([^"\']*)["\'][^>]*name=["\']description')]
+# Werbe- und Seitenbeschreibungen statt Artikel-Vorspann
+ART_DESC_BAD = re.compile(r"^(get the latest|find the latest|read the latest|view the latest|aktuelle nachrichten|"
+                          r"alle news|news und hintergr|hier finden sie|stay (up to date|informed)|breaking news|"
+                          r"subscribe|sign up|jetzt (lesen|abonnieren))|cookies?\b|javascript|\bpaywall", re.I)
+
+
+def gnews_resolve(link):
+    """Echte Artikel-Adresse hinter einem Google-News-Link (news.google.com/rss/articles/…). Andere Links unverändert."""
+    if "news.google.com" not in (link or ""):
+        return link or None
+    gid = urllib.parse.urlparse(link).path.rstrip("/").split("/")[-1]
+    page = _fetch(f"https://news.google.com/rss/articles/{gid}", timeout=10, limit=400_000).decode("utf-8", "replace")
+    sg, ts = re.search(r'data-n-a-sg="([^"]+)"', page), re.search(r'data-n-a-ts="([^"]+)"', page)
+    if not (sg and ts):
+        return None
+    inner = ["garturlreq", [["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1, None, None, None, None, None, 0, 1],
+                            "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0], gid, int(ts.group(1)), sg.group(1)]
+    freq = json.dumps([[["Fbv4je", json.dumps(inner), None, "generic"]]])
+    raw = _fetch("https://news.google.com/_/DotsSplashUi/data/batchexecute", timeout=10, limit=200_000,
+                 data=urllib.parse.urlencode({"f.req": freq}).encode(),
+                 headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}).decode("utf-8", "replace")
+    body = json.loads(raw.split("\n\n", 1)[1])[:-2]
+    url = json.loads(body[0][2])[1]
+    return url if isinstance(url, str) and url.startswith("http") else None
+
+
+def article_desc(url, title=""):
+    """Vorspann eines Artikels aus den Seiten-Metadaten; None, wenn keiner da ist oder er nur die Schlagzeile wiederholt."""
+    head = _fetch(url, timeout=10, limit=500_000).decode("utf-8", "replace")
+    head = head[:head.lower().find("</head>") + 7] if "</head>" in head.lower() else head[:200_000]
+    for rx in ART_DESC_RE:
+        m = rx.search(head)
+        if not m:
+            continue
+        d = re.sub(r"\s+", " ", html_mod.unescape(html_mod.unescape(m.group(1)))).strip(" -–|")
+        norm = lambda x: re.sub(r"\W+", "", x.lower())
+        if len(d) < 40 or ART_DESC_BAD.search(d) or (title and norm(d)[:80] == norm(title)[:80]):
+            continue
+        if len(d) > 320:  # auf ganze Sätze kürzen
+            cut = max(d.rfind(". ", 0, 320), d.rfind("! ", 0, 320), d.rfind("? ", 0, 320))
+            d = d[:cut + 1] if cut > 120 else d[:300].rsplit(" ", 1)[0] + " …"
+        return d
+    return None
+
+
+def article_summaries(items, budget=14):
+    """Je Artikel ein Stichpunkt („summary“, englische zusätzlich „summary_de“) – je Link einmal ermittelt und gespeichert.
+    Parallel und mit Zeitlimit; was nicht klappt (Bezahlschranke, gesperrt), bleibt ohne Stichpunkt."""
+    items = [it for it in items if it.get("link")]
+    if not items:
+        return items
+    data = STORE.load()
+    with STORE.lock:
+        known = dict(data.get("asum") or {})
+    todo = list({it["link"]: it for it in items if it["link"] not in known}.values())
+
+    def one(it):  # Netzfehler -> Ausnahme (später erneut); gesperrte Seite oder kein Vorspann -> None (gespeichert)
+        url = gnews_resolve(it["link"])
+        try:
+            return article_desc(url, it.get("title") or "") if url else None
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500:
+                return None
+            raise
+    found = {}
+    if todo:
+        ex = ThreadPoolExecutor(max_workers=8)
+        futs = {ex.submit(one, it): it for it in todo}
+        t0 = time.time()
+        for f, it in futs.items():
+            try:
+                found[it["link"]] = {"en": f.result(timeout=max(0.1, budget - (time.time() - t0)))}
+            except Exception:
+                pass  # Zeitlimit: beim nächsten Aufruf erneut
+        ex.shutdown(wait=False, cancel_futures=True)
+        LOG.info("[Artikel] Stichpunkte: %d von %d neuen Artikeln mit Vorspann, %d ohne Antwort",
+                 sum(1 for v in found.values() if v["en"]), len(todo), len(todo) - len(found))
+        tr = [{"title": v["en"]} for v in found.values() if v["en"]]
+        safe(lambda: translate_titles(tr))
+        de = {x["title"]: x.get("title_de") for x in tr}
+        for v in found.values():
+            if v["en"] and not GERMAN_HINT.search(v["en"]):
+                v["de"] = de.get(v["en"])
+        with STORE.lock:
+            a_ = data.setdefault("asum", {})
+            a_.update(found)
+            if len(a_) > ART_SUM_KEEP:
+                for k_ in list(a_)[:len(a_) - ART_SUM_KEEP]:
+                    a_.pop(k_, None)
+            STORE.dirty = True
+        known.update(found)
+    for it in items:
+        s_ = known.get(it["link"]) or {}
+        if s_.get("en"):
+            it["summary"] = s_["en"]
+            if s_.get("de"):
+                it["summary_de"] = s_["de"]
+    return items
+
+
 def earnings_topics(rel_topics, events_8k, news, name=""):
     """Themen zusammenführen: Sätze aus der Pressemitteilung, passende 8-K-Punkte und Schlagzeilen (je Thema höchstens
     zwei). Reihenfolge wie EARN_TOPICS; nur Themen mit Inhalt."""
@@ -8871,6 +8980,16 @@ def earnings_topics(rel_topics, events_8k, news, name=""):
         if quotes or filings or heads:
             out.append({"key": key, "label": lab, "quotes": quotes, "filings": filings, "news": heads})
     return out
+
+
+TICKER_IN_TITLE = re.compile(r"\b(?:NYSE|NASDAQ|Nasdaq|NYSEARCA|NYSEAMERICAN|AMEX|OTC|OTCMKTS|TSX|LSE|ETR|FRA|XETRA)\s*:\s*([A-Z][A-Z0-9.\-]{0,9})\b")
+
+
+def other_ticker(title, symbol):
+    """Nennt die Schlagzeile ausdrücklich ein anderes Börsenkürzel („Apple Hospitality REIT (NYSE:APLE)“ bei Apple)?"""
+    root = lambda x: re.split(r"[.-]", x.upper())[0]  # BRK-B / BRK.B -> BRK, SAP.DE -> SAP
+    found = {root(x) for x in TICKER_IN_TITLE.findall(title or "")}
+    return bool(found) and root(symbol or "") not in found
 
 
 def earnings_review(query):
@@ -8935,7 +9054,7 @@ def earnings_review(query):
     seen, press = set(), []
     for it in sorted(news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
         k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
-        if k_ in seen or not EARN_WORDS.search(it["title"]):
+        if k_ in seen or not EARN_WORDS.search(it["title"]) or other_ticker(it["title"], symbol):
             continue
         seen.add(k_)
         press.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
@@ -8945,7 +9064,7 @@ def earnings_review(query):
     strategic = []
     for it in sorted(strat_news, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
         k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
-        if k_ in seen or not STRAT_WORDS.search(it["title"]) or STRAT_NOISE.search(it["title"])                 or name.split()[0].lower() not in it["title"].lower():
+        if k_ in seen or not STRAT_WORDS.search(it["title"]) or STRAT_NOISE.search(it["title"]) or other_ticker(it["title"], symbol)                 or name.split()[0].lower() not in it["title"].lower():
             continue
         seen.add(k_)
         strategic.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
@@ -8955,7 +9074,7 @@ def earnings_review(query):
     topic_news = []
     for it in sorted(topic_news_raw, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
         k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
-        if k_ in seen or STRAT_NOISE.search(it["title"]) or name.split()[0].lower() not in it["title"].lower():
+        if k_ in seen or STRAT_NOISE.search(it["title"]) or name.split()[0].lower() not in it["title"].lower()                 or other_ticker(it["title"], symbol):
             continue
         seen.add(k_)
         topic_news.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
@@ -8965,6 +9084,8 @@ def earnings_review(query):
     safe(lambda: translate_titles(press + strategic + topic_news))  # englische Schlagzeilen zusätzlich auf Deutsch
     rel_topics = safe(lambda: release_topics(sec_["cik"], er["acc"])) if er and sec_ and not ai else None
     topics = safe(lambda: earnings_topics(rel_topics, (sec_ or {}).get("events_8k"), strategic + topic_news + press, name)) or []
+    # je verlinktem Artikel ein Stichpunkt (Vorspann der Redaktion) – nur für die angezeigten
+    safe(lambda: article_summaries(press[:6] + strategic[:6] + [h for tp in topics for h in tp["news"]]))
     if guide:  # Prognose-Sätze, die schon im Ausblick stehen, nicht doppelt
         dup = " ".join([guide.get("excerpt") or ""] + (guide.get("quotes") or []))
         for tp in topics:

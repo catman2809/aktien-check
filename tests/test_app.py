@@ -1986,6 +1986,39 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         raw = "<p>Boeing Defense, Space &#38; Security, F&#47;A-XX&nbsp;fighter &amp; &#8220;more&#8221;</p>"
         self.assertEqual(a._html_text(raw), 'Boeing Defense, Space & Security, F/A-XX fighter & "more"')
 
+    def test_article_summaries(self):
+        import unittest.mock as um
+        page = ('<html><head><meta property="og:description" content="Boeing&#39;s loss narrowed as 737 deliveries rose &amp; '
+                'defense recovered."></head><body>x</body></html>').encode()
+        with um.patch.object(a, "_fetch", return_value=page):
+            self.assertEqual(a.article_desc("https://x.test/a", "Boeing beats"),
+                             "Boeing's loss narrowed as 737 deliveries rose & defense recovered.")
+        bad = b'<head><meta name="description" content="Get the latest news, stock quotes and analysis from us."></head>'
+        with um.patch.object(a, "_fetch", return_value=bad):
+            self.assertIsNone(a.article_desc("https://x.test/b"))                  # Seitenbeschreibung, kein Vorspann
+        store = {}
+        items = [{"title": "Boeing beats", "link": "https://x.test/a"}, {"title": "Paywalled", "link": "https://x.test/p"}]
+        def desc(url, title=""):
+            return "Boeing's loss narrowed as deliveries rose strongly in the quarter." if url.endswith("/a") else None
+        with um.patch.object(a.STORE, "load", return_value=store), um.patch.object(a, "article_desc", side_effect=desc), \
+                um.patch.object(a, "translate_de", return_value="Boeings Verlust sank, da die Auslieferungen stark stiegen."), \
+                um.patch.dict(a.TITLE_DE, clear=True):
+            a.article_summaries(items)
+        self.assertEqual(items[0]["summary_de"], "Boeings Verlust sank, da die Auslieferungen stark stiegen.")
+        self.assertNotIn("summary", items[1])                                      # gesperrt -> nur Schlagzeile
+        self.assertIn("https://x.test/p", store["asum"])                           # gemerkt, nicht erneut abrufen
+        with um.patch.object(a.STORE, "load", return_value=store), um.patch.object(a, "article_desc") as ad:
+            again = [{"title": "Boeing beats", "link": "https://x.test/a"}]
+            a.article_summaries(again)
+            ad.assert_not_called()
+            self.assertTrue(again[0]["summary"].startswith("Boeing's loss"))
+
+    def test_other_ticker_in_title(self):
+        self.assertTrue(a.other_ticker("Apple Hospitality REIT (NYSE:APLE) Releases Earnings", "AAPL"))
+        self.assertFalse(a.other_ticker("Apple (NASDAQ:AAPL) tops estimates", "AAPL"))
+        self.assertFalse(a.other_ticker("Berkshire (NYSE:BRK.B) buys more", "BRK-B"))
+        self.assertFalse(a.other_ticker("Apple tops estimates", "AAPL"))
+
     def test_earnings_topics(self):
         self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)
         self.assertEqual(a.name_in("Sap's eröffnet Filiale", "SAP SE"), -1)
