@@ -8730,6 +8730,147 @@ def release_guidance(cik, acc):
     return out
 
 
+# Themen im Quartalsbericht (Earnings Reviewer): Sätze der Ergebnis-Pressemitteilung, 8-K-Punkte und Schlagzeilen werden
+# Themen zugeordnet – regelbasiert, ohne KI. Je Thema englische und deutsche Suchbegriffe (Schlagzeilen sind gemischt).
+EARN_TOPICS = [
+    ("acq", "Übernahmen", r"\bacqui\w*|\bmerger|\btakeover|\bdivest\w*|\bspin-?off|\btender offer|\bübernahme\w*|\bübernimmt|"
+                          r"\bübernehmen|\bzukauf|\bfusion\b|\babspaltung|\bverkauft .{0,30}(sparte|geschäft|tochter)"),
+    ("restr", "Restrukturierung", r"\brestructur\w*|\breorganiz\w*|\blayoffs?\b|\bworkforce reduction|\bjob cuts|\bheadcount|"
+                                  r"\bcost[- ]savings? (program|initiative|plan)|\bimpairment|\bseverance|\bstellenabbau|"
+                                  r"\bkonzernumbau|\bumbau (des|der) (konzerns|unternehmens|struktur)|"
+                                  r"\brestrukturierung|\bsparprogramm|\bkostensenkung|\babbau von .{0,20}stellen"),
+    ("prod", "Neue Produkte", r"\blaunch(ed|es|ing)?\b|\bintroduc(ed|es|ing)\b|\bunveil\w*|\bnew products?\b|\bdebut\w*|"
+                              r"\bgeneral availability|\brolled out|\bnext-generation|\bneue[nsr]? (produkt|modell|chip|plattform)\w*|"
+                              r"\bstellt .{0,40} vor\b|\bmarkteinführung|\bbringt .{0,40} auf den markt"),
+    ("legal", "Rechtsstreitigkeiten", r"\blitigation|\blawsuits?\b|\blegal (proceedings|matters|charges?)|\bantitrust|\bsettlement\b|"
+                                      r"\bcourt\b|\bverdict|\bjury\b|\bclass action|\bfined?\b|\bpenalt(y|ies)|\binvestigation|"
+                                      r"\bklage|\brechtsstreit|\bgericht|\bkartell\w*|\bvergleich mit|\bstrafe|\bermittlung"),
+    ("macro", "Konjunktur", r"\bmacroeconomic|\beconomic (environment|uncertainty|conditions|slowdown|headwinds?)|\brecession|"
+                            r"\binflation\w*|\bconsumer (demand|spending|sentiment)|\bsoft(er|ness) demand|\bweaker demand|"
+                            r"\bkonjunktur\w*|\bwirtschaftslage|\brezession|\binflation|\bnachfrageschwäche|\bverbraucherstimmung"),
+    ("supply", "Lieferketten", r"\bsupply chain|\bsupply constraints?|\bsupply (shortages?|limitations?)|\bshortages?\b|\bcomponent costs?|"
+                               r"\blogistics|\bcapacity constraints?|\blieferkette\w*|\blieferengp\w*|\bengp(ass|ässe)|\bknappheit"),
+    ("reg", "Regulierung", r"\bregulat\w*|\btariffs?\b|\bexport (controls?|restrictions?|licen[cs]es?)|\bsanctions?\b|\bfda\b|"
+                           r"\b(regulatory )?approval\b|\bgovernment (policy|shutdown)|\bdigital markets act|\bcompliance|"
+                           r"\bregulierung|\bzölle?\b|\bexportkontroll\w*|\bzulassung|\bbehörde|\bsanktion\w*"),
+    ("rates", "Zinsen", r"\binterest rates?\b|\brate (cuts?|hikes?|environment)|\bfederal reserve|\bmonetary policy|\bnet interest (income|margin)|"
+                        r"\bborrowing costs|\bzins\w*|\bnotenbank|\bezb\b|\bleitzins"),
+    ("targets", "Prognosen und Ziele", r"\boutlook\b|\bguidance\b|\btargets?\b|\bgoals?\b|\blong-term (target|goal|plan)|"
+                                       r"\b(we|company) (now )?expects?\b|\bby (fiscal )?20\d\d\b|\bprognose\w*|\bziel\w*|\bmittelfrist\w*"),
+]
+EARN_TOPIC_RE = {k: re.compile(rx, re.I) for k, _, rx in EARN_TOPICS}
+EARN_TOPIC_LABEL = {k: lab for k, lab, _ in EARN_TOPICS}
+# 8-K-Punkte, die direkt einem Thema entsprechen
+SEC_ITEM_TOPIC = {"Kauf oder Verkauf von Unternehmensteilen abgeschlossen": "acq", "Umbau mit Restrukturierungskosten": "restr",
+                  "Wertminderung von Vermögenswerten": "restr", "Wechsel der Kontrolle": "acq"}
+TOPIC_BOILER = re.compile(r"forward[- ]looking|risks? and uncertaint|undue reliance|safe harbor|private securities litigation|"
+                          r"actual results (may|could)|non-gaap|reconciliation|webcast|conference call|investor relations|"
+                          r"www\.|https?://|@|copyright|all rights reserved|trademarks?|management believes|"
+                          r"provides? (investors|useful)|should not be considered", re.I)
+# Schlagzeilen, die nur Kurs-/Prognose-Geplauder sind, und Themen, bei denen die Firma selbst handeln muss (Name vor dem
+# Stichwort – „Value Jet übernimmt dritte Boeing“ ist keine Boeing-Übernahme)
+TOPIC_NEWS_NOISE = re.compile(r"aktie\W+prognose|prognose:|sollten sie|should you|buy or sell|kursziel|price target|"
+                              r"stock forecast|top \d+ |\b(nasdaq|dax|dow jones|s&p 500)\b", re.I)
+TOPIC_ACTOR = {"acq", "restr", "prod", "targets", "rates"}
+
+
+def name_in(title, name):
+    """Kommt die Firma in der Schlagzeile vor? Kurze Großbuchstaben-Namen (SAP, BASF) nur in genau dieser Schreibweise
+    („Sap's eröffnet …“ ist eine Supermarktkette). Gibt die Position zurück, sonst -1."""
+    tok = (name or "").split()[0] if name else ""
+    if not tok:
+        return -1
+    m_ = re.search(r"\b" + re.escape(tok) + r"\b", title) if tok.isupper() and len(tok) <= 5 else \
+        re.search(r"\b" + re.escape(tok.lower()), title.lower())
+    return m_.start() if m_ else -1
+
+
+def release_topics(cik, acc):
+    """Je Thema bis zu zwei Sätze der Ergebnis-Pressemitteilung (die mit den meisten Treffern), englisch und deutsch.
+    Ohne den Rechtshinweis am Ende. Je Meldung einmal ermittelt, übersetzt und gespeichert."""
+    data = STORE.load()
+    with STORE.lock:
+        hit = (data.get("tsum") or {}).get(acc)
+    if hit is not None and (hit.get("de") or not hit.get("topics")):
+        return hit or None
+    if hit is None:
+        text, url = sec_press_release(cik, acc)
+        if not text:
+            return None
+        t = re.sub(r"\s+", " ", text)
+        cut = re.search(r"forward[- ]looking statements", t, re.I)
+        body = t[:cut.start()] if cut and cut.start() > len(t) * 0.25 else t
+        # Satzgrenzen, aber nicht nach Abkürzungen („U.S. Navy“, „Inc.“, „Corp.“)
+        sents = [s_.strip(" \"“”•·") for s_ in
+                 re.split(r"(?<!\bU\.S\.)(?<!\bInc\.)(?<!\bCorp\.)(?<!\bCo\.)(?<!\bLtd\.)(?<!\bNo\.)(?<!\bMr\.)(?<!\bMs\.)"
+                          r"(?<!\bDr\.)(?<!\bSt\.)(?<=[.!?\"”])\s+(?=[A-Z\"“•])", body)]
+        used, topics = set(), {}
+        for key, _lab, _rx in EARN_TOPICS:
+            rx = EARN_TOPIC_RE[key]
+            cand = []
+            for i, s_ in enumerate(sents):
+                if not 50 <= len(s_) <= 360 or TOPIC_BOILER.search(s_) or i in used:
+                    continue
+                n = len(rx.findall(s_))
+                if n:
+                    cand.append((n, -i, i, s_))
+            best = sorted(cand, reverse=True)[:2]
+            for _, _, i, _s in best:
+                used.add(i)
+            if best:
+                topics[key] = [{"en": s_} for _, _, _, s_ in sorted(best, key=lambda x: x[2])]
+        hit = {"topics": topics, "url": url}
+    # Übersetzen (alle Sätze in einem Abruf, sonst einzeln) – klappt es nicht, beim nächsten Aufruf erneut
+    items = [{"title": x["en"]} for v in hit["topics"].values() for x in v if not x.get("de")]
+    if items:
+        translate_titles(items)
+        tr = {it["title"]: it.get("title_de") for it in items}
+        for v in hit["topics"].values():
+            for x in v:
+                x["de"] = x.get("de") or tr.get(x["en"])
+    hit["de"] = all(x.get("de") for v in hit["topics"].values() for x in v)
+    with STORE.lock:
+        ts = data.setdefault("tsum", {})
+        ts[acc] = hit
+        if len(ts) > ESUM_KEEP:
+            for k_ in list(ts)[:len(ts) - ESUM_KEEP]:
+                ts.pop(k_, None)
+        STORE.dirty = True
+    return hit
+
+
+def earnings_topics(rel_topics, events_8k, news, name=""):
+    """Themen zusammenführen: Sätze aus der Pressemitteilung, passende 8-K-Punkte und Schlagzeilen (je Thema höchstens
+    zwei). Reihenfolge wie EARN_TOPICS; nur Themen mit Inhalt."""
+    out = []
+
+    def head_ok(n, key):
+        for t_ in (n["title"], n.get("title_de") or ""):
+            m_ = EARN_TOPIC_RE[key].search(t_)
+            if not m_ or TOPIC_NEWS_NOISE.search(t_):
+                continue
+            pos = name_in(t_, name) if name else 0
+            if pos < 0:
+                continue
+            if key in TOPIC_ACTOR and pos > m_.start():  # Firma muss selbst handeln (steht vor dem Stichwort)
+                continue
+            if key == "targets" and pos > 12:  # Prognose-Schlagzeilen nur, wenn sie mit der Firma beginnen
+                continue
+            return True
+        return False
+    for key, lab, _rx in EARN_TOPICS:
+        quotes = ((rel_topics or {}).get("topics") or {}).get(key) or []
+        filings = [{"date": e["date"], "text": i, "url": e["url"]} for e in events_8k or [] for i in e["items"]
+                   if SEC_ITEM_TOPIC.get(i) == key][:2]
+        heads = [n for n in news or [] if head_ok(n, key)]
+        seen = set()  # gleiche Meldung mehrfach (z. B. mit und ohne „Von Reuters“) nur einmal
+        norm = lambda h: re.sub(r"\W+", "", (h.get("title_de") or h["title"]).lower())[:45]
+        heads = [h for h in heads if not (norm(h) in seen or seen.add(norm(h)))][:2]
+        if quotes or filings or heads:
+            out.append({"key": key, "label": lab, "quotes": quotes, "filings": filings, "news": heads})
+    return out
+
+
 def earnings_review(query):
     """Daten für den Earnings Reviewer: letztes Quartal (Kennzahlen, Ergebnis ggü. Erwartung, Ausblick, Schätzungs-
     änderungen, Pressestimmen, Quellen) plus die letzten Quartale für die Diagramme im One-Pager."""
@@ -8755,10 +8896,17 @@ def earnings_review(query):
             f'"{name}" (acquisition OR buyback OR strategy OR restructuring OR partnership OR CEO OR investment)', "en", days=120), [])
             or []))
         f_cap = ex.submit(lambda: safe(lambda: capital_allocation(t)))
+        # Schlagzeilen zu Recht, Regulierung, Lieferketten, Konjunktur, Zinsen und Produkten (Themen im Quartalsbericht)
+        f_topic = ex.submit(lambda: (safe(lambda: google_news(
+            f'"{name}" (Klage OR Rechtsstreit OR Zölle OR Lieferkette OR Regulierung OR Zinsen OR Konjunktur OR Stellenabbau OR neues Produkt)',
+            "de", days=120), []) or []) + (safe(lambda: google_news(
+            f'"{name}" (lawsuit OR tariffs OR "supply chain" OR regulation OR "interest rates" OR layoffs OR launches)', "en", days=120), [])
+            or []))
         f_div = ex.submit(lambda: safe(lambda: dividend_change(t)))
         qd, eps_h, sec_, revs, events, news = (f_q.result(), f_eps.result(), f_sec.result(), f_rev.result(), f_ev.result(),
                                                f_news.result())
         strat_news, cap, div = f_strat.result(), f_cap.result(), f_div.result()
+        topic_news_raw = f_topic.result()
     m = {"name": name, "currency": info.get("currency"), "fin_currency": financial_currency(symbol, info),
          "eps_quarters": [{"q": e["q"] if len(e["q"]) > 7 else e["q"] + "-28", "est": e["est"], "act": e["act"]} for e in eps_h]}
     qr = safe(lambda: quarter_report(t, m, sec_)) or {}
@@ -8802,7 +8950,24 @@ def earnings_review(query):
                           "date": it["date"].date().isoformat() if it.get("date") else None})
         if len(strategic) >= 6:
             break
-    safe(lambda: translate_titles(press + strategic))  # englische Schlagzeilen zusätzlich auf Deutsch
+    topic_news = []
+    for it in sorted(topic_news_raw, key=lambda x: x.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True):
+        k_ = re.sub(r"\W+", "", it["title"].lower())[:70]
+        if k_ in seen or STRAT_NOISE.search(it["title"]) or name.split()[0].lower() not in it["title"].lower():
+            continue
+        seen.add(k_)
+        topic_news.append({"title": it["title"], "source": it.get("source") or "", "link": it.get("link") or "",
+                           "date": it["date"].date().isoformat() if it.get("date") else None})
+        if len(topic_news) >= 12:
+            break
+    safe(lambda: translate_titles(press + strategic + topic_news))  # englische Schlagzeilen zusätzlich auf Deutsch
+    rel_topics = safe(lambda: release_topics(sec_["cik"], er["acc"])) if er and sec_ and not ai else None
+    topics = safe(lambda: earnings_topics(rel_topics, (sec_ or {}).get("events_8k"), strategic + topic_news + press, name)) or []
+    if guide:  # Prognose-Sätze, die schon im Ausblick stehen, nicht doppelt
+        dup = " ".join([guide.get("excerpt") or ""] + (guide.get("quotes") or []))
+        for tp in topics:
+            tp["quotes"] = [q for q in tp["quotes"] if q["en"][:60] not in dup]
+        topics = [tp for tp in topics if tp["quotes"] or tp["filings"] or tp["news"]]
     # Geschäftsbereiche aus dem letzten Geschäftsbericht (SEC): Berichtssegmente, sonst Produkte/Dienste; Namen auf Deutsch
     segs = None
     G_ = (sec_ or {}).get("segments") or {}
@@ -8826,7 +8991,7 @@ def earnings_review(query):
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
         "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
-        "guidance": guide, "segments": segs,
+        "guidance": guide, "segments": segs, "topics": topics,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)

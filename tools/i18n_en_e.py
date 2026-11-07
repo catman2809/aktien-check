@@ -678,3 +678,16 @@ DEPOT_EXACT.update({"Quartalszahlen im Überblick": "Quarterly results at a glan
 DEPOT_WILD += [("Kurzbericht {*} (A4)", "Brief report {*} (A4)"), ("{*} · Quartalszahlen im Überblick · Quartal bis {0} · veröffentlicht {1}", "{*} · Quarterly results at a glance · quarter ended {0} · published {1}"),
                ("{*} · Quartalszahlen im Überblick · Quartal bis {0}", "{*} · Quarterly results at a glance · quarter ended {0}"),
                ("Erwarteter Gewinn je Aktie: {*}", "Expected EPS: {*}")]
+
+DEPOT_EXACT.update({
+    "Themen im Quartalsbericht": "Topics in the quarterly report", "Pressemitteilung": "Press release", "Pflichtmeldung (8-K)": "SEC filing (8-K)",
+    "Übernahmen": "Acquisitions", "Übernahmen:": "Acquisitions:",
+    "Restrukturierung": "Restructuring", "Restrukturierung:": "Restructuring:",
+    "Neue Produkte": "New products", "Neue Produkte:": "New products:",
+    "Rechtsstreitigkeiten": "Legal disputes", "Rechtsstreitigkeiten:": "Legal disputes:",
+    "Konjunktur": "Economy", "Konjunktur:": "Economy:",
+    "Lieferketten": "Supply chains", "Lieferketten:": "Supply chains:",
+    "Regulierung": "Regulation", "Regulierung:": "Regulation:",
+    "Zinsen": "Interest rates", "Zinsen:": "Interest rates:",
+    "Prognosen und Ziele": "Forecasts and targets", "Prognosen und Ziele:": "Forecasts and targets:",
+})

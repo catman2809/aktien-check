@@ -1982,6 +1982,24 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         with um.patch.object(a, "translate_de", return_value=None):
             self.assertNotIn("de", a.guidance_de("acc2", g))                  # Fehlschlag -> Original, später neu versuchen
 
+    def test_earnings_topics(self):
+        self.assertEqual(a.name_in("SAP stellt neue KI-Plattform vor", "SAP SE"), 0)
+        self.assertEqual(a.name_in("Sap's eröffnet Filiale", "SAP SE"), -1)
+        rel = {"topics": {"legal": [{"en": "We reached a settlement with the DOJ.", "de": "Vergleich mit dem DOJ erzielt."}]}}
+        ev = [{"date": "2026-10-01", "url": "u", "items": ["Kauf oder Verkauf von Unternehmensteilen abgeschlossen"]}]
+        news = [{"title": "Boeing completes acquisition of Spirit AeroSystems", "url": "n1"},
+                {"title": "Airbus wins order as Boeing struggles", "url": "n2"},
+                {"title": "Kredit-Zinsen aktuell: Nach Boeing senkt nächste Bank Zinsen", "url": "n3"},
+                {"title": "Boeing faces supply chain shortages", "url": "n4"},
+                {"title": "Boeing faces supply chain shortages", "url": "n5"}]
+        out = {t["key"]: t for t in a.earnings_topics(rel, ev, news, name="Boeing")}
+        self.assertEqual(out["legal"]["quotes"][0]["de"], "Vergleich mit dem DOJ erzielt.")
+        self.assertEqual(len(out["acq"]["filings"]), 1)
+        self.assertEqual([n["url"] for n in out["acq"]["news"]], ["n1"])
+        self.assertNotIn("rates", out)                                     # Firma ist nicht Akteur
+        self.assertEqual(len(out["supply"]["news"]), 1)                    # doppelte Schlagzeile entfällt
+        self.assertEqual(list(out), [k for k, _, _ in a.EARN_TOPICS if k in out])
+
     def test_translate_press_titles(self):
         import unittest.mock as um
         items = [{"title": "Apple Raises $7.5 Billion From Debt Offering"}, {"title": "SAP-Aktie: Cloud-Wachstum setzt Maßstab"},
