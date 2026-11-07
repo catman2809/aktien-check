@@ -4781,11 +4781,11 @@ function erLink(n) {
   return `<a href="${esc(n.link)}" target="_blank" rel="noopener" translate="no"${de ? ` title="${esc(n.title)}"` : ""}>${esc(de ? n.title_de : n.title)}</a>${de ? ` <small class="er-tr">(übersetzt)</small>` : ""}`;
 }
 // Stichpunkt zum verlinkten Artikel (Vorspann der Redaktion, englische übersetzt); im One-Pager gekürzt
-function erSum(n, max) {
-  const t = (I18N.lang !== "en" && n.summary_de) || n.summary;
-  if (!t) return "";
-  const s = max && t.length > max ? t.slice(0, max - 1).replace(/\s+\S*$/, "") + " …" : t;
-  return `<span class="er-sum" translate="no">${esc(s)}</span>`;
+// Faktenzeile zum verlinkten Artikel: nur Zahlen, Namen und Richtung (eigene Stichworte, kein Text der Redaktion)
+function erSum(n) {
+  const F = n.facts || [];
+  if (!F.length) return "";
+  return `<span class="er-sum er-facts" translate="no">${F.map(([l, v]) => `<b>${esc(l)}</b>${v ? ": " + esc(v) : ""}`).join(" · ")}</span>`;
 }
 // Geschäftsbereiche aus dem letzten Geschäftsbericht (SEC): Umsatzanteil und Wachstum, Namen auf Deutsch
 function erSegments(D) {

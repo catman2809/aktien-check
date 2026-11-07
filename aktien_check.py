@@ -9004,31 +9004,199 @@ def article_desc(url, title=""):
     return None
 
 
-def article_summaries(items, budget=24):
-    """Je Artikel ein Stichpunkt („summary“, englische zusätzlich „summary_de“) – je Link einmal ermittelt und gespeichert.
-    Parallel und mit Zeitlimit; was nicht klappt (Bezahlschranke, gesperrt), bleibt ohne Stichpunkt."""
+# Faktenzeilen zu verlinkten Artikeln (Earnings Reviewer): aus Schlagzeile und Vorspann werden nur Fakten gezogen –
+# Zahlen, Namen, Richtung – und in eigene Stichworte gefasst („Kursziel Melius: 315 USD (gesenkt)“). Formulierungen
+# und Wertungen der Redaktion werden weder angezeigt noch gespeichert (Leistungsschutzrecht der Presseverleger).
+_F_NUM = (r"(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?\s?(?:Billionen|Billion|Milliarden|Mrd\.?|Millionen|Mio\.?)?\s?"
+          r"(?:US-Dollar|Dollar|Euro|Franken|Pfund|Yen|USD|EUR|CHF|\$|€)")
+_F_PCT = r"[+\-]?\d{1,3}(?:[.,]\d{1,2})?\s?(?:%|Prozent)"
+_F_UNIT = [(r"Billionen|Billion", "Bio."), (r"Milliarden|Mrd\.?", "Mrd."), (r"Millionen|Mio\.?", "Mio."),
+           (r"US-Dollar|Dollar|\$|USD", "USD"), (r"Euro|€|EUR", "EUR"), (r"Franken|CHF", "CHF"), (r"Pfund", "GBP"), (r"Yen", "JPY")]
+_F_FIRM = r"((?:[A-Z][\w&.\-]*\s?){1,3})"
+FACT_TARGET = re.compile(_F_FIRM + r"\s?(senkt|hebt|erhöht|reduziert|bestätigt|kappt)\w*\s(?:das\s|sein\s|ihr\s)?Kursziel"
+                         r"(?:\sfür\s\S+)?\s(?:von\s" + _F_NUM + r"\s)?(?:auf|bei)\s(" + _F_NUM + ")")
+FACT_TARGET2 = re.compile(r"Kursziel(?:\svon|\sliegt bei|\sbei|:)?\s(?:∅\s)?(" + _F_NUM + ")")
+FACT_RATING = re.compile(_F_FIRM + r"\s?(?:bestätigt|stuft|bewertet|empfiehlt|belässt|hebt|senkt)\w*\s.{0,40}?[„\"“]?"
+                         r"(Strong Buy|Buy|Hold|Sell|Kaufen|Halten|Verkaufen|Outperform|Underperform|Overweight|Underweight|"
+                         r"Neutral|Equal Weight|Accumulate|Reduce)\b")
+FACT_METRICS = [  # Kennzahl -> Muster (deutsch, nach Übersetzung); „Gewinn“ nur als Hauptwort, „gewinnt“ ist ein Kursplus
+    ("Umsatz", r"(?:Quartals|Jahres|Konzern|Netto)?umsatz\w*|[\w]+-Umsatz\w*|Erlöse?\w*"),
+    ("Gewinn", r"(?:Netto|Quartals|Rein|Konzern|Betriebs)?gewinn(?:e|s|es)?|Überschuss\w*"),
+    ("Verlust", r"(?:Netto|Quartals)?verlust(?:e|s|es)?"),
+    ("Auftragsbestand", r"Auftragsbestand\w*|Auftragseingang\w*|Neuaufträge?\w*"),
+    ("Kosten", r"(?:Mehr|Zusatz)?kosten|Belastung(?:en)?"),
+    ("Cashflow", r"Cashflow\w*|Mittelzufluss\w*"),
+    ("Dividende", r"Dividende\w*"),
+    ("Rückkäufe", r"Aktienrückk\w*|Rückkaufprogramm\w*|zurückgekauft"),
+    ("Investition", r"Investition(?:en)?|investiert"),
+    ("Kaufpreis", r"Kaufpreis|Übernahme\w*"),
+    ("Prognose", r"Prognose\w*|Ausblick\w*"),
+    ("Auslieferungen", r"Auslieferung(?:en)?"),
+    ("Marge", r"Marge|Margen"),
+]
+FACT_BIG = {"Kaufpreis", "Investition", "Rückkäufe", "Auftragsbestand", "Kosten", "Cashflow", "Gewinn", "Verlust", "Umsatz"}
+FACT_RECORD = {"umsatz": "Umsatz", "umsätze": "Umsatz", "gewinn": "Gewinn", "quartal": "Quartal", "hoch": "Allzeithoch",
+               "auftragsbestand": "Auftragsbestand", "ergebnis": "Ergebnis"}
+FACT_METRIC_RE = [(lab, re.compile(r"\b(?:" + rx + r")\b[^.;:!?]{0,40}?(" + _F_NUM + "|" + _F_PCT + ")", re.I),
+                   re.compile(r"(" + _F_NUM + r")[^.;:!?,]{0,30}?\b(?:" + rx + r")\b", re.I)) for lab, rx in FACT_METRICS]
+FACT_UP = re.compile(r"\b(steig\w*|stieg\w*|wächst|wuchs|gewachsen|erhöh\w*|hebt|angehoben|zul(?:egt|egte|egen)|Anstieg|Plus|"
+                     r"klettert\w*|höher\w*|Zuwachs|Wachstum)\b", re.I)
+FACT_DOWN = re.compile(r"\b(sink\w*|sank|gesunken|fällt|fiel|gefallen|senkt|gesenkt|kappt|gekappt|bricht|brach|Rückgang|Minus|"
+                       r"rückläufig|niedriger\w*|schrumpf\w*|verringer\w*)\b", re.I)
+FACT_TAGS = [  # Ereignisse ohne Zahl -> kurzes Stichwort (Bezeichnung, Wert, Muster); Wert None = Name aus dem Treffer
+    ("Erwartungen", "übertroffen", r"übertr(?:i|e)ff\w*\s(?:die\s)?(?:\w+\s){0,2}Erwartung|schlägt\s(?:die\s)?(?:\w+\s)?(?:Gewinn)?[Ee]rwartung|über den Erwartungen"),
+    ("Erwartungen", "verfehlt", r"verfehlt\w*\s(?:die\s)?(?:\w+\s){0,2}Erwartung|unter den Erwartungen"),
+    ("Prognose", "angehoben", r"(?:hebt|erhöht)\w*\s(?:die\s|seine\s|ihre\s)?(?:\w+\s)?(?:Prognose|Ausblick|Jahresziel)|Prognose\w*\s(?:\w+\s)?angehoben"),
+    ("Prognose", "gesenkt", r"(?:senkt|kappt|reduziert)\w*\s(?:die\s|seine\s|ihre\s|das\s)?(?:\w+\s)?(?:Prognose|Ausblick|Lieferziel|Jahresziel)|(?:Prognose|Lieferziel)\w*\s(?:\w+\s)?(?:gesenkt|gekappt)"),
+    ("Prognose", "bestätigt", r"bestätigt\w*\s(?:die\s|seine\s|ihre\s)?(?:\w+\s)?(?:Prognose|Ausblick|Jahresziel)"),
+    ("Quartal", "Verlust", r"Verlustquartal|(?:schreibt|meldet|macht)\w*\s(?:erneut\s|einen\s|wieder\s)*Verlust"),
+    ("Rekord", "", r"\bRekord(?:umsatz|umsätze|gewinn|wert|hoch|quartal|ergebnis|auftragsbestand)\w*|stärkste[sn]?\s\w*[Qq]uartal"),
+    ("Zulassung", "erteilt", r"\b(?:zugelassen|Zulassung erhalten|Zertifizierung erhalten|erhielt\s.{0,40}(?:Zulassung|Zertifizierung))"),
+    ("Verzögerung", "", r"\b(?:verzögert|Verzögerung|verschiebt|verschoben)\w*"),
+    ("Partnerschaft", "", r"\b(?:Partnerschaft|Kooperation)\w*"),
+    ("Übernahme", None, r"(?:übernimmt|Übernahme\s(?:von|des|der)|erwirbt)\s(?:den\s|die\s|das\s|dem\s)?(?:\w+\s)?" + _F_FIRM),
+    ("Stellenabbau", "", r"Stellenabbau|Stellen\sabbauen|streicht\s.{0,20}Stellen|Stellenstreichung\w*|Entlassung\w*"),
+    ("Aktienrückkauf", "", r"Aktienrückkauf\w*|Rückkaufprogramm\w*|Aktien\s.{0,30}zurück(?:gekauft|kaufen)"),
+    ("Neue Produkte", "", r"auf den Markt gebracht|neue[nr]?\s(?:\w+\s)?Produkt\w*|stellt\s.{0,40}\svor\b|vorgestellt"),
+    ("Klage", "", r"\b(?:Klage|verklagt|Wertpapierklage|Sammelklage)\w*"),
+]
+FACT_TAG_RE = [(lab, val, re.compile(rx)) for lab, val, rx in FACT_TAGS]
+_F_STOP = {"Die", "Der", "Das", "Den", "Dem", "Des", "Ein", "Eine", "Einen", "Und", "Mit", "Für", "Im", "In", "Am", "Nach", "Vor",
+           "Analysten", "Experten", "Unternehmen", "Konzern", "Quartal", "Jahr", "Laut", "Bei", "Auf", "Zum", "Zur", "Wie", "Damit",
+           "Auch", "Nun", "Jetzt", "Heute", "Doch", "Aber"}
+
+
+def _f_money(s_):
+    """„455 Millionen US-Dollar“ -> „455 Mio. USD“ (einheitlich und kurz)."""
+    s_ = re.sub(r"\s+", " ", s_.strip())
+    for rx, rpl in _F_UNIT:
+        s_ = re.sub(r"(?<![\w-])(?:" + rx + r")(?!\w)", rpl, s_)
+    s_ = re.sub(r"^(USD|EUR|CHF|GBP|JPY)\s?(.+)$", r"\2 \1", s_)  # „$ 315“ -> „315 USD“
+    return re.sub(r"\s+", " ", s_).strip()
+
+
+_F_GENERIC = re.compile(r"(konzern|unternehmen|unternehmens|hersteller|herstellers|anbieter|anbieters|gruppe|firma|sparte|"
+                        r"start-up|start-ups|spezialist|spezialisten|entwickler|entwicklers)$", re.I)
+
+
+def _f_firm(x):
+    x = re.split(r"\.\s|,|;", x or "")[0]
+    w = [t for t in x.split() if t not in _F_STOP]
+    while len(w) > 1 and _F_GENERIC.search(w[0].split("-")[-1]):  # „Softwareunternehmens Decart AI“ -> „Decart AI“
+        w = w[1:]
+    name_ = " ".join(w).strip(" .,:;")
+    if not name_ or len(name_) < 2 or re.search(r"Aktie|Anteil|Papier|\d", name_) or (len(w) == 1 and _F_GENERIC.search(name_)):
+        return ""
+    return name_
+
+
+def _f_dir(seg):
+    up, dn = FACT_UP.search(seg), FACT_DOWN.search(seg)
+    return "gestiegen" if up and not dn else "gesunken" if dn and not up else ""
+
+
+def _f_pctnum(x):
+    return re.sub(r"\s?(?:Prozent|%)", "", x).lstrip("+-").replace(".", ",")
+
+
+def lede_facts(text_de, title_de="", name="", limit=4):
+    """Fakten aus deutscher Schlagzeile + Vorspann als Liste [Bezeichnung, Wert] – höchstens `limit`, ohne Wortlaut.
+    name: Firmenname – eine Kursbewegung zählt nur, wenn sie diese Firma betrifft (nicht „Chipaktien steigen“)."""
+    t = re.sub(r"\s+", " ", f"{title_de or ''}. {text_de or ''}").replace("−", "-")
+    t = re.sub(r"©\s?Foto:\s?[^.]{0,60}?(?=[A-ZÄÖÜ][a-zäöü]+\s)", " ", t)  # Bildnachweis vor dem Text
+    out, seen = [], set()
+
+    def add(lab, val):
+        key = lab.split()[0]
+        if key in seen:
+            return
+        seen.add(key)
+        out.append([lab, val])
+    # 1. Kursziel und Einstufung von Analysten
+    m_ = FACT_TARGET.search(t)
+    if m_:
+        verb = m_.group(2).lower()
+        dir_ = {"senkt": "gesenkt", "reduziert": "gesenkt", "kappt": "gesenkt", "hebt": "angehoben", "erhöht": "angehoben",
+                "bestätigt": "bestätigt"}.get(verb, "")
+        add(("Kursziel " + _f_firm(m_.group(1))).strip(), _f_money(m_.group(3)) + (f" ({dir_})" if dir_ else ""))
+    else:
+        m_ = FACT_TARGET2.search(t)
+        if m_:
+            add("Kursziel", _f_money(m_.group(1)))
+    m_ = FACT_RATING.search(t)
+    if m_ and _f_firm(m_.group(1)):
+        add("Einstufung " + _f_firm(m_.group(1)), m_.group(2))
+    # 2. Kursreaktion (mit Prozentwert, wenn genannt) – nur für die Firma selbst
+    tok = (name or "").split()[0].lower() if name else ""
+    for rx, word in ((DIGEST_DOWN, "Minus"), (DIGEST_UP, "Plus")):
+        m_ = next((x for x in rx.finditer(t) if not tok or tok in t[max(0, x.start() - 40):x.end()].lower()), None)
+        if m_:
+            near = t[m_.start():m_.end() + 45]
+            pm = re.search(r"(\d{1,2}(?:[.,]\d{1,2})?)\s?(?:%|Prozent)", near)
+            light = re.search(r"\bleicht\w*", t[max(0, m_.start() - 30):m_.end() + 20])
+            add("Kurs", (("-" if word == "Minus" else "+") + pm.group(1).replace(".", ",") + " %") if pm
+                else ("leicht im " if light else "im ") + word)
+            break
+    # 3. Kennzahlen mit Betrag oder Prozent (Richtung aus dem Satzteil)
+    for lab, rx1, rx2 in FACT_METRIC_RE:
+        if len(out) >= limit:
+            break
+        m1, m2 = rx1.search(t), rx2.search(t)
+        # Betrag vor Prozentwert: „455 Mio. USD höhere Kosten … Anstieg um 43 %“ -> 455 Mio. USD (+43 %)
+        m_ = m2 if m2 and (not m1 or re.search(r"%|Prozent", m1.group(1))) else m1
+        if not m_:
+            continue
+        val = m_.group(1)
+        end_ = r"(?<!Mio)(?<!Mrd)(?<!Bio)(?<!\bca)(?<!bzw)(?<=[a-zäöü%)])\.\s"  # Satzende, nicht „Mio. “
+        seg = re.split(end_, t[max(0, m_.start() - 25):m_.start()])[-1] + re.split(end_, t[m_.start():m_.end() + 80])[0]
+        dir_ = _f_dir(seg)
+        sign = "+" if dir_ == "gestiegen" else "-" if dir_ == "gesunken" else ""
+        if re.search(r"%|Prozent", val):  # Prozentwert: Vorzeichen aus der Richtung („stieg um 4 %“ -> +4 %)
+            add(lab, sign + _f_pctnum(val) + " %")
+            continue
+        if lab in FACT_BIG and not re.search(r"Mrd|Mio|Bio|Milliard|Million|Billion", val):
+            continue  # Kaufpreis, Investition … ohne Millionen/Milliarden ist meist ein Aktienkurs, kein Betrag
+        pm = re.search(r"(?:um|Anstieg um|Plus von|Minus von|Rückgang um)\s(" + _F_PCT + ")", seg)
+        extra = f" ({sign}{_f_pctnum(pm.group(1))} %)" if pm else (f" ({dir_})" if dir_ else "")
+        add(lab, _f_money(val) + extra)
+    # 4. Ereignisse ohne Zahl
+    for lab, val, rx in FACT_TAG_RE:
+        if len(out) >= limit:
+            break
+        m_ = rx.search(t)
+        if not m_ or lab.split()[0] in seen:
+            continue
+        if val is None:
+            nm = _f_firm(m_.group(1))
+            if not nm or (tok and nm.lower().startswith(tok)):
+                continue
+            add(lab, nm)
+        elif lab == "Rekord":  # „Rekordumsätzen“ -> Rekord: Umsatz, „stärkstes Septemberquartal“ -> Rekord: Quartal
+            w_ = m_.group(0).lower()
+            add(lab, next((v for k_, v in FACT_RECORD.items() if k_ in w_), ""))
+        else:
+            add(lab, val)
+    return out[:limit]
+
+
+def article_summaries(items, budget=24, name=""):
+    """Je Artikel eine Faktenzeile („facts“: [[Bezeichnung, Wert], …]) und die Tonalität („tone“, −1 … +1).
+    Der Vorspann der Redaktion wird nur kurz zur Auswertung gelesen (englischer vorher übersetzt) – angezeigt und
+    gespeichert werden allein die daraus gezogenen Fakten. Je Link einmal ermittelt; parallel und mit Zeitlimit.
+    Gesperrte Seiten oder Artikel ohne verwertbare Fakten bleiben ohne Stichpunkt (nur Schlagzeile mit Link)."""
     items = [it for it in items if it.get("link")]
     if not items:
         return items
     data = STORE.load()
     with STORE.lock:
-        known = dict(data.get("asum") or {})
+        known = dict(data.get("afct") or {})
+        old = dict(data.get("asum") or {})  # frühere Fassung mit gespeichertem Vorspann -> einmalig in Fakten umwandeln
     todo = list({it["link"]: it for it in items if it["link"] not in known}.values())
-    # früher ohne Übersetzung gespeichert (Dienst nicht erreichbar)? -> jetzt nachholen
-    retry = {it["link"]: known[it["link"]] for it in items if it["link"] in known and (known[it["link"]] or {}).get("en")
-             and not known[it["link"]].get("de") and not GERMAN_HINT.search(known[it["link"]]["en"])}
-    if retry:
-        tr = [{"title": v["en"]} for v in retry.values()]
-        safe(lambda: translate_titles(tr))
-        de_ = {x["title"]: x.get("title_de") for x in tr}
-        fixed = {k_: {**v, "de": de_.get(v["en"])} for k_, v in retry.items() if de_.get(v["en"])}
-        if fixed:
-            known.update(fixed)
-            with STORE.lock:
-                data.setdefault("asum", {}).update(fixed)
-                STORE.dirty = True
+    texts = {it["link"]: {"en": old[it["link"]].get("en"), "de": old[it["link"]].get("de")}
+             for it in todo if it["link"] in old}
+    fetch = [it for it in todo if it["link"] not in texts]
 
-    def one(it):  # Netzfehler -> Ausnahme (später erneut); gesperrte Seite oder kein Vorspann -> None (gespeichert)
+    def one(it):  # Netzfehler -> Ausnahme (später erneut); gesperrte Seite oder kein Vorspann -> None
         url = gnews_resolve(it["link"])
         try:
             return article_desc(url, it.get("title") or "") if url else None
@@ -9036,39 +9204,51 @@ def article_summaries(items, budget=24):
             if 400 <= e.code < 500:
                 return None
             raise
-    found = {}
-    if todo:
+    if fetch:
         ex = ThreadPoolExecutor(max_workers=12)
-        futs = {ex.submit(one, it): it for it in todo}
+        futs = {ex.submit(one, it): it for it in fetch}
         t0 = time.time()
         for f, it in futs.items():
             try:
-                found[it["link"]] = {"en": f.result(timeout=max(0.1, budget - (time.time() - t0)))}
+                texts[it["link"]] = {"en": f.result(timeout=max(0.1, budget - (time.time() - t0)))}
             except Exception:
                 pass  # Zeitlimit: beim nächsten Aufruf erneut
         ex.shutdown(wait=False, cancel_futures=True)
-        LOG.info("[Artikel] Stichpunkte: %d von %d neuen Artikeln mit Vorspann, %d ohne Antwort",
-                 sum(1 for v in found.values() if v["en"]), len(todo), len(todo) - len(found))
-        tr = [{"title": v["en"]} for v in found.values() if v["en"]]
+    if texts:
+        # nur zur Auswertung ins Deutsche übersetzen (die Faktenregeln sind deutsch); der Text selbst wird verworfen
+        tr = [{"title": v["en"]} for v in texts.values() if v.get("en") and not v.get("de") and not GERMAN_HINT.search(v["en"])]
         safe(lambda: translate_titles(tr))
-        de = {x["title"]: x.get("title_de") for x in tr}
-        for v in found.values():
-            if v["en"] and not GERMAN_HINT.search(v["en"]):
-                v["de"] = de.get(v["en"])
+        de_ = {x["title"]: x.get("title_de") for x in tr}
+        by_link = {it["link"]: it for it in items}
+        rec = {}
+        for link, v in texts.items():
+            en = v.get("en")
+            if not en:
+                rec[link] = {"facts": [], "tone": 0}
+                continue
+            de = v.get("de") or (en if GERMAN_HINT.search(en) else de_.get(en))
+            if not de:
+                continue  # Übersetzung gerade nicht möglich -> beim nächsten Aufruf erneut
+            it = by_link.get(link) or {}
+            rec[link] = {"facts": lede_facts(de, it.get("title_de") or it.get("title") or "", name),
+                         "tone": round(headline_sentiment(en), 2)}
+        LOG.info("[Artikel] Faktenzeilen: %d neue Artikel, %d mit Fakten, %d ohne Antwort",
+                 len(rec), sum(1 for r_ in rec.values() if r_["facts"]), len(todo) - len(texts))
         with STORE.lock:
-            a_ = data.setdefault("asum", {})
-            a_.update(found)
+            a_ = data.setdefault("afct", {})
+            a_.update(rec)
             if len(a_) > ART_SUM_KEEP:
                 for k_ in list(a_)[:len(a_) - ART_SUM_KEEP]:
                     a_.pop(k_, None)
+            data.pop("asum", None)  # gespeicherte Vorspänne der Redaktionen löschen
             STORE.dirty = True
-        known.update(found)
+        known.update(rec)
     for it in items:
-        s_ = known.get(it["link"]) or {}
-        if s_.get("en"):
-            it["summary"] = s_["en"]
-            if s_.get("de"):
-                it["summary_de"] = s_["de"]
+        r_ = known.get(it["link"]) or {}
+        if r_.get("facts"):
+            it["facts"] = r_["facts"]
+        if r_.get("tone"):
+            it["tone"] = r_["tone"]
     return items
 
 
@@ -9151,16 +9331,20 @@ def join_de(xs):
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " und " + xs[-1] if xs else ""
 
 
+def _facts_text(it):
+    """Faktenzeile als Text für das Fazit der Presse („Auftragsbestand 745 Mrd. USD · Kurs -5 %“)."""
+    return " · ".join(f"{l_} {v_}" if v_ else l_ for l_, v_ in it.get("facts") or [])
+
+
 def _digest_texts(it):
-    """Alle Fassungen eines Artikels: Titel und Vorspann, englisch und deutsch."""
-    return [x for x in (it.get("title"), it.get("title_de"), it.get("summary"), it.get("summary_de")) if x]
+    """Was von einem Artikel ausgewertet wird: Schlagzeile (englisch und deutsch) und die Faktenzeile."""
+    return [x for x in (it.get("title"), it.get("title_de"), _facts_text(it)) if x]
 
 
 def _digest_de(it):
     """Deutsche Fassung (für Zahlen in deutschen Satzbausteinen)."""
     t = it.get("title_de") or (it["title"] if GERMAN_HINT.search(it.get("title") or "") else "")
-    s_ = it.get("summary_de") or (it.get("summary") if GERMAN_HINT.search(it.get("summary") or "") else "")
-    return [x for x in (t, s_) if x]
+    return [x for x in (t, _facts_text(it)) if x]
 
 
 def press_digest(press, topics=(), strategic=()):
@@ -9172,7 +9356,7 @@ def press_digest(press, topics=(), strategic=()):
     # 1. Ton: Schlagzeile zählt voll, Vorspann halb
     tones = []
     for p in press:
-        v = headline_sentiment(p["title"]) + 0.5 * headline_sentiment(p.get("summary") or "")
+        v = headline_sentiment(p["title"]) + 0.5 * (p.get("tone") or 0)  # Tonalität des Vorspanns (beim Auswerten ermittelt)
         tones.append(1 if v >= 0.25 else -1 if v <= -0.25 else 0)
     neg, pos, n = tones.count(-1), tones.count(1), len(tones)
     srcs = list(dict.fromkeys(p["source"] for p in press if p.get("source")))
@@ -9221,8 +9405,14 @@ def press_digest(press, topics=(), strategic=()):
                         v = float(pm.group(1).replace(",", "."))
                         if 0.3 <= v <= 40:
                             lst.append(v)
+        kurs = next((v_ for l_, v_ in p.get("facts") or [] if l_ == "Kurs"), "")  # aus der Faktenzeile: „-5 %“, „im Plus“
+        if kurs:
+            km = re.search(r"(\d{1,2}(?:,\d{1,2})?) %", kurs)
+            if km and 0.3 <= float(km.group(1).replace(",", ".")) <= 40:
+                (pct_dn if kurs.startswith("-") else pct_up).append(float(km.group(1).replace(",", ".")))
         blob = " ".join(_digest_texts(p))
-        d_, u_ = bool(DIGEST_DOWN.search(blob)), bool(DIGEST_UP.search(blob))
+        d_ = bool(DIGEST_DOWN.search(blob)) or kurs.startswith("-") or "Minus" in kurs
+        u_ = bool(DIGEST_UP.search(blob)) or kurs.startswith("+") or "Plus" in kurs
         down += d_ and not u_
         up += u_ and not d_
     if down and down > up:
@@ -9372,7 +9562,7 @@ def earnings_review(query):
             tp["quotes"] = [q for q in tp["quotes"] if q["en"][:60] not in dtxt]
         topics = [tp for tp in topics if tp["quotes"] or tp["filings"] or tp["news"]]
     # je verlinktem Artikel ein Stichpunkt (Vorspann der Redaktion) – nur für die angezeigten
-    safe(lambda: article_summaries(press[:6] + strategic[:6] + [h for tp in topics for h in tp["news"]]))
+    safe(lambda: article_summaries(press[:6] + strategic[:6] + [h for tp in topics for h in tp["news"]], name=name))
     if guide:  # Prognose-Sätze, die schon im Ausblick stehen, nicht doppelt
         dup = " ".join([guide.get("excerpt") or ""] + (guide.get("quotes") or []))
         for tp in topics:

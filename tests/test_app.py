@@ -1996,22 +1996,41 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         bad = b'<head><meta name="description" content="Get the latest news, stock quotes and analysis from us."></head>'
         with um.patch.object(a, "_fetch", return_value=bad):
             self.assertIsNone(a.article_desc("https://x.test/b"))                  # Seitenbeschreibung, kein Vorspann
-        store = {}
-        items = [{"title": "Boeing beats", "link": "https://x.test/a"}, {"title": "Paywalled", "link": "https://x.test/p"}]
+        store = {"asum": {"https://x.test/old": {"en": "Melius cuts its price target to $315.",
+                                                  "de": "Melius senkt das Kursziel auf 315 Dollar."}}}
+        items = [{"title": "Boeing beats", "link": "https://x.test/a"}, {"title": "Paywalled", "link": "https://x.test/p"},
+                 {"title": "Nvidia target cut", "link": "https://x.test/old"}]
         def desc(url, title=""):
-            return "Boeing's loss narrowed as deliveries rose strongly in the quarter." if url.endswith("/a") else None
+            return "Boeing expects costs of $455 million for Spirit contracts, up 43 percent." if url.endswith("/a") else None
+        de_txt = "Boeing rechnet mit 455 Millionen US-Dollar höheren Kosten für Spirit-Verträge – ein Anstieg um 43 Prozent."
         with um.patch.object(a.STORE, "load", return_value=store), um.patch.object(a, "article_desc", side_effect=desc), \
-                um.patch.object(a, "translate_de", return_value="Boeings Verlust sank, da die Auslieferungen stark stiegen."), \
-                um.patch.dict(a.TITLE_DE, clear=True):
-            a.article_summaries(items)
-        self.assertEqual(items[0]["summary_de"], "Boeings Verlust sank, da die Auslieferungen stark stiegen.")
-        self.assertNotIn("summary", items[1])                                      # gesperrt -> nur Schlagzeile
-        self.assertIn("https://x.test/p", store["asum"])                           # gemerkt, nicht erneut abrufen
+                um.patch.object(a, "translate_de", return_value=de_txt), um.patch.dict(a.TITLE_DE, clear=True):
+            a.article_summaries(items, name="Boeing")
+        self.assertEqual(items[0]["facts"], [["Kosten", "455 Mio. USD (+43 %)"]])       # eigene Faktenzeile
+        self.assertFalse(any(k_.startswith("summary") for it in items for k_ in it))     # kein Text der Redaktion
+        self.assertNotIn("facts", items[1])                                              # gesperrt -> nur Schlagzeile
+        self.assertEqual(items[2]["facts"], [["Kursziel Melius", "315 USD (gesenkt)"]])   # alte Fassung umgewandelt
+        self.assertNotIn("asum", store)                                                  # gespeicherte Vorspänne gelöscht
+        self.assertNotIn("Boeing expects", str(store))                                   # nur Fakten gespeichert
+        self.assertIn("https://x.test/p", store["afct"])                                 # gemerkt, nicht erneut abrufen
         with um.patch.object(a.STORE, "load", return_value=store), um.patch.object(a, "article_desc") as ad:
             again = [{"title": "Boeing beats", "link": "https://x.test/a"}]
             a.article_summaries(again)
             ad.assert_not_called()
-            self.assertTrue(again[0]["summary"].startswith("Boeing's loss"))
+            self.assertEqual(again[0]["facts"][0][0], "Kosten")
+
+    def test_lede_facts(self):
+        f = a.lede_facts("Der iPhone-Umsatz von Apple stieg im Septemberquartal um 17 % auf 57,6 Milliarden US-Dollar.", "", "Apple")
+        self.assertEqual(f[0], ["Umsatz", "+17 %"])
+        f = a.lede_facts("Die Nvidia-Aktie fiel am 5. November um etwa 5 % auf 189,75 US-Dollar.", "", "Nvidia")
+        self.assertEqual(f[0], ["Kurs", "-5 %"])
+        self.assertEqual(a.lede_facts("Chipaktien steigen nach Anthropic-IPO-Antrag, Boeing im Fokus.", "", "Boeing"), [])
+        f = a.lede_facts("Deutsche Bank Research bestätigt „Hold“ bei 270 Euro.", "", "Siemens")
+        self.assertIn(["Einstufung Deutsche Bank Research", "Hold"], f)
+        f = a.lede_facts("Amazon verhandelt über die Übernahme des KI-Softwareunternehmens Decart AI für rund 7 Milliarden Dollar.",
+                         "", "Amazon")
+        self.assertIn(["Übernahme", "Decart AI"], f)
+        self.assertEqual(a.lede_facts("Die Allianz-Aktie steht vor den Quartalszahlen im Fokus.", "", "Allianz"), [])
 
     def test_other_ticker_in_title(self):
         self.assertTrue(a.other_ticker("Apple Hospitality REIT (NYSE:APLE) Releases Earnings", "AAPL"))
@@ -2023,19 +2042,19 @@ class TestIncomeEstimatesSources(unittest.TestCase):
         self.assertEqual(a.join_de(["A", "B", "C"]), "A, B und C")
         self.assertEqual(a.press_digest([{"title": "Boeing beats"}]), [])               # zu wenig Artikel
         press = [{"title": "Boeing Aktie stürzt nach Quartalszahlen ab: Lieferziel gekappt", "source": "XTB",
-                  "summary": "Boeing Aktie bricht um 10 % ein: Produktion langsamer."},
+                  "facts": [["Kurs", "-10 %"], ["Auslieferungen", "Produktion langsamer"]], "tone": -0.6},
                  {"title": "Boeing-Aktie unter Druck: Quartalszahlen belasten den Kurs", "source": "LYNX"},
                  {"title": "Boeing shares sell off on slower-than-expected 737 production", "source": "Reuters",
                   "title_de": "Boeing-Aktien fallen wegen langsamerer 737-Produktion"},
                  {"title": "Boeing reports third quarter results", "source": "Boeing",
-                  "summary_de": "Der Auftragsbestand stieg auf 745 Milliarden US-Dollar."}]
+                  "facts": [["Auftragsbestand", "745 Mrd. USD (gestiegen)"]]}]
         topics = [{"key": "supply", "label": "Lieferketten", "news": [{"title": "x"}]}, {"key": "legal", "label": "Recht", "news": []}]
         d = a.press_digest(press, topics)
         self.assertIn("kritisch", d[0])
         self.assertIn("2 von 4 Artikeln", d[0])
         self.assertTrue(any(x.startswith("Im Mittelpunkt stehen Produktion und Auslieferungen") for x in d))
         self.assertTrue(any("Kursverlusten" in x and "10 % Minus" in x for x in d))
-        self.assertTrue(any("Auftragsbestand 745 Milliarden US-Dollar (Boeing)" in x for x in d))
+        self.assertTrue(any("Auftragsbestand 745 Mrd. USD (Boeing)" in x for x in d))
         self.assertEqual(d[-1], "Darüber hinaus berichten die Medien über die Lieferketten.")  # nur Themen mit Schlagzeilen
 
     def test_decision_sentences(self):
