@@ -672,3 +672,5 @@ DEPOT_EXACT.update({"(übersetzt)": "(translated)"})
 DEPOT_WILD += [("(Umsatzanteil, Geschäftsjahr bis {0})", "(share of revenue, fiscal year ended {0})"), ("{0} ggü. Vorjahr", "{0} vs. prior year")]
 DEPOT_EXACT.update({"Umsatz nach Regionen": "Revenue by region"})
 DEPOT_WILD += [("±{0} ggü. Vorjahr", "±{0} vs. prior year")]
+DEPOT_EXACT.update({"Freier Cashflow": "Free cash flow", "Erwarteter Gewinn je Aktie (Konsens)": "Expected EPS (consensus)"})
+DEPOT_WILD += [("{0} Prozentpunkte", "{0} pp")]

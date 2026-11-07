@@ -8473,7 +8473,7 @@ def capital_allocation(t):
                 return num(cf.loc[nm].get(col))
         return None
     rows = []
-    for key, lab, names in (("fcf", "Free Cashflow", ("Free Cash Flow",)),
+    for key, lab, names in (("fcf", "Freier Cashflow", ("Free Cash Flow",)),
                             ("buyback", "Aktienrückkäufe", ("Repurchase Of Capital Stock", "Common Stock Payments")),
                             ("dividends", "Dividenden gezahlt", ("Cash Dividends Paid", "Common Stock Dividend Paid")),
                             ("capex", "Investitionen (Sachanlagen)", ("Capital Expenditure",)),

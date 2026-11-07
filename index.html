@@ -4645,10 +4645,10 @@ function erOnePager() {
   const c = Q.currency || D.fin_currency || "";
   const pct_ = (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + nf(v * 100, d) + " %";
   const kpi = [["Umsatz", Q.revenue != null ? pcMoney(Q.revenue, c) : "–", pct_(Q.revenue_g)],
-    ["Operative Marge", Q.op_margin != null ? nf(Q.op_margin * 100, 1) + " %" : "–", Q.op_margin_chg != null ? (Q.op_margin_chg > 0 ? "+" : "") + nf(Q.op_margin_chg * 100, 1) + " Pp." : "–"],
+    ["Operative Marge", Q.op_margin != null ? nf(Q.op_margin * 100, 1) + " %" : "–", Q.op_margin_chg != null ? (Q.op_margin_chg > 0 ? "+" : "") + nf(Q.op_margin_chg * 100, 1) + " Prozentpunkte" : "–"],
     ["Reinertrag", Q.net_income != null ? pcMoney(Q.net_income, c) : "–", pct_(Q.net_income_g)],
     ["Gewinn je Aktie", (Q.eps_act ?? Q.eps) != null ? nf(Q.eps_act ?? Q.eps) : "–", pct_(Q.eps_g)],
-    ["Konsens Gewinn je Aktie", Q.eps_est != null ? nf(Q.eps_est) : "–", Q.eps_surprise != null ? pct_(Q.eps_surprise) + " Überraschung" : ""]];
+    ["Erwarteter Gewinn je Aktie (Konsens)", Q.eps_est != null ? nf(Q.eps_est) : "–", Q.eps_surprise != null ? pct_(Q.eps_surprise) + " Überraschung" : ""]];
   const lst = (t, arr) => arr?.length ? `<h4>${t}</h4><ul>${arr.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
   const R = D.revisions || [];
   const src = [];
