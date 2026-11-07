@@ -4541,6 +4541,16 @@ function erLink(n) {
   const de = n.title_de && I18N.lang !== "en";
   return `<a href="${esc(n.link)}" target="_blank" rel="noopener" translate="no"${de ? ` title="${esc(n.title)}"` : ""}>${esc(de ? n.title_de : n.title)}</a>${de ? ` <small class="er-tr">(übersetzt)</small>` : ""}`;
 }
+// Geschäftsbereiche aus dem letzten Geschäftsbericht (SEC): Umsatzanteil und Wachstum, Namen auf Deutsch
+function erSegments(D) {
+  const S = D.segments;
+  if (!S?.items?.length) return "";
+  const de = I18N.lang !== "en";
+  const g = v => v == null ? "" : (Math.round(v * 100) === 0 ? "±0" : (v > 0 ? "+" : "") + nf(v * 100, 0)) + " % ggü. Vorjahr";
+  return `<h4>${S.kind === "seg" || S.kind === "prod" ? "Geschäftsbereiche" : "Umsatz nach Regionen"} <small>(Umsatzanteil, Geschäftsjahr bis ${erDate(S.end)})</small></h4>
+    <table class="op-tbl"><tbody>${S.items.map(i => `<tr><td translate="no"${de && i.name_de ? ` title="${esc(i.name)}"` : ""}>${esc(de && i.name_de ? i.name_de : i.name)}</td>
+      <td>${nf(i.share * 100, 0)} %</td><td>${g(i.growth)}</td></tr>`).join("")}</tbody></table>`;
+}
 function erOutlook(D) {
   return D.ai?.outlook || D.quarter?.ai?.outlook || "";
 }
@@ -4667,7 +4677,7 @@ function erOnePager() {
         <h4>Die wichtigsten Punkte</h4><ul>${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("")}</ul>
         ${erGuideQuotes(D, true) ? `<h4>Ausblick des Managements</h4>${erGuideQuotes(D, true)}` : ""}
         ${erOutlook(D) || A?.outlook_points?.length ? `<h4>Ausblick</h4>${erOutlook(D) ? `<p>${esc(erOutlook(D))}</p>` : ""}${A?.outlook_points?.length ? `<ul>${A.outlook_points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}` : ""}
-        ${lst("Geschäftsbereiche", A?.segments)}${lst("Positiv", A?.pos)}${lst("Negativ", A?.neg)}
+        ${A?.segments?.length ? lst("Geschäftsbereiche", A.segments) : erSegments(D)}${lst("Positiv", A?.pos)}${lst("Negativ", A?.neg)}
         ${A?.verdict ? `<h4>Fazit</h4><p>${esc(A.verdict)}</p>` : ""}
       </div><div>
         <h4>Kennzahlen ggü. Vorjahresquartal</h4>

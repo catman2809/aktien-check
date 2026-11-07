@@ -669,3 +669,6 @@ DEPOT_EXACT.update({"Ausblick des Managements": "Management outlook",
 DEPOT_EXACT.update({"Aus der Ergebnis-Pressemitteilung, maschinell übersetzt": "From the earnings press release, machine-translated",
                     "Original öffnen": "Open original"})
 DEPOT_EXACT.update({"(übersetzt)": "(translated)"})
+DEPOT_WILD += [("(Umsatzanteil, Geschäftsjahr bis {0})", "(share of revenue, fiscal year ended {0})"), ("{0} ggü. Vorjahr", "{0} vs. prior year")]
+DEPOT_EXACT.update({"Umsatz nach Regionen": "Revenue by region"})
+DEPOT_WILD += [("±{0} ggü. Vorjahr", "±{0} vs. prior year")]

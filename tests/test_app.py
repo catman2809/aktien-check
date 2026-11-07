@@ -1999,6 +1999,11 @@ class TestIncomeEstimatesSources(unittest.TestCase):
             x = a.translate_titles([{"title": "One headline here"}, {"title": "Another headline there"}])
             self.assertFalse(any("title_de" in i for i in x))                  # Zeilen passen nicht -> Original
 
+    def test_segment_names_german(self):
+        self.assertEqual(a.SEG_NAME_DE["Graphics"], "Grafik")
+        self.assertEqual(a.SEG_NAME_DE["Asset & Wealth Management"], "Vermögensverwaltung")
+        self.assertTrue(a.GERMAN_HINT.search("Rest von EMEA ist Teil der Region") is not None)
+
     def test_company_name_legal_forms(self):
         self.assertEqual(a.clean_company_name("Assicurazioni Generali S.p.A."), "Assicurazioni Generali")
         self.assertEqual(a.clean_company_name("LVMH Moët Hennessy - Louis Vuitton, Société Européenne"),

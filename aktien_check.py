@@ -8612,6 +8612,16 @@ def translate_de(text):
 
 
 TITLE_DE = {}  # englische Schlagzeile -> deutsche Übersetzung (Zwischenspeicher)
+# übliche Segmentnamen, die die Maschinenübersetzung schief trifft („Graphics“ -> „Grafiken“, „Asset & Wealth
+# Management“ -> „Vermögens- und Vermögensverwaltung“); Produktnamen wie iPhone bleiben ohnehin unverändert
+SEG_NAME_DE = {"Services": "Dienste", "Graphics": "Grafik", "Compute & Networking": "Rechenzentren & Netzwerk",
+          "More Personal Computing": "Personal Computing", "Intelligent Cloud": "Intelligent Cloud (Cloud-Dienste)",
+          "Productivity and Business Processes": "Produktivität & Geschäftsprozesse",
+          "Wearables, Home and Accessories": "Wearables, Zuhause & Zubehör", "Asset & Wealth Management": "Vermögensverwaltung",
+          "Consumer & Community Banking": "Privat- & Geschäftskundenbank", "Commercial & Investment Bank": "Firmenkunden- & Investmentbank",
+          "Global Services": "Service & Wartung", "Bottling Investments": "Abfüllbeteiligungen", "Corporate": "Konzern/Sonstiges",
+          "All Other": "Sonstiges", "Other": "Sonstiges", "Advertising": "Werbung", "Cloud": "Cloud", "Data Center": "Rechenzentren",
+          "Gaming": "Gaming", "Automotive": "Automobil", "Professional Visualization": "Profi-Visualisierung"}
 GERMAN_HINT = re.compile(r"[äöüß]|\b(der|die|das|und|mit|für|nach|vor|aus|bei|zum|zur|nicht|auf|Aktie|Quartal|Zahlen|Gewinn|Umsatz)\b", re.I)
 
 
@@ -8786,6 +8796,18 @@ def earnings_review(query):
         if len(strategic) >= 6:
             break
     safe(lambda: translate_titles(press + strategic))  # englische Schlagzeilen zusätzlich auf Deutsch
+    # Geschäftsbereiche aus dem letzten Geschäftsbericht (SEC): Berichtssegmente, sonst Produkte/Dienste; Namen auf Deutsch
+    segs = None
+    G_ = (sec_ or {}).get("segments") or {}
+    bds = [b for b in G_.get("breakdowns") or [] if len(b.get("items") or []) > 1]
+    bd = next((b for k_ in ("seg", "prod") for b in bds if b.get("kind") == k_), None) or (bds[0] if bds else None)
+    if bd:
+        def known(n_):  # eigene Begriffe, dann die Regionsnamen der Segmentauswertung (Americas -> Amerika)
+            return SEG_NAME_DE.get(n_) or (SEG_DE.get(n_.lower().rstrip(".")) if n_.lower().rstrip(".") in SEG_DE else None)
+        names = [{"title": i["name"], **({"title_de": known(i["name"])} if known(i["name"]) else {})} for i in bd["items"][:6]]
+        safe(lambda: translate_titles([n for n in names if "title_de" not in n]))
+        segs = {"title": bd.get("title"), "kind": bd.get("kind"), "end": bd.get("end") or G_.get("end"), "currency": G_.get("currency"), "url": G_.get("url"),
+                "items": [{**i, "name_de": n.get("title_de")} for i, n in zip(bd["items"][:6], names)]}
     filings = [f for f in ((sec_ or {}).get("filings") or []) if f["form"] in ("10-Q", "10-K", "8-K", "6-K", "20-F")][:4]
     P = ((qd or {}).get("periods") or [])[-6:]
     out = {
@@ -8797,7 +8819,7 @@ def earnings_review(query):
         "q_estimates": [{k_: e.get(k_) for k_ in ("label", "end", "revenue", "net_income")} for e in ((qd or {}).get("estimates") or [])[:2]],
         "next": nxt, "press": press, "filings": filings, "sec_url": (sec_ or {}).get("url"),
         "strategic_news": strategic, "events_8k": (sec_ or {}).get("events_8k") or [], "capital": cap, "dividend": div,
-        "guidance": guide,
+        "guidance": guide, "segments": segs,
         "generated": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
     EARN_CACHE[symbol] = (time.time(), out)
