@@ -126,6 +126,7 @@ p.section-sub{margin:0 0 16px;color:var(--text-2);font-size:14px}
 .dp-logo{width:24px;height:24px;border-radius:6px;padding:2px;vertical-align:middle;margin-right:8px}
 .load-logo{display:block;width:60px;height:60px;border-radius:16px;padding:8px;margin:4px auto 12px;opacity:0;transition:opacity .3s}
 .load-logo.on{opacity:1}
+.co-logo.logo-white,.dp-logo.logo-white,.load-logo.logo-white,.op-logo.logo-white{background:#1f3a5f}
 @media (max-width:600px){.co-logo{width:46px;height:46px;border-radius:12px;padding:6px}}
 .co-name{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:6px 0 4px;line-height:1.2}
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
@@ -752,6 +753,23 @@ table.trk.pc-sum td,table.trk.pc-sum th{padding:7px 8px}
 .er-badge.neu{color:var(--neu);background:var(--neu-soft);border-color:var(--neu-line)}
 .er-headline{font-family:var(--serif);font-size:19px;font-weight:600;margin:12px 0 0}
 .er-list{margin:0;padding-left:20px} .er-list li{margin:4px 0}
+.er-sec{border-top:1px solid var(--border);margin-top:10px}
+.er-sec summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 0}
+.er-sec summary::-webkit-details-marker{display:none}
+.er-sec summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--text-3);border-bottom:2px solid var(--text-3);transform:rotate(45deg);margin:0 6px 4px 0;transition:transform .15s;flex:none}
+.er-sec[open] summary::after{transform:rotate(-135deg);margin-bottom:-4px}
+.er-sec summary h3{margin:12px 0}
+.er-sec summary h3 small{font-weight:500;color:var(--text-3);font-size:.85em}
+.er-sec>:last-child{margin-bottom:8px}
+@media (max-width:640px){
+  .er-list{padding-left:16px} .er-list li{margin:6px 0;line-height:1.45}
+  .er-card{padding:16px 14px}
+  .er-card a{font-weight:500;text-decoration-color:color-mix(in srgb,currentColor 35%,transparent);text-underline-offset:3px}
+  .er-card h3{font-size:16px}
+  #er-res .pc-actions{position:sticky;bottom:10px;z-index:5;margin-top:14px}
+  #er-op{width:100%;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+  .er-topic .er-list{padding-left:16px}
+}
 .er-out{margin:12px 0 4px}
 .er-quote blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid var(--accent);background:var(--surface-2);border-radius:0 8px 8px 0;font-size:14px;font-style:italic}
 .er-qsrc{margin:2px 0 0}
@@ -768,6 +786,30 @@ table.trk.pc-sum td,table.trk.pc-sum th{padding:7px 8px}
 /* One-Pager: weißes A4-Blatt, unabhängig von Hell/Dunkel, druckfähig */
 #op-wrap{position:fixed;inset:0;z-index:90;background:rgba(10,8,6,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;flex-direction:column}
 body.op-open{overflow:hidden}
+.op-mode{display:none} .op-short{display:none}
+@media screen and (max-width:640px){
+  .op-bar{padding:8px 12px;gap:8px}
+  .op-bar>b{font-size:14px;flex-basis:100%}
+  .op-mode{display:inline-flex}
+  .op-btns{display:flex;gap:6px;margin-left:auto}
+  .op-btns .btn{padding:8px 11px;font-size:13px}
+  .op-long{display:none} .op-short{display:inline}
+  .op-mode button{padding:6px 10px}
+  #op-wrap.op-read .op-tbl td:not(:first-child){white-space:nowrap}
+  .op-scroll{padding:10px 8px 40px}
+  #op-wrap.op-read .op-sheet{width:auto;min-height:0;padding:16px 14px;font-size:14.5px !important;line-height:1.5;transform:none !important;margin:0 !important}
+  #op-wrap.op-read .op-cols{grid-template-columns:1fr;gap:4px}
+  #op-wrap.op-read .op-head{flex-wrap:wrap}
+  #op-wrap.op-read .op-meta{text-align:left}
+  #op-wrap.op-read .op-sub,#op-wrap.op-read .op-meta,#op-wrap.op-read .op-verdict{font-size:12px}
+  #op-wrap.op-read .op-name{font-size:1.5em}
+  #op-wrap.op-read .op-title{font-size:1.25em}
+  #op-wrap.op-read .op-sheet h4{margin-top:14px}
+  #op-wrap.op-read .op-tbl{font-size:.9em}
+  #op-wrap.op-read .op-tbl td{padding:4px 4px}
+  #op-wrap.op-read .op-chart{max-width:420px}
+  #op-wrap.op-read .op-foot{font-size:11px}
+}
 .op-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;background:var(--glass-strong);color:var(--text)}
 .op-scroll{flex:1;overflow:auto;padding:16px 12px 40px}
 .op-sheet{width:210mm;min-height:297mm;margin:0 auto;background:#fff;color:#1b1b1b;padding:12mm 13mm;box-shadow:0 10px 40px rgba(0,0,0,.4);
@@ -4442,6 +4484,20 @@ function pcTable() {
 }
 // Handy: statt der breiten Tabelle ein Jahr nach dem anderen (Reiter), Werte untereinander, dazu alle Kursziele kompakt
 const PC_MQ = matchMedia("(max-width:640px)");
+// weiße Logos (z. B. Boeing: weiß auf transparent) wären auf der weißen Kachel unsichtbar -> dunkle Kachel
+document.addEventListener("load", e => {
+  const i = e.target;
+  if (i.tagName !== "IMG" || !/\b(co|dp|load|op)-logo\b/.test(i.className) || !i.naturalWidth) return;
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 40;
+    const x = c.getContext("2d"); x.drawImage(i, 0, 0, 40, 40);
+    const d = x.getImageData(0, 0, 40, 40).data;
+    let op = 0, wh = 0;
+    for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 40) { op++; if (d[k] > 225 && d[k + 1] > 225 && d[k + 2] > 225) wh++; }
+    const transp = op < 1600 * 0.9;  // weiß auf transparent – ein weißes Logo mit weißem Hintergrund ist unproblematisch
+    i.classList.toggle("logo-white", transp && op > 20 && wh / op > 0.9);
+  } catch (err) { /* fremde Quelle ohne Freigabe: nichts tun */ }
+}, true);
 function pcFmt(R) {  // Anzeige der berechneten Werte je Jahr (Tabelle und Karten)
   const D = PC.data, c = D.currency, fc = D.fin_currency;
   const cg = v => v == null ? "" : pc(v, 0, true);
@@ -4666,7 +4722,13 @@ function erGuideQuotes(D, full) {
   return `<div class="er-quote" translate="no">${qs.map(q => `<blockquote>„${esc(q)}“</blockquote>`).join("")}</div>
     <p class="stamp er-qsrc"><span>${de ? "Aus der Ergebnis-Pressemitteilung, maschinell übersetzt" : "Wörtlich aus der Ergebnis-Pressemitteilung (englisch)"}</span>${G.url ? ` · <a href="${esc(G.url)}" target="_blank" rel="noopener">Original öffnen</a>` : ""}</p>`;
 }
+// Handy: lange Abschnitte zum Aufklappen (Überschrift mit Anzahl), Desktop: alles offen
+function erSec(title, html, n = 0, open = false) {
+  if (!PC_MQ.matches) return `<h3>${title}</h3>${html}`;
+  return `<details class="er-sec"${open ? " open" : ""}><summary><h3>${title}${n ? ` <small>(${n})</small>` : ""}</h3></summary>${html}</details>`;
+}
 function erRender() {
+  if (!erRender.mq) { erRender.mq = true; PC_MQ.addEventListener("change", () => { if (ER.data && $("#er-res .er-card")) erRender(); }); }
   const D = ER.data, Q = D.quarter || {}, A = D.ai, V = ER_VERDICT[D.verdict];
   const G = ER_GUIDE[A?.guidance || D.guidance?.direction];
   const rel = Q.release;
@@ -4680,11 +4742,11 @@ function erRender() {
       <h3>Die wichtigsten Punkte</h3>
       <ul class="er-list">${erPoints(D).map(p => `<li>${esc(p)}</li>`).join("") || "<li>Keine Kennzahlen zum letzten Quartal verfügbar.</li>"}</ul>
       ${erOutlook(D) ? `<p class="er-out"><b>Ausblick:</b> ${esc(erOutlook(D))}</p>` : ""}
-      ${erGuideQuotes(D) ? `<h3>Ausblick des Managements</h3>${erGuideQuotes(D)}` : ""}
-      ${(() => { const S = erStrategyPoints(D); return S.length ? `<h3>Strategische Entscheidungen</h3><ul class="er-list">${S.join("")}</ul>` : ""; })()}
-      ${erTopics(D, false)}
-      ${D.digest?.length ? `<h3>Fazit der Presse</h3><ul class="er-list er-digest" translate="no">${D.digest.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      ${D.press?.length ? `<h3>Pressestimmen</h3><ul class="er-list">${D.press.slice(0, 5).map(p => `<li>${erLink(p)} <small class="stamp">${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small>${erSum(p)}</li>`).join("")}</ul>` : ""}
+      ${erGuideQuotes(D) ? erSec("Ausblick des Managements", erGuideQuotes(D), 0, true) : ""}
+      ${(() => { const S = erStrategyPoints(D); return S.length ? erSec("Strategische Entscheidungen", `<ul class="er-list">${S.join("")}</ul>`, S.length) : ""; })()}
+      ${(D.topics || []).length ? erSec("Themen im Quartalsbericht", erTopics(D, false).replace(/^<h3>[^<]*<\/h3>/, ""), D.topics.length) : ""}
+      ${D.digest?.length ? erSec("Fazit der Presse", `<ul class="er-list er-digest" translate="no">${D.digest.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`, 0, true) : ""}
+      ${D.press?.length ? erSec("Pressestimmen", `<ul class="er-list">${D.press.slice(0, 5).map(p => `<li>${erLink(p)} <small class="stamp">${esc(p.source)}${p.date ? ", " + erDate(p.date) : ""}</small>${erSum(p)}</li>`).join("")}</ul>`, Math.min(5, D.press.length)) : ""}
       ${D.next ? `<p class="stamp">Nächste Quartalszahlen: ${erDate(D.next.date)}${D.next.estimated ? " (geschätzt)" : ""}</p>` : ""}
       <div class="pc-actions"><button class="btn primary" id="er-op">One-Pager ansehen (A4)</button></div>
     </div>`;
@@ -4769,8 +4831,9 @@ function erOnePager() {
   if (A) src.push(`<span>Analyse der Pressemitteilung: Claude (${esc(A.model || "")})</span>`);
   const wrap = document.createElement("div");
   wrap.id = "op-wrap";
-  wrap.innerHTML = `<div class="op-bar"><b>Kurzbericht ${esc(D.name)} (A4)</b><span>
-      <button class="btn primary" id="op-print">Drucken / als PDF speichern</button> <button class="btn" id="op-close">Schließen</button></span></div>
+  wrap.innerHTML = `<div class="op-bar"><b>Kurzbericht ${esc(D.name)} (A4)</b>
+      <div class="seg op-mode" role="tablist"><button type="button" data-m="read">Lesen</button><button type="button" data-m="a4">A4-Seite</button></div><span class="op-btns">
+      <button class="btn primary" id="op-print"><span class="op-long">Drucken / als PDF speichern</span><span class="op-short">PDF / Drucken</span></button> <button class="btn" id="op-close">Schließen</button></span></div>
     <div class="op-scroll"><div class="op-sheet">
       <header class="op-head"><div class="op-id">${logoImg(D.symbol, "op-logo")}<div><div class="op-name" translate="no">${esc(D.name)}</div>
         <div class="op-sub">${esc(D.symbol)} · Quartalszahlen im Überblick · Quartal bis ${erDate(Q.end)}${Q.release ? ` · veröffentlicht ${erDate(Q.release.date)}` : ""}</div></div></div>
@@ -4816,8 +4879,15 @@ function erOnePager() {
     }
   }
   sheet.style.minHeight = "";
+  // Handy: „Lesen“ zeigt den Inhalt einspaltig in normaler Schrift, „A4-Seite“ das ganze Blatt verkleinert;
+  // gedruckt wird immer die A4-Seite
+  let mode = PC_MQ.matches ? "read" : "a4";
+  const setMode = m => { mode = m; wrap.classList.toggle("op-read", m === "read");
+    wrap.querySelectorAll(".op-mode button").forEach(b => b.classList.toggle("on", b.dataset.m === m)); fit(); };
+  wrap.querySelectorAll(".op-mode button").forEach(b => b.onclick = () => setMode(b.dataset.m));
   const fit = () => {  // auf schmalen Bildschirmen das ganze Blatt verkleinert zeigen (links ausgerichtet, dann zentriert)
     const sh = wrap.querySelector(".op-sheet"), w = wrap.querySelector(".op-scroll").clientWidth - 24;
+    if (mode === "read" && PC_MQ.matches) { sh.style.transform = sh.style.marginLeft = sh.style.marginRight = sh.style.marginBottom = ""; return; }
     const s_ = Math.min(1, w / sh.offsetWidth);
     sh.style.transform = s_ < 1 ? `scale(${s_})` : "";
     sh.style.transformOrigin = "top left";
@@ -4825,7 +4895,7 @@ function erOnePager() {
     sh.style.marginRight = s_ < 1 ? `${-(sh.offsetWidth * (1 - s_))}px` : "auto";
     sh.style.marginBottom = s_ < 1 ? `${-(1 - s_) * sh.offsetHeight}px` : "";
   };
-  fit(); window.addEventListener("resize", fit);
+  setMode(mode); window.addEventListener("resize", fit);
   const close = () => { window.removeEventListener("resize", fit); wrap.remove(); document.body.classList.remove("op-open"); };
   wrap.querySelector("#op-close").onclick = close;
   wrap.querySelector("#op-print").onclick = () => window.print();

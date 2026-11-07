@@ -595,7 +595,7 @@ DEPOT_EXACT.update({
     "Geänderte Gewinnschätzungen": "Revised earnings estimates", "aktuell": "current",
     "laufendes Quartal": "current quarter", "nächstes Quartal": "next quarter", "laufendes Geschäftsjahr": "current fiscal year", "nächstes Geschäftsjahr": "next fiscal year",
     "Geschäftsbereiche": "Business segments", "Positiv": "Positive", "Negativ": "Negative", "Fazit": "Conclusion",
-    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "konservativ": "conservative", "optimistisch": "optimistic",
+    "Pressestimmen": "Press coverage", "Fazit der Presse": "Press summary", "Kursziele im Überblick": "Price targets at a glance", "Lesen": "Read", "A4-Seite": "A4 page", "PDF / Drucken": "PDF / Print", "konservativ": "conservative", "optimistisch": "optimistic",
     "Basisjahr – zuletzt berichtete Zahlen, ohne Kursziel.": "Base year – latest reported figures, no price target.", "Quellen:": "Sources:", "Quartalszahlen im Überblick": "Quarterly results at a glance",
     "Alle Pflichtmeldungen bei SEC EDGAR": "All filings at SEC EDGAR",
     "Keine Anlageberatung – automatisch erstellte Zusammenfassung aus öffentlichen Daten.": "Not investment advice – automatically generated summary from public data.",
