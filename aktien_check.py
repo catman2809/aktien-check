@@ -8895,7 +8895,7 @@ def article_desc(url, title=""):
     return None
 
 
-def article_summaries(items, budget=14):
+def article_summaries(items, budget=24):
     """Je Artikel ein Stichpunkt („summary“, englische zusätzlich „summary_de“) – je Link einmal ermittelt und gespeichert.
     Parallel und mit Zeitlimit; was nicht klappt (Bezahlschranke, gesperrt), bleibt ohne Stichpunkt."""
     items = [it for it in items if it.get("link")]
@@ -8916,7 +8916,7 @@ def article_summaries(items, budget=14):
             raise
     found = {}
     if todo:
-        ex = ThreadPoolExecutor(max_workers=8)
+        ex = ThreadPoolExecutor(max_workers=12)
         futs = {ex.submit(one, it): it for it in todo}
         t0 = time.time()
         for f, it in futs.items():
