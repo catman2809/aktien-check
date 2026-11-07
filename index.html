@@ -781,6 +781,7 @@ body.op-open{overflow:hidden}
   #op-wrap .op-sheet{width:auto;min-height:0;box-shadow:none;padding:0;transform:none !important;margin:0 !important}
 }
 .trk-teaser{margin-top:28px;display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 20px;text-align:left;flex-wrap:wrap}
+.trk-teaser + .trk-teaser{margin-top:12px}
 .trk-teaser b{display:block;margin-bottom:2px}
 .trk-teaser span{color:var(--text-2);font-size:14px}
 .trk-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
@@ -2443,35 +2444,35 @@ function welcome() {
     <div class="quick">${["Allianz", "SAP.DE", "Apple", "NVIDIA", "Siemens", "Bitcoin", "Ethereum", "Solana"]
       .map(x => `<button data-q="${x}">${x}</button>`).join("")}</div>
     ${a2hsHint()}
-    <div class="feat">
-      <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
-      <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
-      <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
+    <div class="trk-teaser card">
+      <div><b>Aktienkursrechner</b>
+        <span>Wohin kann der Kurs in fünf Jahren laufen? Umsatz- und Gewinnwachstum mit konservativem und optimistischem KGV – Bear-, Base- und Bull-Szenario nach einem DCF-Modell, alle Annahmen selbst änderbar.</span></div>
+      <button class="btn primary" id="pcopen">Kurs berechnen</button>
+    </div>
+    <div class="trk-teaser card">
+      <div><b>Earnings Reviewer</b>
+        <span>Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein One-Pager (A4) zum Ansehen und Drucken.</span></div>
+      <button class="btn primary" id="eropen">Quartal auswerten</button>
     </div>
     <div class="trk-teaser card dp-teaser">
       <div><b>Mein Depot analysieren</b>
         <span>CSV-Export deines Depots hochladen: Aufteilung nach Positionen, Branchen, Ländern und Währungen, Rendite und Risiko, Dividenden und ein Depot-Check auf Klumpenrisiken.</span></div>
       <button class="btn primary" id="dpopen">Depot hochladen</button>
     </div>
-    <div class="mv" id="mv"></div>
-    ${wlLoad().length ? `<div class="wl-preview">
-      <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
-      <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
     ${ME?.admin ? `<div class="trk-teaser card">
       <div><b>Screener: DAX, MDAX, TecDAX, Euro Stoxx 50, Dow Jones, Nasdaq-100, S&amp;P 500</b>
         <span>Alle Werte dieser Indizes per Knopfdruck bewerten lassen – als Rangliste mit Filtern wie „Kaufen“, „unter fairem Wert“ oder „Dividende ab 3 %“.</span></div>
       <button class="btn primary" id="scropen">Screener öffnen</button>
     </div>` : ""}
-    <div class="trk-teaser card">
-      <div><b>Earnings Reviewer</b>
-        <span>Das letzte Quartal einer Aktie auf einen Blick: über oder unter den Erwartungen, die wichtigsten Zahlen und der Ausblick als Stichpunkte – dazu ein One-Pager (A4) zum Ansehen und Drucken.</span></div>
-      <button class="btn primary" id="eropen">Quartal auswerten</button>
+    <div class="feat">
+      <div class="card"><b>14 Abstufungen</b>Von Strong Buy bis Strong Sell, abgeleitet aus acht gewichteten Kategorien.</div>
+      <div class="card"><b>Quellen nach Tiers</b>News aus Tier 1–3, Pressemitteilungen werden gegen seriöse Medien abgeglichen.</div>
+      <div class="card"><b>Fundamentalanalyse</b>Margen, Cashflow, Verschuldung, Kapitalallokation und eingepreiste Erwartungen.</div>
     </div>
-    <div class="trk-teaser card">
-      <div><b>Aktienkursrechner</b>
-        <span>Wohin kann der Kurs in fünf Jahren laufen? Umsatz- und Gewinnwachstum mit konservativem und optimistischem KGV – Bear-, Base- und Bull-Szenario nach einem DCF-Modell, alle Annahmen selbst änderbar.</span></div>
-      <button class="btn primary" id="pcopen">Kurs berechnen</button>
-    </div>
+    <div class="mv" id="mv"></div>
+    ${wlLoad().length ? `<div class="wl-preview">
+      <div class="wl-head"><h2>Deine Watchlist</h2><button class="btn" id="wlall">Alle anzeigen (${wlLoad().length})</button></div>
+      <div class="card">${wlSorted().slice(0, 5).map(wlRow).join("")}</div></div>` : ""}
     <div class="trk-teaser card">
       <div><b>Wie gut sind die Empfehlungen?</b>
         <span>Die App merkt sich jede Empfehlung mit Kurs und Datum und vergleicht die spätere Entwicklung mit dem Heimatindex.</span></div>
